@@ -1,0 +1,86 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --font-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --color-bg: #0b0c0e;
+  --color-surface: #141518;
+  --color-elevated: #1b1c20;
+  --color-fg: #ecece8;
+  --color-muted: #8a8a86;
+  --color-subtle: #5c5c58;
+  --color-border: color-mix(in oklab, var(--color-fg) 12%, transparent);
+  --color-border-strong: color-mix(in oklab, var(--color-fg) 22%, transparent);
+  --color-accent: #c5cbc4;
+  --color-accent-fg: #0b0c0e;
+  --color-ok: #7ea88a;
+  --color-warn: #c4a46a;
+  --color-danger: #c07a72;
+  --color-info: #8aa0b0;
+
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-fg);
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-fg);
+  --color-popover: var(--color-elevated);
+  --color-popover-foreground: var(--color-fg);
+  --color-primary: var(--color-accent);
+  --color-primary-foreground: var(--color-accent-fg);
+  --color-secondary: var(--color-elevated);
+  --color-secondary-foreground: var(--color-fg);
+  --color-muted-foreground: var(--color-muted);
+  --color-accent-foreground: var(--color-accent-fg);
+  --color-destructive: var(--color-danger);
+  --color-input: var(--color-elevated);
+  --color-ring: var(--color-accent);
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius: 0.75rem;
+
+  --shadow-panel: 0 12px 40px color-mix(in oklab, #000 38%, transparent);
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  html,
+  body,
+  #app {
+    min-height: 100%;
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+  body {
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

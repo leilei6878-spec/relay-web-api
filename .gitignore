@@ -1,0 +1,30 @@
+node_modules/
+dist/
+.vercel/
+.tanstack/
+.grok/
+.output/
+coverage/
+*.log
+*.pid
+
+# secrets & runtime state
+storage/*.json
+storage/*.txt
+storage/*.py
+.env
+.env.*
+*.pem
+
+# binaries / local tools
+bin/
+artifacts/
+screenshots/
+attachments/
+public/__grok/
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
