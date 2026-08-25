@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
-import { LogStatusBadge, PlatformBadge } from "@/components/status";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useGateway } from "@/lib/store";
+import { getApiKey } from "@/lib/gateway";
+import type { UsageRow } from "@/lib/usage";
 import { formatFull } from "@/lib/utils";
 
 export const Route = createFileRoute("/logs")({ component: Page });
@@ -18,15 +19,29 @@ function Page() {
 }
 
 function LogsView() {
-  const logs = useGateway((s) => s.logs);
-  const clearLogs = useGateway((s) => s.clearLogs);
+  const [rows, setRows] = useState<UsageRow[]>([]);
   const [q, setQ] = useState("");
-  const filtered = logs.filter(
+
+  async function reload() {
+    const key = await getApiKey();
+    const res = await fetch("/api/usage", { headers: { Authorization: `Bearer ${key.apiKey}` } });
+    const body = (await res.json()) as { rows?: UsageRow[] };
+    setRows(body.rows || []);
+  }
+
+  useEffect(() => {
+    void reload();
+    const t = setInterval(() => void reload(), 8000);
+    return () => clearInterval(t);
+  }, []);
+
+  const filtered = rows.filter(
     (l) =>
       !q ||
       l.promptPreview.includes(q) ||
       l.accountEmail.includes(q) ||
-      l.detail.includes(q),
+      (l.error || "").includes(q) ||
+      l.keyName.includes(q),
   );
 
   return (
@@ -34,23 +49,42 @@ function LogsView() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-medium tracking-tight">请求日志</h1>
-          <p className="mt-1 text-sm text-muted">成功、失败与自动切换都会落盘到控制台。</p>
+          <p className="mt-1 text-sm text-muted">服务端账本：Key、账号、是否带图、耗时和失败原因。</p>
         </div>
-        <Button variant="secondary" onClick={clearLogs}>
-          清空
+        <Button
+          variant="secondary"
+          onClick={() => {
+            void (async () => {
+              const key = await getApiKey();
+              const res = await fetch("/api/usage?format=csv", { headers: { Authorization: `Bearer ${key.apiKey}` } });
+              const blob = await res.blob();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = "usage.csv";
+              a.click();
+              URL.revokeObjectURL(url);
+            })();
+          }}
+        >
+          导出 CSV
+        </Button>
+        <Button variant="secondary" onClick={() => void reload()}>
+          刷新
         </Button>
       </header>
       <Input
-        placeholder="筛选提示、账号或原因"
+        placeholder="筛选提示、账号、Key 或原因"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         className="max-w-sm"
       />
       <div className="overflow-x-auto rounded-xl border border-border">
-        <table className="w-full min-w-[640px] text-left text-sm">
+        <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="bg-surface text-xs text-muted">
             <tr>
               <th className="px-3 py-3 font-medium">时间</th>
+              <th className="px-3 py-3 font-medium">Key</th>
               <th className="px-3 py-3 font-medium">模型</th>
               <th className="px-3 py-3 font-medium">账号</th>
               <th className="px-3 py-3 font-medium">状态</th>
@@ -61,30 +95,27 @@ function LogsView() {
           <tbody>
             {filtered.map((l) => (
               <tr key={l.id} className="border-t border-border">
-                <td className="px-3 py-3 whitespace-nowrap font-mono text-[11px] text-muted">
-                  {formatFull(l.createdAt)}
+                <td className="px-3 py-3 text-xs text-muted">{formatFull(l.createdAt)}</td>
+                <td className="px-3 py-3 text-xs">{l.keyName}</td>
+                <td className="px-3 py-3 font-mono text-xs">
+                  {l.model}
+                  {l.images ? ` · 图${l.images}` : ""}
                 </td>
+                <td className="px-3 py-3 font-mono text-xs">{l.accountEmail || "—"}</td>
                 <td className="px-3 py-3">
-                  <div className="flex items-center gap-2">
-                    <PlatformBadge platform={l.platform} />
-                    <span className="font-mono text-[11px]">{l.model}</span>
-                  </div>
+                  <Badge tone={l.ok ? "ok" : "danger"}>{l.ok ? l.mode || "成功" : "失败"}</Badge>
                 </td>
-                <td className="px-3 py-3 font-mono text-xs">{l.accountEmail}</td>
-                <td className="px-3 py-3">
-                  <LogStatusBadge status={l.status} />
-                </td>
-                <td className="px-3 py-3 font-mono text-xs tabular-nums">{l.latencyMs}ms</td>
-                <td className="px-3 py-3">
-                  <p className="max-w-sm truncate">{l.promptPreview}</p>
-                  <p className="text-[11px] text-subtle">{l.detail}</p>
+                <td className="px-3 py-3 font-mono text-xs">{l.latencyMs}ms</td>
+                <td className="px-3 py-3 text-xs">
+                  <p>{l.promptPreview}</p>
+                  {l.error && <p className="mt-1 text-danger">{l.error}</p>}
                 </td>
               </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-10 text-center text-muted">
-                  暂无日志
+                <td colSpan={7} className="px-3 py-10 text-center text-sm text-muted">
+                  还没有调用记录
                 </td>
               </tr>
             )}

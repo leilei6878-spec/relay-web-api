@@ -59,6 +59,7 @@ export const defaultSettings: GatewaySettings = {
   concurrencyPerWorker: 3,
   enforceProxy: true,
   replyTimeoutMs: 90000,
+  allowPreviewFallback: false,
   chatgptSelectors: defaultSelectors.chatgpt,
   geminiSelectors: defaultSelectors.gemini,
 };

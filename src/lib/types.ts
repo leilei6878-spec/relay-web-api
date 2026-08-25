@@ -21,6 +21,7 @@ export type Account = {
   lastProbeAt?: string | null;
   sessionCookieCount?: number;
   sessionSavedAt?: string | null;
+  sessionWarning?: string | null;
 };
 
 export type Proxy = {
@@ -59,6 +60,10 @@ export type RequestLog = {
   status: LogStatus;
   detail: string;
   promptPreview: string;
+  images?: number;
+  keyName?: string;
+  mode?: string;
+  error?: string;
 };
 
 export type WorkerNode = {
@@ -86,6 +91,7 @@ export type GatewaySettings = {
   concurrencyPerWorker: number;
   enforceProxy: boolean;
   replyTimeoutMs: number;
+  allowPreviewFallback: boolean;
   chatgptSelectors: SelectorPack;
   geminiSelectors: SelectorPack;
 };

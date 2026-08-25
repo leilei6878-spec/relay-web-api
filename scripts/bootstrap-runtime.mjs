@@ -115,5 +115,10 @@ if (!apiKey) {
 }
 
 writeFileSync("/workspace/storage/worker.py", localWorkerScript());
-writeFileSync("/workspace/storage/worker-token.txt", apiKey);
+try {
+  const existing = readFileSync("/workspace/storage/worker-token.txt", "utf8").trim();
+  if (!existing.startsWith("wk-relay-")) throw new Error("rotate");
+} catch {
+  writeFileSync("/workspace/storage/worker-token.txt", `wk-relay-${crypto.randomUUID().replace(/-/g, "")}`);
+}
 process.stdout.write(apiKey + "\n");

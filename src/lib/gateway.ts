@@ -19,12 +19,12 @@ export const runGatewayChat = createServerFn({ method: "POST" })
       },
       signal: AbortSignal.timeout(data.timeoutMs ?? 90_000),
       body: JSON.stringify({
-        model: "grok-4.5",
+        model: "grok-4.20-0309-non-reasoning",
         max_tokens: 700,
         messages: [
           {
             role: "system",
-            content: "You are the Relay gateway model. Reply concisely in the user's language.",
+            content: "直接按用户的问题作答，不要自称网关或演示模型。",
           },
           { role: "user", content: data.prompt },
         ],
@@ -55,7 +55,7 @@ export const runGatewayImage = createServerFn({ method: "POST" })
       },
       signal: AbortSignal.timeout(data.timeoutMs ?? 90_000),
       body: JSON.stringify({
-        model: "grok-2-image",
+        model: "grok-imagine-image",
         prompt: data.prompt,
       }),
     });
@@ -108,8 +108,8 @@ export const saveControlPlane = createServerFn({ method: "POST" })
   });
 
 export const getApiKey = createServerFn({ method: "GET" }).handler(async () => {
-  const { ensureApiKey } = await import("./control-plane");
-  return { apiKey: await ensureApiKey() };
+  const { primaryApiKey } = await import("./api-keys");
+  return { apiKey: await primaryApiKey() };
 });
 
 export const listGatewayJobs = createServerFn({ method: "GET" }).handler(async () => {

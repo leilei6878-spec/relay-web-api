@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { saveSessionFile } from "@/lib/gateway";
+import { getApiKey, saveSessionFile } from "@/lib/gateway";
+import { whyBlocked } from "@/lib/readiness";
 import { useGateway } from "@/lib/store";
 import { loginHelperScript, safeName } from "@/lib/session-file";
 import { textFile, zipStore } from "@/lib/zip-store";
@@ -27,6 +28,7 @@ function Page() {
 function AccountsView() {
   const accounts = useGateway((s) => s.accounts);
   const proxies = useGateway((s) => s.proxies);
+  const settings = useGateway((s) => s.settings);
   const [platform, setPlatform] = useState<"all" | Platform>("all");
   const [status, setStatus] = useState<"all" | AccountStatus>("all");
   const [q, setQ] = useState("");
@@ -46,7 +48,6 @@ function AccountsView() {
   const deleteAccount = useGateway((s) => s.deleteAccount);
   const updateAccount = useGateway((s) => s.updateAccount);
   const bindProxy = useGateway((s) => s.bindProxy);
-  const probeHealthy = useGateway((s) => s.probeHealthy);
 
   function bulkDelete() {
     selected.forEach(deleteAccount);
@@ -59,14 +60,43 @@ function AccountsView() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-medium tracking-tight">账号池</h1>
-          <p className="mt-1 text-sm text-muted">新号：添加 → 绑代理 → 本机登录助手生成 state.json → 拖回来</p>
+          <p className="mt-1 text-sm text-muted">添加 → 绑代理 → 登录。可调用的号才会被 API 选中。</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
             variant="secondary"
             onClick={() => {
-              const r = probeHealthy();
-              toast.success(`探活 ${r.checked} 个，摘除 ${r.demoted} 个`);
+              void (async () => {
+                const key = await getApiKey();
+                const res = await fetch("/api/accounts/probe", {
+                  method: "POST",
+                  headers: { Authorization: `Bearer ${key.apiKey}` },
+                });
+                const body = (await res.json()) as {
+                  checked?: number;
+                  demoted?: number;
+                  error?: string;
+                  details?: { email: string; ok: boolean; reason?: string; warning?: string }[];
+                };
+                if (!res.ok) toast.error(body.error || "探活失败");
+                else {
+                  const warn = (body.details || []).filter((d) => d.warning);
+                  for (const d of body.details || []) {
+                    const acc = useGateway.getState().accounts.find((a) => a.email === d.email);
+                    if (!acc) continue;
+                    updateAccount(acc.id, {
+                      status: d.ok ? "healthy" : "invalid",
+                      lastError: d.ok ? null : d.reason || "探活失败",
+                      sessionWarning: d.warning || null,
+                      lastProbeAt: new Date().toISOString(),
+                    });
+                  }
+                  toast.success(
+                    `探活 ${body.checked} 个，摘除 ${body.demoted} 个` +
+                      (warn.length ? `；${warn.length} 个登录即将过期` : ""),
+                  );
+                }
+              })();
             }}
           >
             探活健康池
@@ -84,15 +114,15 @@ function AccountsView() {
           </p>
         </li>
         <li>
-          <p className="font-medium text-fg">2. 本机登录助手</p>
+          <p className="font-medium text-fg">2. 在你电脑登录</p>
           <p className="mt-1 text-xs leading-relaxed text-subtle">
-            点「登录」下载一键登录包。解压后双击 run.bat，按平台绑定的节点出网。
+            点「登录」下载登录包，双击 run.bat，在弹出的窗口里登 ChatGPT。
           </p>
         </li>
         <li>
-          <p className="font-medium text-fg">3. 拖回 state.json</p>
+          <p className="font-medium text-fg">3. 把登录文件拖回来</p>
           <p className="mt-1 text-xs leading-relaxed text-subtle">
-            只校验并登记 Cookie 数量，全文不进网页、不进日志。文件请当密码保管。
+            窗口登录成功后会生成文件。拖到账号这一行的登录框，状态变成可调用。
           </p>
         </li>
       </ol>
@@ -128,9 +158,21 @@ function AccountsView() {
           </SelectContent>
         </Select>
         {selected.length > 0 && (
-          <Button variant="destructive" size="sm" onClick={bulkDelete}>
-            删除 {selected.length} 个
-          </Button>
+          <>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                selected.forEach((id) => updateAccount(id, { status: "invalid" }));
+                toast.success("已批量下线");
+              }}
+            >
+              下线 {selected.length} 个
+            </Button>
+            <Button variant="destructive" size="sm" onClick={bulkDelete}>
+              删除 {selected.length} 个
+            </Button>
+          </>
         )}
       </div>
 
@@ -151,6 +193,7 @@ function AccountsView() {
               <th className="px-3 py-3 font-medium">账号</th>
               <th className="px-3 py-3 font-medium">平台</th>
               <th className="px-3 py-3 font-medium">状态</th>
+              <th className="px-3 py-3 font-medium">调度</th>
               <th className="px-3 py-3 font-medium">代理</th>
               <th className="px-3 py-3 font-medium">请求 / 失败</th>
               <th className="px-3 py-3 font-medium">最近使用</th>
@@ -175,6 +218,7 @@ function AccountsView() {
                 <td className="px-3 py-3">
                   <p className="font-mono text-xs">{a.email}</p>
                   <p className="text-[11px] text-subtle">{a.remark || "无备注"}</p>
+                  {a.sessionWarning && <p className="text-[11px] text-warn">{a.sessionWarning}</p>}
                   {a.lastError && <p className="text-[11px] text-danger">{a.lastError}</p>}
                   {a.sessionCookieCount ? (
                     <p className="text-[11px] text-subtle">已登记 {a.sessionCookieCount} 枚 Cookie</p>
@@ -188,6 +232,13 @@ function AccountsView() {
                 </td>
                 <td className="px-3 py-3">
                   <AccountStatusBadge status={a.status} />
+                </td>
+                <td className="px-3 py-3">
+                  {whyBlocked(a, proxies, settings) ? (
+                    <span className="text-[11px] text-subtle">{whyBlocked(a, proxies, settings)}</span>
+                  ) : (
+                    <span className="text-[11px] text-muted">可调用</span>
+                  )}
                 </td>
                 <td className="px-3 py-3">
                   <select
@@ -254,7 +305,7 @@ function AccountsView() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-10 text-center text-sm text-muted">
+                <td colSpan={9} className="px-3 py-10 text-center text-sm text-muted">
                   没有匹配的账号
                 </td>
               </tr>
@@ -473,7 +524,7 @@ pause
 
   function readFile(file: File) {
     if (!file.name.toLowerCase().endsWith(".json")) {
-      setError("请拖入 state.json");
+      setError("请拖入登录生成的 json 文件");
       return;
     }
     const reader = new FileReader();
@@ -593,8 +644,8 @@ pause
                   if (file) readFile(file);
                 }}
               >
-                <span className="text-muted">把 state.json 拖到这里，或点此选择</span>
-                <span className="mt-1 text-subtle">只读取 Cookie 数量，原文立刻丢弃</span>
+                <span className="text-muted">把登录文件拖到这里（常见文件名 state.json）</span>
+                <span className="mt-1 text-subtle">只数 Cookie，文件内容不留在网页里</span>
                 <input
                   type="file"
                   accept=".json,application/json"

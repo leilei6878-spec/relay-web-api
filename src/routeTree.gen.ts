@@ -11,14 +11,22 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountsRouteImport } from './routes/accounts'
+import { Route as ConsoleRouteImport } from './routes/console'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as PlaygroundRouteImport } from './routes/playground'
 import { Route as ProxiesRouteImport } from './routes/proxies'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ApiJobsRouteImport } from './routes/api/jobs'
+import { Route as ApiKeysRouteImport } from './routes/api/keys'
 import { Route as ApiRuntimeRouteImport } from './routes/api/runtime'
+import { Route as ApiUsageRouteImport } from './routes/api/usage'
+import { Route as V1ModelsRouteImport } from './routes/v1/models'
+import { Route as ApiAccountsProbeRouteImport } from './routes/api/accounts/probe'
+import { Route as ApiWorkerControlRouteImport } from './routes/api/worker/control'
 import { Route as ApiWorkerNextRouteImport } from './routes/api/worker/next'
 import { Route as ApiWorkerResultRouteImport } from './routes/api/worker/result'
 import { Route as V1ChatCompletionsRouteImport } from './routes/v1/chat/completions'
+import { Route as V1ImagesEditsRouteImport } from './routes/v1/images/edits'
 import { Route as V1ImagesGenerationsRouteImport } from './routes/v1/images/generations'
 
 const IndexRoute = IndexRouteImport.update({
@@ -29,6 +37,11 @@ const IndexRoute = IndexRouteImport.update({
 const AccountsRoute = AccountsRouteImport.update({
   id: '/accounts',
   path: '/accounts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConsoleRoute = ConsoleRouteImport.update({
+  id: '/console',
+  path: '/console',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LogsRoute = LogsRouteImport.update({
@@ -51,9 +64,39 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiJobsRoute = ApiJobsRouteImport.update({
+  id: '/api/jobs',
+  path: '/api/jobs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiKeysRoute = ApiKeysRouteImport.update({
+  id: '/api/keys',
+  path: '/api/keys',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiRuntimeRoute = ApiRuntimeRouteImport.update({
   id: '/api/runtime',
   path: '/api/runtime',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiUsageRoute = ApiUsageRouteImport.update({
+  id: '/api/usage',
+  path: '/api/usage',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const V1ModelsRoute = V1ModelsRouteImport.update({
+  id: '/v1/models',
+  path: '/v1/models',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAccountsProbeRoute = ApiAccountsProbeRouteImport.update({
+  id: '/api/accounts/probe',
+  path: '/api/accounts/probe',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWorkerControlRoute = ApiWorkerControlRouteImport.update({
+  id: '/api/worker/control',
+  path: '/api/worker/control',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiWorkerNextRoute = ApiWorkerNextRouteImport.update({
@@ -71,6 +114,11 @@ const V1ChatCompletionsRoute = V1ChatCompletionsRouteImport.update({
   path: '/v1/chat/completions',
   getParentRoute: () => rootRouteImport,
 } as any)
+const V1ImagesEditsRoute = V1ImagesEditsRouteImport.update({
+  id: '/v1/images/edits',
+  path: '/v1/images/edits',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const V1ImagesGenerationsRoute = V1ImagesGenerationsRouteImport.update({
   id: '/v1/images/generations',
   path: '/v1/images/generations',
@@ -80,41 +128,65 @@ const V1ImagesGenerationsRoute = V1ImagesGenerationsRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/console': typeof ConsoleRoute
   '/logs': typeof LogsRoute
   '/playground': typeof PlaygroundRoute
   '/proxies': typeof ProxiesRoute
   '/settings': typeof SettingsRoute
+  '/api/jobs': typeof ApiJobsRoute
+  '/api/keys': typeof ApiKeysRoute
   '/api/runtime': typeof ApiRuntimeRoute
+  '/api/usage': typeof ApiUsageRoute
+  '/v1/models': typeof V1ModelsRoute
+  '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/worker/control': typeof ApiWorkerControlRoute
   '/api/worker/next': typeof ApiWorkerNextRoute
   '/api/worker/result': typeof ApiWorkerResultRoute
   '/v1/chat/completions': typeof V1ChatCompletionsRoute
+  '/v1/images/edits': typeof V1ImagesEditsRoute
   '/v1/images/generations': typeof V1ImagesGenerationsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/console': typeof ConsoleRoute
   '/logs': typeof LogsRoute
   '/playground': typeof PlaygroundRoute
   '/proxies': typeof ProxiesRoute
   '/settings': typeof SettingsRoute
+  '/api/jobs': typeof ApiJobsRoute
+  '/api/keys': typeof ApiKeysRoute
   '/api/runtime': typeof ApiRuntimeRoute
+  '/api/usage': typeof ApiUsageRoute
+  '/v1/models': typeof V1ModelsRoute
+  '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/worker/control': typeof ApiWorkerControlRoute
   '/api/worker/next': typeof ApiWorkerNextRoute
   '/api/worker/result': typeof ApiWorkerResultRoute
   '/v1/chat/completions': typeof V1ChatCompletionsRoute
+  '/v1/images/edits': typeof V1ImagesEditsRoute
   '/v1/images/generations': typeof V1ImagesGenerationsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/console': typeof ConsoleRoute
   '/logs': typeof LogsRoute
   '/playground': typeof PlaygroundRoute
   '/proxies': typeof ProxiesRoute
   '/settings': typeof SettingsRoute
+  '/api/jobs': typeof ApiJobsRoute
+  '/api/keys': typeof ApiKeysRoute
   '/api/runtime': typeof ApiRuntimeRoute
+  '/api/usage': typeof ApiUsageRoute
+  '/v1/models': typeof V1ModelsRoute
+  '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/worker/control': typeof ApiWorkerControlRoute
   '/api/worker/next': typeof ApiWorkerNextRoute
   '/api/worker/result': typeof ApiWorkerResultRoute
   '/v1/chat/completions': typeof V1ChatCompletionsRoute
+  '/v1/images/edits': typeof V1ImagesEditsRoute
   '/v1/images/generations': typeof V1ImagesGenerationsRoute
 }
 export interface FileRouteTypes {
@@ -122,54 +194,86 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/accounts'
+    | '/console'
     | '/logs'
     | '/playground'
     | '/proxies'
     | '/settings'
+    | '/api/jobs'
+    | '/api/keys'
     | '/api/runtime'
+    | '/api/usage'
+    | '/v1/models'
+    | '/api/accounts/probe'
+    | '/api/worker/control'
     | '/api/worker/next'
     | '/api/worker/result'
     | '/v1/chat/completions'
+    | '/v1/images/edits'
     | '/v1/images/generations'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/accounts'
+    | '/console'
     | '/logs'
     | '/playground'
     | '/proxies'
     | '/settings'
+    | '/api/jobs'
+    | '/api/keys'
     | '/api/runtime'
+    | '/api/usage'
+    | '/v1/models'
+    | '/api/accounts/probe'
+    | '/api/worker/control'
     | '/api/worker/next'
     | '/api/worker/result'
     | '/v1/chat/completions'
+    | '/v1/images/edits'
     | '/v1/images/generations'
   id:
     | '__root__'
     | '/'
     | '/accounts'
+    | '/console'
     | '/logs'
     | '/playground'
     | '/proxies'
     | '/settings'
+    | '/api/jobs'
+    | '/api/keys'
     | '/api/runtime'
+    | '/api/usage'
+    | '/v1/models'
+    | '/api/accounts/probe'
+    | '/api/worker/control'
     | '/api/worker/next'
     | '/api/worker/result'
     | '/v1/chat/completions'
+    | '/v1/images/edits'
     | '/v1/images/generations'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountsRoute: typeof AccountsRoute
+  ConsoleRoute: typeof ConsoleRoute
   LogsRoute: typeof LogsRoute
   PlaygroundRoute: typeof PlaygroundRoute
   ProxiesRoute: typeof ProxiesRoute
   SettingsRoute: typeof SettingsRoute
+  ApiJobsRoute: typeof ApiJobsRoute
+  ApiKeysRoute: typeof ApiKeysRoute
   ApiRuntimeRoute: typeof ApiRuntimeRoute
+  ApiUsageRoute: typeof ApiUsageRoute
+  V1ModelsRoute: typeof V1ModelsRoute
+  ApiAccountsProbeRoute: typeof ApiAccountsProbeRoute
+  ApiWorkerControlRoute: typeof ApiWorkerControlRoute
   ApiWorkerNextRoute: typeof ApiWorkerNextRoute
   ApiWorkerResultRoute: typeof ApiWorkerResultRoute
   V1ChatCompletionsRoute: typeof V1ChatCompletionsRoute
+  V1ImagesEditsRoute: typeof V1ImagesEditsRoute
   V1ImagesGenerationsRoute: typeof V1ImagesGenerationsRoute
 }
 
@@ -187,6 +291,13 @@ declare module '@tanstack/react-router' {
       path: '/accounts'
       fullPath: '/accounts'
       preLoaderRoute: typeof AccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/console': {
+      id: '/console'
+      path: '/console'
+      fullPath: '/console'
+      preLoaderRoute: typeof ConsoleRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/logs': {
@@ -217,11 +328,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/jobs': {
+      id: '/api/jobs'
+      path: '/api/jobs'
+      fullPath: '/api/jobs'
+      preLoaderRoute: typeof ApiJobsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/keys': {
+      id: '/api/keys'
+      path: '/api/keys'
+      fullPath: '/api/keys'
+      preLoaderRoute: typeof ApiKeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/runtime': {
       id: '/api/runtime'
       path: '/api/runtime'
       fullPath: '/api/runtime'
       preLoaderRoute: typeof ApiRuntimeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/usage': {
+      id: '/api/usage'
+      path: '/api/usage'
+      fullPath: '/api/usage'
+      preLoaderRoute: typeof ApiUsageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/v1/models': {
+      id: '/v1/models'
+      path: '/v1/models'
+      fullPath: '/v1/models'
+      preLoaderRoute: typeof V1ModelsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/accounts/probe': {
+      id: '/api/accounts/probe'
+      path: '/api/accounts/probe'
+      fullPath: '/api/accounts/probe'
+      preLoaderRoute: typeof ApiAccountsProbeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/worker/control': {
+      id: '/api/worker/control'
+      path: '/api/worker/control'
+      fullPath: '/api/worker/control'
+      preLoaderRoute: typeof ApiWorkerControlRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/worker/next': {
@@ -245,6 +398,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof V1ChatCompletionsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/v1/images/edits': {
+      id: '/v1/images/edits'
+      path: '/v1/images/edits'
+      fullPath: '/v1/images/edits'
+      preLoaderRoute: typeof V1ImagesEditsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/v1/images/generations': {
       id: '/v1/images/generations'
       path: '/v1/images/generations'
@@ -258,14 +418,22 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountsRoute: AccountsRoute,
+  ConsoleRoute: ConsoleRoute,
   LogsRoute: LogsRoute,
   PlaygroundRoute: PlaygroundRoute,
   ProxiesRoute: ProxiesRoute,
   SettingsRoute: SettingsRoute,
+  ApiJobsRoute: ApiJobsRoute,
+  ApiKeysRoute: ApiKeysRoute,
   ApiRuntimeRoute: ApiRuntimeRoute,
+  ApiUsageRoute: ApiUsageRoute,
+  V1ModelsRoute: V1ModelsRoute,
+  ApiAccountsProbeRoute: ApiAccountsProbeRoute,
+  ApiWorkerControlRoute: ApiWorkerControlRoute,
   ApiWorkerNextRoute: ApiWorkerNextRoute,
   ApiWorkerResultRoute: ApiWorkerResultRoute,
   V1ChatCompletionsRoute: V1ChatCompletionsRoute,
+  V1ImagesEditsRoute: V1ImagesEditsRoute,
   V1ImagesGenerationsRoute: V1ImagesGenerationsRoute,
 }
 export const routeTree = rootRouteImport

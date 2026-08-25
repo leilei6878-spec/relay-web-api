@@ -4,6 +4,7 @@ import {
   Cable,
   LayoutDashboard,
   Menu,
+  Radio,
   ScrollText,
   Settings2,
   TerminalSquare,
@@ -14,15 +15,17 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { saveControlPlane } from "@/lib/gateway";
+import { nextStep } from "@/lib/readiness";
 import { useGateway } from "@/lib/store";
 
 const nav = [
   { to: "/", label: "总览", icon: LayoutDashboard },
   { to: "/accounts", label: "账号池", icon: Users },
   { to: "/proxies", label: "代理", icon: Cable },
-  { to: "/playground", label: "网关试运行", icon: TerminalSquare },
+  { to: "/playground", label: "试运行", icon: TerminalSquare },
+  { to: "/console", label: "API 测试", icon: Radio },
   { to: "/logs", label: "请求日志", icon: ScrollText },
-  { to: "/settings", label: "调度设置", icon: Settings2 },
+  { to: "/settings", label: "API", icon: Settings2 },
 ];
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
@@ -55,7 +58,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const beatWorkers = useGateway((s) => s.beatWorkers);
   const hydrated = useGateway((s) => s.hydrated);
   const setHydrated = useGateway((s) => s.setHydrated);
-  const workers = useGateway((s) => s.workers);
   const accounts = useGateway((s) => s.accounts);
   const proxies = useGateway((s) => s.proxies);
   const settings = useGateway((s) => s.settings);
@@ -91,9 +93,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="mt-8 flex-1">
           <NavLinks />
         </div>
-        <p className="px-1 text-[11px] text-subtle">
-          Worker 在线 {workers.filter((w) => w.online).length}/{workers.length}
-        </p>
+        <p className="px-1 text-[11px] leading-relaxed text-subtle">{nextStep({ accounts, proxies, settings }).title}</p>
       </aside>
 
       <div className="md:pl-60">

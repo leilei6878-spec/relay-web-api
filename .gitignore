@@ -8,13 +8,9 @@ coverage/
 *.log
 *.pid
 
-# secrets & runtime state
-storage/*.json
-storage/*.txt
-storage/*.py
-.env
-.env.*
-*.pem
+storage/
+!storage/.gitkeep
+
 
 # binaries / local tools
 bin/
