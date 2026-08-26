@@ -268,6 +268,7 @@ export function normalizeError(error?: string, faultHint?: string): ErrorCode {
   if (t.includes("LEONARDO_DOWNLOAD_FAILED")) return "LEONARDO_DOWNLOAD_FAILED";
   if (t.includes("LEONARDO_PROXY_UNAVAILABLE")) return "LEONARDO_PROXY_UNAVAILABLE";
   if (t.includes("LEONARDO_GENERATION_FAILED")) return "LEONARDO_GENERATION_FAILED";
+  if (t.includes("SEND_NOT_ACKED") || t.includes("MESSAGE DID NOT ENTER")) return "PROVIDER_DOM_CHANGED";
   if (t.includes("MODEL_SELECTION_UNCONFIRMED")) return "MODEL_SELECTION_UNCONFIRMED";
   if (t.includes("MODEL_MISMATCH")) return "MODEL_MISMATCH";
   if (t.includes("CHALLENGE")) return "ACCOUNT_RATE_LIMIT";

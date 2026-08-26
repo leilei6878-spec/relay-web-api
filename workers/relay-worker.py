@@ -392,8 +392,18 @@ def fill_composer(page, box, prompt):
               const el = document.querySelector('#prompt-textarea') || document.querySelector('[contenteditable="true"]');
               if (!el) return false;
               el.focus();
+              if (el.tagName === 'TEXTAREA') {
+                const desc = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+                if (desc && desc.set) desc.set.call(el, t);
+                else el.value = t;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return (el.value || '').trim().length > 0;
+              }
               try { document.execCommand('selectAll'); } catch (e) {}
-              if (!document.execCommand('insertText', false, t)) {
+              let inserted = false;
+              try { inserted = document.execCommand('insertText', false, t); } catch (e) {}
+              if (!inserted || !(el.innerText || '').trim()) {
                 el.textContent = t;
                 el.dispatchEvent(new InputEvent('input', { bubbles: true, data: t, inputType: 'insertText' }));
               }
@@ -419,6 +429,12 @@ def fill_composer(page, box, prompt):
 
 def click_send(page, btn):
     try:
+        if send_button_enabled(page) and btn:
+            btn.click(timeout=1500)
+            return True
+    except Exception:
+        pass
+    try:
         if btn:
             btn.click(timeout=1500, force=True)
             return True
@@ -429,6 +445,71 @@ def click_send(page, btn):
         return True
     except Exception:
         return False
+
+def send_button_enabled(page):
+    try:
+        return bool(page.evaluate("""() => {
+          const b = document.querySelector('button[data-testid="send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label*="Send"]');
+          if (!b) return false;
+          return !b.disabled && b.getAttribute('aria-disabled') !== 'true' && b.getAttribute('data-disabled') !== 'true';
+        }"""))
+    except Exception:
+        return False
+
+def composer_text(page):
+    try:
+        return (page.evaluate("""() => {
+          const el = document.querySelector('#prompt-textarea') || document.querySelector('[contenteditable="true"]');
+          if (!el) return '';
+          return (el.innerText || el.value || el.textContent || '').trim();
+        }""") or "")
+    except Exception:
+        return ""
+
+def wait_send_ack(page, before_user, before_as, timeout_ms=None, stop_sels=None, had_text=None):
+    sels = stop_sels or ["button[aria-label='Stop streaming']", "button[aria-label='Stop generating']", "button[data-testid='stop-button']"]
+    deadline = time.time() + (timeout_ms or SEND_ACK_TIMEOUT) / 1000.0
+    while time.time() < deadline:
+        try:
+            if page.locator("[data-message-author-role='user']").count() > before_user:
+                return True
+            if page.locator("[data-message-author-role='assistant']").count() > before_as:
+                return True
+            if page.locator("[data-turn='user'], [data-testid*='conversation-turn']").count() > before_user:
+                return True
+            if page.locator(",".join(sels)).first.is_visible():
+                return True
+            if had_text and not composer_text(page):
+                return True
+        except Exception:
+            pass
+        time.sleep(0.08)
+    return False
+
+def submit_prompt(page, prompt, inp, send, stop_sels=None):
+    box = first_visible(page, inp)
+    if box is None:
+        return False
+    if not fill_composer(page, box, prompt):
+        return False
+    waited = time.time() + 2
+    while time.time() < waited and not send_button_enabled(page):
+        time.sleep(0.1)
+    before_as = page.locator("[data-message-author-role='assistant']").count()
+    before_user = page.locator("[data-message-author-role='user']").count()
+    filled = composer_text(page)
+    click_send(page, first_visible(page, send))
+    if wait_send_ack(page, before_user, before_as, None, stop_sels, filled):
+        return True
+    try:
+        page.keyboard.press("Enter")
+    except Exception:
+        pass
+    if wait_send_ack(page, before_user, before_as, 2000, stop_sels, filled):
+        return True
+    if filled and not composer_text(page):
+        return True
+    return False
 
 PAGE_READY_TIMEOUT = 8000
 COMPOSER_READY_TIMEOUT = 4000
@@ -1038,35 +1119,17 @@ def run_chat(body):
                 "sessionBaseVersion": int(body.get("sessionVersion") or 0),
                 "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
             }
-        before_as = page.locator("div[data-message-author-role='assistant']").count()
-        before_user = page.locator("div[data-message-author-role='user']").count()
-        if not fill_composer(page, box, prompt):
-            page, recovery_level = recover_page(page, context, 2, real)
-            composer_ready(page, COMPOSER_READY_TIMEOUT)
-            box = first_visible(page, inp)
-            if not fill_composer(page, box, prompt):
-                return {"ok": False, "error": "PROVIDER_DOM_CHANGED: cannot fill composer", "fault": "provider", "recoveryLevel": recovery_level, "timing": marks}
         mark("T5")
-        install_mut_observer(page, before_as)
-        sent = click_send(page, first_visible(page, send))
+        install_mut_observer(page, page.locator("div[data-message-author-role='assistant']").count())
+        acked = submit_prompt(page, prompt, inp, send, stop)
         mark("T6")
-        ack = False
-        ack_deadline = time.time() + SEND_ACK_TIMEOUT / 1000.0
-        while time.time() < ack_deadline:
-            try:
-                if page.locator("div[data-message-author-role='user']").count() > before_user:
-                    ack = True
-                    break
-                if page.locator("div[data-message-author-role='assistant']").count() > before_as:
-                    ack = True
-                    break
-                if page.locator(",".join(stop)).first.is_visible():
-                    ack = True
-                    break
-            except Exception:
-                pass
-            time.sleep(0.08)
-        if not ack and not TEST_URL:
+        if not acked:
+            page, recovery_level = recover_page(page, context, 3, real)
+            composer_ready(page, COMPOSER_READY_TIMEOUT)
+            switched, actual = select_model(page, model)
+            install_mut_observer(page, page.locator("div[data-message-author-role='assistant']").count())
+            acked = submit_prompt(page, prompt, inp, send, stop)
+        if not acked and not TEST_URL:
             return {"ok": False, "error": "SEND_NOT_ACKED: message did not enter conversation", "fault": "provider", "recoveryLevel": recovery_level, "timing": marks}
         mark("T7")
         post_phase("generating")

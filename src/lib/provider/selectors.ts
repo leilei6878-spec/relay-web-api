@@ -5,7 +5,7 @@ export const SELECTOR_PACKS: Record<string, VersionedSelectorPack> = {
   "chatgpt-v1": {
     version: "chatgpt-v1",
     input: ["textarea#prompt-textarea", "div[contenteditable='true']#prompt-textarea"],
-    send: ["button[data-testid='send-button']", "button[aria-label='Send prompt']"],
+    send: ["button[data-testid='send-button']", "button[aria-label='Send prompt']", "button[aria-label*='Send']"],
     assistant: ["div[data-message-author-role='assistant']"],
     streamingStop: ["button[data-testid='stop-button']", "button[aria-label='Stop streaming']"],
     modelSwitcher: ['[data-testid="model-switcher-dropdown-button"]', 'button[aria-haspopup="menu"]'],
