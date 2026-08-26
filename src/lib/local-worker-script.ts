@@ -1699,7 +1699,7 @@ def run_leonardo(body):
             texts = page.evaluate("""() => [...document.querySelectorAll('[role=menuitem], [role=option], button, [data-slot=dropdown-menu-item]')].map(e => (e.innerText||'').trim()).filter(t => t && t.length < 80)""")
             if isinstance(texts, list):
                 for t in texts:
-                    if t and t not in found:
+                    if t and t not in found and len(t) >= 4:
                         found.append(t)
         except Exception:
             pass
@@ -1753,7 +1753,9 @@ def run_leonardo(body):
         picked = ""
         for lab in labels:
             for item in available:
-                if lab.lower() in item.lower() or item.lower() in lab.lower():
+                if len(item) < 4:
+                    continue
+                if lab.lower() in item.lower() or (len(item) >= 8 and item.lower() in lab.lower()):
                     picked = item
                     break
             if picked:
