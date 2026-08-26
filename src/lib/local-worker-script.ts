@@ -388,6 +388,10 @@ def pick_locator(page, names, limit=4):
             pass
     return None, None
 
+def first_visible(page, names):
+    loc, _sel = pick_locator(page, names, 4)
+    return loc
+
 def fill_composer(page, box, prompt):
     try:
         ok = page.evaluate(
