@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { adminCookieHeader, assertAdmin, ensureAdminToken } from "@/lib/authz";
-import { isProduction } from "@/lib/env-mode";
 
 export const Route = createFileRoute("/api/admin/session")({
   server: {
@@ -8,7 +7,7 @@ export const Route = createFileRoute("/api/admin/session")({
       GET: async ({ request }) => {
         const auth = await assertAdmin(request);
         if (auth.ok) return Response.json({ ok: true, role: "admin" });
-        const auto = process.env.RELAY_REQUIRE_ADMIN_LOGIN !== "1" && !isProduction();
+        const auto = process.env.RELAY_REQUIRE_ADMIN_LOGIN !== "1";
         if (!auto) return Response.json({ ok: false, error: auth.error }, { status: 401 });
         const token = await ensureAdminToken();
         const https = new URL(request.url).protocol === "https:" || request.headers.get("x-forwarded-proto") === "https";

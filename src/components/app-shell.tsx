@@ -10,7 +10,7 @@ import {
   TerminalSquare,
   Users,
 } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -66,6 +66,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const planeLoaded = useRef(false);
 
   const [planeError, setPlaneError] = useState("");
+  const [needLogin, setNeedLogin] = useState(false);
+  const [adminToken, setAdminToken] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
 
   useEffect(() => {
     const unsub = useGateway.persist.onFinishHydration(() => setHydrated(true));
@@ -90,7 +93,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         await fetch("/api/admin/session", { credentials: "include" });
         const r = await fetch("/api/admin/plane", { credentials: "include" });
         if (r.status === 401) {
-          if (!stop) setPlaneError("未登录管理台，账号不会显示。请刷新页面。");
+          if (!stop) {
+            setNeedLogin(true);
+            setPlaneError("未登录管理台，账号不会显示。请输入管理员凭证。");
+          }
           return;
         }
         const plane = (await r.json()) as { accounts?: typeof accounts; proxies?: typeof proxies; settings?: typeof settings; error?: string };
@@ -115,6 +121,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           settings: { ...settings, ...(plane.settings || {}) },
         });
         planeLoaded.current = true;
+        setNeedLogin(false);
         setPlaneError("");
       } catch {
         if (!stop) setPlaneError("无法连接服务器读取账号");
@@ -127,6 +134,58 @@ export function AppShell({ children }: { children: ReactNode }) {
       clearInterval(t);
     };
   }, [hydrated]);
+
+  async function submitAdminLogin(e: FormEvent) {
+    e.preventDefault();
+    const token = adminToken.trim();
+    if (!token) {
+      setPlaneError("请输入管理员凭证");
+      return;
+    }
+    setLoginBusy(true);
+    try {
+      const r = await fetch("/api/admin/session", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const body = (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!r.ok || !body.ok) {
+        setPlaneError(body.error || "管理员凭证无效");
+        return;
+      }
+      setNeedLogin(false);
+      setAdminToken("");
+      const planeRes = await fetch("/api/admin/plane", { credentials: "include" });
+      if (!planeRes.ok) {
+        setNeedLogin(true);
+        setPlaneError("登录成功但读取账号失败，请刷新页面");
+        return;
+      }
+      const plane = (await planeRes.json()) as { accounts?: typeof accounts; proxies?: typeof proxies; settings?: typeof settings };
+      if (!plane.accounts) {
+        setPlaneError("服务器没有返回账号数据");
+        return;
+      }
+      useGateway.setState({
+        accounts: plane.accounts,
+        proxies: plane.proxies || [],
+        settings: { ...settings, ...(plane.settings || {}) },
+      });
+      planeSnap.current = JSON.stringify({
+        accounts: plane.accounts,
+        proxies: plane.proxies || [],
+        settings: { ...settings, ...(plane.settings || {}) },
+      });
+      planeLoaded.current = true;
+      setPlaneError("");
+    } catch {
+      setPlaneError("无法连接服务器");
+    } finally {
+      setLoginBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!hydrated || !planeLoaded.current) return;
@@ -167,7 +226,24 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
         <main className="px-4 py-6 sm:px-6 lg:px-8">
           {planeError && (
-            <p className="mb-4 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-danger">{planeError}</p>
+            <div className="mb-4 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-danger">
+              <p>{planeError}</p>
+              {needLogin && (
+                <form onSubmit={submitAdminLogin} className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={adminToken}
+                    onChange={(e) => setAdminToken(e.target.value)}
+                    placeholder="管理员凭证"
+                    className="h-11 min-w-0 flex-1 rounded-md border border-border bg-bg px-3 text-sm text-fg outline-none placeholder:text-subtle focus:border-fg/40"
+                  />
+                  <Button type="submit" disabled={loginBusy} className="h-11">
+                    {loginBusy ? "登录中…" : "登录管理台"}
+                  </Button>
+                </form>
+              )}
+            </div>
           )}
           {hydrated ? children : <p className="text-sm text-muted">正在载入控制台…</p>}
         </main>
