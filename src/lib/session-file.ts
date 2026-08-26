@@ -854,9 +854,35 @@ CONFIGS = [${JSON.stringify(cfg256)}, ${JSON.stringify(cfg128)}]
 def find_singbox():
     for n in ("sing-box.exe", "sing-box"):
         p = os.path.join(HERE, n)
-        if os.path.isfile(p):
+        if os.path.isfile(p) and os.path.getsize(p) > 1000000:
             return p
-    return shutil.which("sing-box") or shutil.which("sing-box.exe")
+    w = shutil.which("sing-box") or shutil.which("sing-box.exe")
+    if w:
+        return w
+    dest = os.path.join(HERE, "sing-box.exe")
+    url = "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-windows-amd64.zip"
+    print("登录包不再内置 33MB 组件。正在从 GitHub 下载 sing-box（只需一次，日本线路通常很快）...")
+    zip_path = os.path.join(HERE, "sing-box-win.zip")
+    try:
+        import urllib.request, zipfile
+        urllib.request.urlretrieve(url, zip_path)
+        with zipfile.ZipFile(zip_path) as z:
+            for n in z.namelist():
+                if n.replace("\\\\", "/").lower().endswith("sing-box.exe"):
+                    with z.open(n) as src, open(dest, "wb") as out:
+                        shutil.copyfileobj(src, out)
+                    break
+        try:
+            os.remove(zip_path)
+        except Exception:
+            pass
+        if os.path.isfile(dest) and os.path.getsize(dest) > 1000000:
+            print("sing-box 已就绪")
+            return dest
+    except Exception as e:
+        print("下载 sing-box 失败", e)
+    print("请把 sing-box.exe 放到本目录后重试：", HERE)
+    return None
 
 def port_open(port):
     s = socket.socket()

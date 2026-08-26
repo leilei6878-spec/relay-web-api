@@ -522,7 +522,7 @@ function LoginDialog({ account }: { account: Account }) {
         a.remove();
       }
       setProxyPassword("");
-      toast.success("已开始下载登录包（约 33MB），看浏览器下载栏");
+      toast.success("登录包很小，已开始下载。第一次运行 run.bat 会从 GitHub 下载代理组件。");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "打包失败";
       setError(msg);
@@ -635,8 +635,8 @@ function LoginDialog({ account }: { account: Account }) {
             <>
               <p className="text-xs leading-relaxed text-subtle">
                 下载的是压缩包（含 login.py、run.bat
-                {proxy?.type === "ss" ? "、sing-box.exe" : ""}
-                ）。解压后双击 run.bat，按平台这条节点出网，不用开 v2rayN。
+                {proxy?.type === "ss" ? "。第一次运行会从 GitHub 下载 sing-box" : ""}
+                ）。解压后双击 run.bat，按平台这条节点出网。
               </p>
               <Button className="w-full" variant="secondary" onClick={() => void downloadHelper()} disabled={packing}>
                 {packing ? "正在下载登录包…" : "下载一键登录包"}

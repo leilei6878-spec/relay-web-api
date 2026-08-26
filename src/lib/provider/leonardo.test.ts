@@ -328,7 +328,7 @@ test("leonardo SS helper pins canva.com through the bound node", () => {
     },
     "secret",
   );
-  assert.match(py, /Leonardo 登录用绑定节点/);
+  assert.match(py, /GitHub 下载 sing-box/);
   assert.match(py, /disable-cn-redirect/);
   assert.match(py, /proxy-pac-url/);
   assert.match(py, /SOCKS5 /);
