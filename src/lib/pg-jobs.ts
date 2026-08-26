@@ -33,7 +33,7 @@ import { markResilience } from "./resilience-metrics";
 const PENDING = "__pending__";
 
 function workerDeadMs() {
-  return Number(process.env.RELAY_WORKER_DEAD_MS || 15_000);
+  return Number(process.env.RELAY_WORKER_DEAD_MS || 60_000);
 }
 
 async function reclaimAll() {
@@ -49,7 +49,7 @@ async function reclaimAll() {
 }
 
 function claimGraceMs() {
-  return Number(process.env.RELAY_CLAIM_GRACE_MS || 15_000);
+  return Number(process.env.RELAY_CLAIM_GRACE_MS || 45_000);
 }
 
 function asJob(row: Record<string, unknown> | null | undefined): Job | null {
@@ -519,7 +519,7 @@ export async function liveWorkerOnlinePg() {
   const workers = ((await dbLoadWorkers()) || []) as unknown as WorkerRow[];
   const now = Date.now();
   return workers.some(
-    (w) => w.name !== "preview" && !w.name.startsWith("test") && !w.draining && now - Date.parse(w.lastBeat) < 20_000,
+    (w) => w.name !== "preview" && !w.name.startsWith("test") && !w.draining && now - Date.parse(w.lastBeat) < 45_000,
   );
 }
 

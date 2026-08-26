@@ -18,6 +18,16 @@ export const Route = createFileRoute("/api/worker/next")({
           draining: request.headers.get("x-worker-drain") === "1",
         };
         await beatWorker(name, stats);
+        if (request.headers.get("x-worker-beat-only") === "1") {
+          const jobId = request.headers.get("x-job-id") || "";
+          const accountId = request.headers.get("x-account-id") || "";
+          if (jobId) {
+            const { coordSet } = await import("@/lib/coord");
+            await coordSet(`job-claim:${jobId}`, name, 120_000);
+            if (accountId) await coordSet(`account-lease:${accountId}`, name, 120_000);
+          }
+          return Response.json({ ok: true, beat: true, name });
+        }
         const next = await claimNext(name, stats);
         return Response.json(next);
       },

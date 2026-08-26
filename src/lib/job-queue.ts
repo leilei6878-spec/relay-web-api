@@ -106,11 +106,11 @@ function locked<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 function workerDeadMs() {
-  return Number(process.env.RELAY_WORKER_DEAD_MS || 15_000);
+  return Number(process.env.RELAY_WORKER_DEAD_MS || 60_000);
 }
 
 function claimGraceMs() {
-  return Number(process.env.RELAY_CLAIM_GRACE_MS || 15_000);
+  return Number(process.env.RELAY_CLAIM_GRACE_MS || 45_000);
 }
 
 async function persist(store: Store) {
@@ -168,7 +168,13 @@ async function reclaim(store: Store): Promise<Store> {
     const timedOut = now - start > (job.timeoutMs || 90_000) + 8_000;
     const worker = job.workerName ? store.workers.find((w) => w.name === job.workerName) : null;
     const grace = now - start < graceMs;
-    const workerDead = !grace && (!worker || now - Date.parse(worker.lastBeat) > deadMs);
+    let hbFresh = false;
+    if (job.workerName) {
+      const hb = await coordGet(`hb:worker:${job.workerName}`);
+      const ts = Number(hb);
+      hbFresh = Number.isFinite(ts) ? now - ts < deadMs : Boolean(hb);
+    }
+    const workerDead = !grace && !hbFresh && (!worker || now - Date.parse(worker.lastBeat) > deadMs);
     if (!timedOut && !workerDead) continue;
     if (job.accountId) await coordDel(`account-lease:${job.accountId}`);
     if (job.id) await coordDel(`job-claim:${job.id}`);
@@ -531,7 +537,7 @@ export async function liveWorkerOnline() {
       w.name !== "preview" &&
       !w.name.startsWith("test") &&
       !w.draining &&
-      now - Date.parse(w.lastBeat) < 20_000,
+      now - Date.parse(w.lastBeat) < 45_000,
   );
 }
 

@@ -742,7 +742,7 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(MOCK_HTML.encode("utf-8"))
             return
-        if self.path.startswith("/health"):
+        if self.path.startswith("/health") or self.path in ("/", "/healthz"):
             self.send_response(200)
             self._cors()
             self.send_header("Content-Type", "application/json")
@@ -786,6 +786,7 @@ def exec_job(body):
     os.environ["RELAY_LEASE_ID"] = str(body.get("leaseId") or "")
     os.environ["RELAY_ATTEMPT_ID"] = str(body.get("attemptId") or "")
     os.environ["RELAY_FENCE"] = str(body.get("fencingToken") or "0")
+    os.environ["RELAY_ACCOUNT_ID"] = str(body.get("accountId") or "")
     aid = str(body.get("accountId") or "")
     SEM.acquire()
     account_lock(aid).acquire()
@@ -948,6 +949,34 @@ def make_image(prompt, images=None):
     )
     return {"ok": True, "url": "data:image/svg+xml;charset=utf-8," + urllib.parse.quote(svg)}
 
+def beat_loop():
+    import urllib.request
+    gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
+    token = os.environ.get("RELAY_TOKEN") or ""
+    if not gw:
+        return
+    while True:
+        if DRAINING and ACTIVE <= 0:
+            break
+        try:
+            req = urllib.request.Request(
+                gw + "/api/worker/next",
+                headers={
+                    "Authorization": "Bearer " + token,
+                    "X-Worker-Name": os.environ.get("RELAY_WORKER_NAME") or "pc-1",
+                    "X-Worker-Capacity": str(CAPACITY),
+                    "X-Worker-Active": str(ACTIVE),
+                    "X-Worker-Beat-Only": "1",
+                    "X-Job-Id": os.environ.get("RELAY_JOB_ID") or "",
+                    "X-Account-Id": os.environ.get("RELAY_ACCOUNT_ID") or "",
+                    "X-Worker-Drain": "1" if DRAINING else "0",
+                },
+            )
+            urllib.request.urlopen(req, timeout=8).read()
+        except Exception:
+            pass
+        time.sleep(4)
+
 def poll_gateway():
     import urllib.request
     gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
@@ -1086,5 +1115,6 @@ if __name__ == "__main__":
         print("已检测到本机代理")
     else:
         print("还没检测到 10808/10809，先开 v2rayN 再在平台点发送")
+    threading.Thread(target=beat_loop, daemon=True).start()
     threading.Thread(target=poll_gateway, daemon=True).start()
     Server(("127.0.0.1", PORT), H).serve_forever()
