@@ -2,7 +2,12 @@
 set -eu
 cd /workspace
 node scripts/preview.mjs stop || true
-if [ -x /workspace/bin/sing-box ] && [ -f /workspace/storage/sing-box.json ]; then
+if [ -x /workspace/bin/xray ] && [ -f /workspace/storage/xray.json ]; then
+  if ! python3 -c "import socket;s=socket.create_connection(('127.0.0.1',10808),1);s.close()" 2>/dev/null; then
+    /workspace/bin/xray run -c /workspace/storage/xray.json >>/tmp/xray-local.log 2>&1 &
+    echo $! > /workspace/storage/xray.pid
+  fi
+elif [ -x /workspace/bin/sing-box ] && [ -f /workspace/storage/sing-box.json ]; then
   if ! python3 -c "import socket;s=socket.create_connection(('127.0.0.1',10808),1);s.close()" 2>/dev/null; then
     /workspace/bin/sing-box run -c /workspace/storage/sing-box.json >>/tmp/sing-box.log 2>&1 &
   fi

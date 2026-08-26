@@ -110,7 +110,7 @@ export function parseShareLink(raw: string): { ok: true; data: ParsedShareLink }
         error: "ss 链接缺少主机或端口。单行输入框容易只贴上前半段，请确认包含 @IP:端口，例如 …@1.2.3.4:8443#名称",
       };
     }
-    method = ssMethodForKey(method, password);
+    method = advertisedSsMethod(method, password);
     return {
       ok: true,
       data: {
@@ -134,17 +134,39 @@ export function parseShareLink(raw: string): { ok: true; data: ParsedShareLink }
   }
 }
 
-function ssMethodForKey(advertised: string, password: string) {
-  try {
-    const bin = Uint8Array.from(atob(password.replace(/-/g, "+").replace(/_/g, "/")), (c) =>
-      c.charCodeAt(0),
-    );
-    if (bin.length >= 32 && advertised.includes("128")) return "2022-blake3-aes-256-gcm";
-    if (bin.length === 16) return "2022-blake3-aes-128-gcm";
-  } catch {
-    /* keep advertised */
-  }
-  return advertised;
+function advertisedSsMethod(advertised: string, _password: string) {
+  return advertised || "2022-blake3-aes-128-gcm";
+}
+
+export function xrayConfig(proxy: Pick<Proxy, "host" | "port" | "password" | "method" | "localPort" | "name">) {
+  const method = proxy.method || "2022-blake3-aes-128-gcm";
+  const port = proxy.localPort || 10808;
+  return {
+    log: { loglevel: "warning" },
+    inbounds: [
+      {
+        listen: "127.0.0.1",
+        port,
+        protocol: "socks",
+        settings: { udp: false, auth: "noauth" },
+      },
+    ],
+    outbounds: [
+      {
+        protocol: "shadowsocks",
+        settings: {
+          servers: [
+            {
+              address: proxy.host,
+              port: proxy.port,
+              method,
+              password: proxy.password || "",
+            },
+          ],
+        },
+      },
+    ],
+  };
 }
 
 export function singBoxConfig(proxy: Pick<Proxy, "host" | "port" | "password" | "method" | "localPort" | "name">) {

@@ -47,6 +47,17 @@ test("userinfo-only paste explains missing host", () => {
   assert.match(parsed.error, /主机或端口/);
 });
 
+test("SS2022 32-byte key keeps advertised 128-gcm (v2rayN / Xray)", () => {
+  const key = Buffer.alloc(32, 9).toString("base64");
+  const user = Buffer.from(`2022-blake3-aes-128-gcm:${key}`).toString("base64").replace(/=+$/g, "");
+  const parsed = parseShareLink(`ss://${user}@38.175.201.137:8443#Japan-BGP-SS2022`);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.data.method, "2022-blake3-aes-128-gcm");
+  assert.equal(parsed.data.host, "38.175.201.137");
+  assert.equal(parsed.data.port, 8443);
+});
+
 test("percent-encoded method:password@host", () => {
   const parsed = parseShareLink("ss://aes-256-gcm:test@10.0.0.1:9443#plain");
   assert.equal(parsed.ok, true);

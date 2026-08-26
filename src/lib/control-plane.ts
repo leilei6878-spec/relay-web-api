@@ -138,6 +138,19 @@ export async function writeControlPlane(plane: Omit<ControlPlane, "savedAt">) {
     }
   }
   await syncDb(body);
+  const ss = plane.proxies.find((p) => p.type === "ss");
+  if (ss) {
+    const { ensureSsLocalFromPlane } = await import("./ss-local");
+    void ensureSsLocalFromPlane({
+      host: ss.host,
+      port: ss.port,
+      method: ss.method,
+      localPort: ss.localPort,
+      name: ss.name,
+      password: ss.password,
+      id: ss.id,
+    });
+  }
   return { ok: true as const };
 }
 

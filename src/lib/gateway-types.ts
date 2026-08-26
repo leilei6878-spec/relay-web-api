@@ -23,4 +23,5 @@ export type ProbeProxyInput = {
   username?: string;
   password?: string;
   localPort?: number;
+  method?: string;
 };
