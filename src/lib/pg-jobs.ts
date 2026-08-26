@@ -279,6 +279,10 @@ export async function finishJobPg(
     pageState?: string;
     fingerprint?: string;
     selectorPackVersion?: string;
+    timing?: Record<string, unknown>;
+    actualProfile?: string;
+    profileVerified?: boolean;
+    recoveryLevel?: number;
   },
 ) {
   const current = asJob(await dbGetJob(id));
@@ -303,6 +307,10 @@ export async function finishJobPg(
   const has = Boolean(result.text || result.url);
   const decision = decisionFor(result.error, result.fault);
   const fault = decision.fault_domain || classifyError(result.error);
+  if (result.timing) current.timing = result.timing;
+  if (result.actualProfile) current.actualProfile = result.actualProfile;
+  if (typeof result.profileVerified === "boolean") current.profileVerified = result.profileVerified;
+  if (typeof result.recoveryLevel === "number") current.recoveryLevel = result.recoveryLevel;
 
   if (typeof result.modelActual === "string") {
     const { getAdapter } = await import("./provider/index");

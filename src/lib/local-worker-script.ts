@@ -129,7 +129,7 @@ def account_lock(aid):
     return ACCOUNT_LOCKS[aid or "_"]
 
 def post_chunk(text, phase=""):
-    if text and not phase:
+    if os.environ.get("RELAY_STREAM_CHUNKS") == "0" and text and not phase:
         return
     gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
     token = os.environ.get("RELAY_TOKEN") or ""
@@ -380,12 +380,12 @@ def fill_composer(page, box, prompt):
         pass
     try:
         if box:
-            box.fill(prompt, timeout=2000)
+            box.fill(prompt, timeout=1000)
             return True
     except Exception:
         pass
     try:
-        page.locator("#prompt-textarea").first.fill(prompt, timeout=2000)
+        page.locator("#prompt-textarea").first.fill(prompt, timeout=1000)
         return True
     except Exception:
         return False
@@ -402,6 +402,120 @@ def click_send(page, btn):
         return True
     except Exception:
         return False
+
+PAGE_READY_TIMEOUT = 8000
+COMPOSER_READY_TIMEOUT = 4000
+INPUT_TIMEOUT = 1000
+SEND_BUTTON_TIMEOUT = 1500
+SEND_ACK_TIMEOUT = 4000
+WARM_MAX_REQ = int(os.environ.get("RELAY_WARM_MAX_REQ") or "20")
+WARM_MAX_AGE = int(os.environ.get("RELAY_WARM_MAX_AGE") or "2700")
+
+def detect_profile(page):
+    blob = ""
+    try:
+        blob = (page.evaluate("() => (document.body && document.body.innerText || '').slice(0, 6000)") or "")
+    except Exception:
+        blob = ""
+    low = blob.lower()
+    instant = any(x in low for x in ("instant", "快速响应", "fast"))
+    thinking = any(x in low for x in ("thinking", "reasoning", "sol", "深度研究"))
+    return {
+        "instant_visible": bool(instant),
+        "reasoning_visible": bool(thinking),
+        "actual_profile": "unknown",
+        "profile_verified": False,
+        "fast_capable": False,
+    }
+
+def install_mut_observer(page, before):
+    page.evaluate(
+        """(before) => {
+          window.__relayPrev = '';
+          window.__relayFull = '';
+          window.__relayDeltas = [];
+          window.__relayBefore = before || 0;
+          const read = () => {
+            const nodes = document.querySelectorAll('[data-message-author-role="assistant"]');
+            if (nodes.length <= window.__relayBefore) return '';
+            return (nodes[nodes.length - 1].innerText || '').trim();
+          };
+          const tick = () => {
+            const t = read();
+            if (!t) return;
+            if (t === window.__relayFull) return;
+            let d = '';
+            if (t.startsWith(window.__relayPrev)) d = t.slice(window.__relayPrev.length);
+            else d = t;
+            window.__relayPrev = t;
+            window.__relayFull = t;
+            if (d) window.__relayDeltas.push(d);
+          };
+          if (window.__relayObs) try { window.__relayObs.disconnect(); } catch (e) {}
+          const obs = new MutationObserver(tick);
+          obs.observe(document.body, { subtree: true, childList: true, characterData: true });
+          window.__relayObs = obs;
+          tick();
+        }""",
+        before,
+    )
+
+def drain_deltas(page):
+    try:
+        return page.evaluate(
+            """() => {
+              const d = window.__relayDeltas || [];
+              window.__relayDeltas = [];
+              return { deltas: d, full: window.__relayFull || '' };
+            }"""
+        ) or {"deltas": [], "full": ""}
+    except Exception:
+        return {"deltas": [], "full": ""}
+
+def js_new_chat(page):
+    try:
+        page.evaluate(
+            """() => {
+              const b = document.querySelector('[data-testid="create-new-chat-button"]');
+              if (b) b.click();
+            }"""
+        )
+        return True
+    except Exception:
+        return False
+
+def recover_page(page, context, level, real):
+    target = "https://chatgpt.com/?temporary-chat=true" if real else CHAT_URL
+    if level <= 1:
+        return page, 1
+    if level == 2:
+        try:
+            page.reload(wait_until="domcontentloaded", timeout=PAGE_READY_TIMEOUT)
+        except Exception:
+            pass
+        return page, 2
+    if level >= 3:
+        try:
+            page.close()
+        except Exception:
+            pass
+        page = context.new_page()
+        arm_page(page)
+        try:
+            page.set_default_timeout(4000)
+        except Exception:
+            pass
+        page.goto(target, wait_until="domcontentloaded", timeout=25000)
+        return page, 3
+    return page, level
+
+def composer_ready(page, timeout_ms):
+    try:
+        page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea", timeout=timeout_ms)
+        return True
+    except Exception:
+        return False
+
 
 def snapshot_image_srcs(page):
     out = []
@@ -654,7 +768,12 @@ def get_pooled_context(proxy, storage_state, account_id):
             ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         except Exception:
             pass
-        CTX_POOL[ctx_key] = {"ctx": ctx, "last": time.time(), "n": 1, "page": None}
+        try:
+            ctx.set_default_timeout(4000)
+            ctx.set_default_navigation_timeout(25000)
+        except Exception:
+            pass
+        CTX_POOL[ctx_key] = {"ctx": ctx, "last": time.time(), "n": 1, "page": None, "born": time.time()}
         return browser, ctx, None, ctx_key
 
 
@@ -795,9 +914,32 @@ def run_chat(body):
 
     def run_on(page, context, close_browser):
         t0 = time.time()
-        def lap(name):
-            print("t+%dms %s" % (int((time.time() - t0) * 1000), name), flush=True)
+        marks = {}
+        recovery_level = 0
+        def mark(name):
+            marks[name] = int((time.time() - t0) * 1000)
+            print("T %s %dms" % (name, marks[name]), flush=True)
+        mark("T0")
+        try:
+            page.set_default_timeout(4000)
+        except Exception:
+            pass
         arm_page(page)
+        net = {"req": None, "res": None}
+        def on_req(req):
+            u = req.url or ""
+            if net["req"] is None and any(x in u for x in ("/backend-api/", "/conversation")):
+                net["req"] = time.time()
+        def on_res(res):
+            u = res.url or ""
+            if net["res"] is None and any(x in u for x in ("/backend-api/", "/conversation")):
+                net["res"] = time.time()
+        try:
+            page.on("request", on_req)
+            page.on("response", on_res)
+        except Exception:
+            pass
+        mark("T2")
         post_phase("opening_chatgpt")
         already = False
         try:
@@ -805,7 +947,15 @@ def run_chat(body):
         except Exception:
             already = False
         if already:
-            lap("reuse")
+            js_new_chat(page)
+            if not composer_ready(page, COMPOSER_READY_TIMEOUT):
+                page, recovery_level = recover_page(page, context, 2, real)
+                if not composer_ready(page, PAGE_READY_TIMEOUT):
+                    page, recovery_level = recover_page(page, context, 3, real)
+                    if not composer_ready(page, PAGE_READY_TIMEOUT):
+                        pst = detect_page_state(page, "chatgpt")
+                        err, fault = page_state_error(pst, True)
+                        return {"ok": False, "error": err, "fault": fault, "pageState": pst, "recoveryLevel": recovery_level, "timing": marks}
         else:
             target = CHAT_URL if not real else "https://chatgpt.com/?temporary-chat=true"
             try:
@@ -813,28 +963,37 @@ def run_chat(body):
             except Exception as e:
                 t = str(e)
                 if "ERR_CONNECTION_CLOSED" in t or "ERR_CONNECTION_RESET" in t or "ERR_TUNNEL" in t:
-                    return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
-                return {"ok": False, "error": "CHAT_PAGE_TIMEOUT: 打不开 chatgpt.com（%s）" % t[:160], "fault": "proxy"}
-            try:
-                page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea, [data-testid='send-button']", timeout=8000)
-            except Exception:
+                    return {"ok": False, "error": tunnel_down_error(), "fault": "proxy", "timing": marks}
+                page, recovery_level = recover_page(page, context, 3, real)
+            if not composer_ready(page, PAGE_READY_TIMEOUT):
                 pst = detect_page_state(page, "chatgpt")
                 if pst == "CHALLENGE":
                     err, fault = page_state_error(pst, False)
-                    return {"ok": False, "error": err, "fault": fault, "pageState": pst}
-            lap("goto")
+                    return {"ok": False, "error": err, "fault": fault, "pageState": pst, "timing": marks}
+                page, recovery_level = recover_page(page, context, 3, real)
+                if not composer_ready(page, PAGE_READY_TIMEOUT):
+                    pst = detect_page_state(page, "chatgpt")
+                    err, fault = page_state_error(pst, True)
+                    return {"ok": False, "error": err, "fault": fault, "pageState": pst, "recoveryLevel": recovery_level, "timing": marks}
+        mark("T3")
         post_phase("page_ready")
+        profile = detect_profile(page)
         switched, actual = select_model(page, model)
         if not switched and not TEST_URL:
             code = "MODEL_SELECTION_UNCONFIRMED" if not actual else "MODEL_MISMATCH"
-            return {"ok": False, "error": code + ": failed to select " + model, "fault": "provider", "modelActual": actual or ""}
+            return {"ok": False, "error": code + ": failed to select " + model, "fault": "provider", "modelActual": actual or "", "timing": marks, "profile": profile}
         if images:
             attach_images(page, images)
         box = first_visible(page, inp)
         if box is None:
+            page, recovery_level = recover_page(page, context, 2, real)
+            composer_ready(page, COMPOSER_READY_TIMEOUT)
+            box = first_visible(page, inp)
+        if box is None:
             pst = detect_page_state(page, "chatgpt")
             err, fault = page_state_error(pst, True)
-            return {"ok": False, "error": err, "fault": fault, "pageState": pst, "selectorPackVersion": pack_version, "fingerprint": page_fingerprint(page, sel)}
+            return {"ok": False, "error": err, "fault": fault, "pageState": pst, "selectorPackVersion": pack_version, "fingerprint": page_fingerprint(page, sel), "recoveryLevel": recovery_level, "timing": marks}
+        mark("T4")
         post_phase("composer_ready")
         if body.get("kind") == "canary":
             fp = page_fingerprint(page, sel)
@@ -847,21 +1006,49 @@ def run_chat(body):
                 "fingerprint": fp,
                 "selectorPackVersion": pack_version,
                 "modelActual": actual or model,
+                "profile": profile,
+                "timing": marks,
                 "sessionBaseVersion": int(body.get("sessionVersion") or 0),
                 "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
             }
-        before = page.locator(",".join(assistant)).count()
+        before_as = page.locator("div[data-message-author-role='assistant']").count()
+        before_user = page.locator("div[data-message-author-role='user']").count()
         if not fill_composer(page, box, prompt):
-            return {"ok": False, "error": "PROVIDER_DOM_CHANGED: cannot fill composer", "fault": "provider"}
-        click_send(page, first_visible(page, send))
+            page, recovery_level = recover_page(page, context, 2, real)
+            composer_ready(page, COMPOSER_READY_TIMEOUT)
+            box = first_visible(page, inp)
+            if not fill_composer(page, box, prompt):
+                return {"ok": False, "error": "PROVIDER_DOM_CHANGED: cannot fill composer", "fault": "provider", "recoveryLevel": recovery_level, "timing": marks}
+        mark("T5")
+        install_mut_observer(page, before_as)
+        sent = click_send(page, first_visible(page, send))
+        mark("T6")
+        ack = False
+        ack_deadline = time.time() + SEND_ACK_TIMEOUT / 1000.0
+        while time.time() < ack_deadline:
+            try:
+                if page.locator("div[data-message-author-role='user']").count() > before_user:
+                    ack = True
+                    break
+                if page.locator("div[data-message-author-role='assistant']").count() > before_as:
+                    ack = True
+                    break
+                if page.locator(",".join(stop)).first.is_visible():
+                    ack = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.08)
+        if not ack and not TEST_URL:
+            return {"ok": False, "error": "SEND_NOT_ACKED: message did not enter conversation", "fault": "provider", "recoveryLevel": recovery_level, "timing": marks}
+        mark("T7")
         post_phase("generating")
-        lap("sent")
         stop_sel = ",".join(stop)
         deadline = time.time() + timeout_ms / 1000
         text = ""
-        stable = ""
-        same = 0
+        last_change = time.time()
         stop_seen = False
+        first_delta = False
         while time.time() < deadline:
             generating = False
             try:
@@ -870,37 +1057,75 @@ def run_chat(body):
                     stop_seen = True
             except Exception:
                 generating = False
-            nodes = page.locator(",".join(assistant))
-            n = nodes.count()
-            cur = ""
-            if n > before:
-                cur = (nodes.nth(n - 1).inner_text() or "").strip()
-            if cur:
-                if cur != stable:
-                    stable = cur
-                    same = 0
-                else:
-                    same += 1
-                    if same >= 2 and not generating:
-                        text = cur
-                        break
-            time.sleep(0.1)
-        if not text:
-            text = stable
+            drained = drain_deltas(page)
+            full = (drained.get("full") or "").strip()
+            if full:
+                if not first_delta:
+                    first_delta = True
+                    mark("T8")
+                    post_chunk(full)
+                    last_change = time.time()
+                elif drained.get("deltas"):
+                    post_chunk(full)
+                    last_change = time.time()
+                text = full
+            idle = time.time() - last_change
+            if text and not generating and idle >= 0.45:
+                break
+            if text and idle >= 1.8:
+                break
+            time.sleep(0.08)
+        mark("T9")
         if not text:
             pst = detect_page_state(page, "chatgpt")
-            return {"ok": False, "error": "TIMEOUT: empty assistant", "fault": "provider", "pageState": pst}
-        observe = int((time.time() - t0) * 1000)
-        lap("done")
+            return {"ok": False, "error": "TIMEOUT: empty assistant", "fault": "provider", "pageState": pst, "timing": marks, "profile": profile}
+        if "sol" in text.lower() or "reasoning" in text.lower() or "推理" in text:
+            profile["actual_profile"] = "reasoning"
+            profile["profile_verified"] = False
+            profile["fast_capable"] = False
+        elif "instant" in text.lower():
+            profile["actual_profile"] = "instant"
+            profile["profile_verified"] = False
+        mark("T10")
+        def g(a, b=None):
+            if b is None:
+                return marks.get(a, 0)
+            return max(0, marks.get(b, 0) - marks.get(a, 0))
+        timing = {
+            "marks": marks,
+            "queue_wait_ms": 0,
+            "lease_ms": 0,
+            "browser_prepare_ms": g("T2"),
+            "page_ready_ms": g("T2", "T3"),
+            "composer_ready_ms": g("T3", "T4"),
+            "input_ms": g("T4", "T5"),
+            "send_ms": g("T5", "T6"),
+            "submit_to_first_delta_ms": g("T6", "T8") if "T8" in marks else None,
+            "first_delta_to_complete_ms": g("T8", "T9") if "T8" in marks else None,
+            "generation_ms": g("T6", "T9"),
+            "send_to_network_activity_ms": int((net["req"] - t0) * 1000) - marks.get("T6", 0) if net["req"] else None,
+            "network_to_dom_ms": int((marks.get("T8", 0)) - int((net["res"] - t0) * 1000)) if (net["res"] and "T8" in marks) else None,
+            "recovery_level": recovery_level,
+            "recovery_ms": 0,
+            "total_ms": g("T10"),
+            "warm_page": bool(already),
+        }
+        print("TIMING", json.dumps(timing, ensure_ascii=False), flush=True)
         return {
             "ok": True,
             "text": text,
             "sessionBaseVersion": int(body.get("sessionVersion") or 0),
             "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
             "modelActual": actual or model,
+            "actualProfile": profile.get("actual_profile"),
+            "profileVerified": bool(profile.get("profile_verified")),
+            "fastCapable": bool(profile.get("fast_capable")),
             "selectorPackVersion": pack_version,
             "pageState": "RESULT_READY",
-            "latencyMs": observe,
+            "latencyMs": timing["total_ms"],
+            "timing": timing,
+            "profile": profile,
+            "recoveryLevel": recovery_level,
         }
 
     if pool_enabled():

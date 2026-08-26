@@ -376,6 +376,7 @@ export function streamChat(
           relay: { phase: "waiting_worker", accountEmail: queued.job.accountEmail, jobId: queued.job.id, requestId },
         });
         let assembled = "";
+        let firstSse = 0;
         const ping = setInterval(() => {
           void send({
             id: `chatcmpl-${queued.job.id}`,
@@ -400,6 +401,7 @@ export function streamChat(
               const chunk = ev.text.startsWith(assembled) ? ev.text.slice(assembled.length) : ev.text;
               if (chunk) {
                 assembled += chunk;
+                if (!firstSse) firstSse = Date.now();
                 void send({
                   id: `chatcmpl-${queued.job.id}`,
                   object: "chat.completion.chunk",
@@ -460,6 +462,12 @@ export function streamChat(
             requestId: queued.job.requestId,
             attemptId: done.attemptId,
             workerId: done.workerId,
+            firstSseDeltaMs: firstSse ? firstSse - started : null,
+            timing: done.timing || null,
+            actualModel: done.actualModel || null,
+            actualProfile: done.actualProfile || null,
+            profileVerified: done.profileVerified ?? false,
+            requestedProfile: model === "chatgpt-web-fast" ? "fast" : "auto",
           },
         });
         await send(sseUsageChunk(model, queued.job.id, estimateTokens(prompt), estimateTokens(text)));

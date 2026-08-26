@@ -54,6 +54,10 @@ export type Job = {
   pageState?: string;
   requestedModel?: string;
   actualModel?: string;
+  timing?: Record<string, unknown>;
+  actualProfile?: string;
+  profileVerified?: boolean;
+  recoveryLevel?: number;
 };
 
 export type EnqueueOpts = {
@@ -560,6 +564,10 @@ export function finishJob(
     pageState?: string;
     fingerprint?: string;
     selectorPackVersion?: string;
+    timing?: Record<string, unknown>;
+    actualProfile?: string;
+    profileVerified?: boolean;
+    recoveryLevel?: number;
   },
 ) {
   if (pgSotActive()) {
@@ -577,6 +585,10 @@ export function finishJob(
     const has = Boolean(result.text || result.url);
     const decision = decisionFor(result.error, result.fault);
     const fault = decision.fault_domain || classifyError(result.error);
+    if (result.timing) job.timing = result.timing;
+    if (result.actualProfile) job.actualProfile = result.actualProfile;
+    if (typeof result.profileVerified === "boolean") job.profileVerified = result.profileVerified;
+    if (typeof result.recoveryLevel === "number") job.recoveryLevel = result.recoveryLevel;
     if (typeof result.modelActual === "string") {
       const verdict = getAdapter(job.platform).verifyModel(job.model, result.modelActual);
       job.actualModel = result.modelActual;
