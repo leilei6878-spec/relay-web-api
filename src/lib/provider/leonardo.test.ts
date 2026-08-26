@@ -249,4 +249,34 @@ test("leonardo login helper waits for Sign In to disappear, not the public compo
   assert.match(py, /leonardo_cookies_ok/);
   assert.match(py, /没有写入 state\.json/);
   assert.match(py, /游客首页也有输入框/);
+  assert.match(py, /canva\.com/);
+  assert.match(py, /proxy-pac-url/);
+  assert.match(py, /write_idp_pac/);
+  assert.match(py, /v2rayN\/TUN/);
+});
+
+test("leonardo SS helper uses bound node and Canva goes DIRECT", () => {
+  const py = loginHelperScript(
+    acc({ status: "pending_login", sessionPath: null }),
+    {
+      id: "px-1",
+      name: "Japan",
+      type: "ss",
+      host: "127.0.0.1",
+      port: 8443,
+      username: "",
+      stickySessionId: "s",
+      region: "JP",
+      status: "active",
+      maxAccounts: 8,
+      remark: "",
+      createdAt: new Date().toISOString(),
+      method: "2022-blake3-aes-128-gcm",
+    },
+    "secret",
+  );
+  assert.match(py, /Leonardo 登录用绑定节点/);
+  assert.match(py, /canva\.com/);
+  assert.match(py, /proxy-pac-url/);
+  assert.match(py, /SOCKS5 /);
 });

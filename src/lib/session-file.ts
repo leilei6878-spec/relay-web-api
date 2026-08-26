@@ -124,10 +124,58 @@ export function loginHelperScript(account: Account, proxy: Proxy, password: stri
         : "#prompt-textarea, textarea#prompt-textarea, [data-testid='send-button']";
 
   const waitSave = `
-import re
+import re, base64
 HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
 PLATFORM = ${JSON.stringify(account.platform)}
 READY_SEL = ${JSON.stringify(readySel)}
+IDP_HOSTS = [
+    "canva.com", "canva.net",
+    "google.com", "googleapis.com", "gstatic.com", "googleusercontent.com",
+    "apple.com", "icloud.com",
+    "microsoft.com", "microsoftonline.com", "live.com", "office.com",
+    "msn.com", "hotmail.com", "outlook.com",
+]
+
+def pac_proxy_line(server):
+    s = (server or "").strip()
+    if s.startswith("socks5://"):
+        rest = s[9:]
+        kind = "SOCKS5 "
+    elif s.startswith("socks://"):
+        rest = s[8:]
+        kind = "SOCKS "
+    elif s.startswith("http://"):
+        rest = s[7:]
+        kind = "PROXY "
+    elif s.startswith("https://"):
+        rest = s[8:]
+        kind = "HTTPS "
+    else:
+        rest = s
+        kind = "SOCKS5 "
+    if "@" in rest:
+        rest = rest.split("@", 1)[1]
+    return kind + rest
+
+def write_idp_pac(server):
+    line = pac_proxy_line(server)
+    out = [
+        "function FindProxyForURL(url, host) {",
+        "  host = (host || '').toLowerCase();",
+        "  if (",
+    ]
+    last = len(IDP_HOSTS) - 1
+    for i, d in enumerate(IDP_HOSTS):
+        piece = '    (host === "%s" || dnsDomainIs(host, "%s") || shExpMatch(host, "*.%s"))' % (d, d, d)
+        if i < last:
+            piece += " ||"
+        out.append(piece)
+    out.append('  ) return "DIRECT";')
+    out.append('  return "%s";' % line)
+    out.append("}")
+    raw = "\\n".join(out) + "\\n"
+    b64 = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+    return "data:application/x-ns-proxy-autoconfig;base64," + b64
 
 def save_state(context):
     raw = []
@@ -206,7 +254,9 @@ def wait_login(page, context):
     print("在弹出窗口登录", ${email})
     if PLATFORM == "leonardo":
         print("Leonardo 游客首页也有输入框，那不是登录。")
-        print("请点 Sign In，登录成功后 Sign In 必须消失，并停留在 /generate。")
+        print("请点 Sign In，可用 Canva / Google / Microsoft / Email。")
+        print("Canva 验证码走你本机网络；Leonardo 仍走绑定节点。")
+        print("若 Canva 提示关掉 VPN：先关系统 v2rayN/TUN，再点 Resend。")
     else:
         print("看到聊天输入框会自动保存；也可以回到这里按回车。")
     redirected = False
@@ -250,6 +300,14 @@ def open_browser(p, proxy):
     args = ["--disable-blink-features=AutomationControlled"]
     ignore = ["--enable-automation"]
     kw = {"headless": False, "args": args, "ignore_default_args": ignore}
+    if proxy and PLATFORM == "leonardo":
+        server = proxy.get("server") if isinstance(proxy, dict) else ""
+        if server:
+            pac_url = write_idp_pac(server)
+            args.append("--disable-quic")
+            args.append("--proxy-pac-url=" + pac_url)
+            print("Canva / Google / Microsoft 验证码走本机，Leonardo 走绑定节点")
+            proxy = None
     if proxy:
         kw["proxy"] = proxy
     for channel in ("chrome", "msedge"):
@@ -363,18 +421,27 @@ def open_page(page, url, timeout=20000):
     return False
 
 def pick_socks():
-    # v2rayN 已通则优先用它，不要先占一个坏的 18080
+    if PLATFORM == "leonardo":
+        print("Leonardo 登录用绑定节点，不优先用 v2rayN（Canva 会把系统 VPN 当成风险）")
+        child = None
+        for cfg in CONFIGS:
+            child = start_singbox(cfg)
+            if child:
+                print("已启动包内 sing-box 18080")
+                return 18080, "socks5", child
+        print("包内节点没起来，再试本机 v2rayN…")
     for port, scheme, label in ((10808, "socks5", "v2rayN SOCKS"), (10809, "http", "v2rayN HTTP")):
         if port_open(port):
             print("使用本机 %s 127.0.0.1:%d（请确认选中平台同一条节点）" % (label, port))
             return port, scheme, None
-    print("未检测到 v2rayN，尝试启动包内节点…")
-    child = None
-    for cfg in CONFIGS:
-        child = start_singbox(cfg)
-        if child:
-            print("已启动包内 sing-box 18080")
-            return 18080, "socks5", child
+    if PLATFORM != "leonardo":
+        print("未检测到 v2rayN，尝试启动包内节点…")
+        child = None
+        for cfg in CONFIGS:
+            child = start_singbox(cfg)
+            if child:
+                print("已启动包内 sing-box 18080")
+                return 18080, "socks5", child
     print("没有可用本地代理。请先打开 v2rayN，选中 Japan 节点，再运行 run.bat。")
     sys.exit(1)
 
