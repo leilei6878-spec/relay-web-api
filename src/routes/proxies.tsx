@@ -56,7 +56,7 @@ function ProxiesView() {
         toast.success(
           res.tunnelOk && res.ip
             ? `节点通 · 出口 ${res.ip}`
-            : `节点 ${p.host}:${p.port} 通 · TCP ${"portMs" in res ? res.portMs : ""}ms`,
+            : `SS 节点 ${p.host}:${p.port} 通，但隧道未出网`,
         );
       } else {
         updateProxy(p.id, {

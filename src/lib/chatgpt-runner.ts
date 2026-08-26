@@ -121,13 +121,30 @@ export async function probeProxyJob(data: ProbeProxyInput) {
   }
 
   if (data.type === "ss") {
+    const local = data.localPort || 10808;
+    const started = Date.now();
+    const tunnel = await runCurl(["-sS", "--max-time", "12", "--socks5-hostname", `127.0.0.1:${local}`, "https://api.ipify.org"]);
+    const tunnelMs = Date.now() - started;
+    if (tunnel.ok) {
+      const ip = tunnel.text.trim();
+      if (/^[\d.:a-fA-F]+$/.test(ip)) {
+        return {
+          ok: true as const,
+          portOk: true,
+          portMs: port.ms,
+          tunnelOk: true,
+          ip,
+          ms: tunnelMs,
+        };
+      }
+    }
     return {
       ok: true as const,
       portOk: true,
       portMs: port.ms,
       tunnelOk: false,
-      ip: null,
-      ms: port.ms,
+      error: `SS 节点 TCP 通，但本机 SOCKS ${local} 隧道出不了网。云端执行器连该节点会被断开，请在已开 v2rayN 的电脑上跑本机 Worker。`,
+      ms: tunnelMs,
     };
   }
 

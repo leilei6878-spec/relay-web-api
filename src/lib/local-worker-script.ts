@@ -3,7 +3,7 @@ export const LOCAL_WORKER = "http://127.0.0.1:18765";
 export function localWorkerScript() {
   return `#!/usr/bin/env python3
 # Relay 本机 ChatGPT Worker。保持窗口开着，平台试运行会连过来。
-import json, os, socket, subprocess, sys, tempfile, threading, time, base64
+import json, os, socket, ssl, subprocess, sys, tempfile, threading, time, base64
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
@@ -51,6 +51,46 @@ def pick_proxy():
     if port_open(10809):
         return {"server": "http://127.0.0.1:10809"}
     return None
+
+def socks_https_ok(proxy):
+    server = ""
+    if isinstance(proxy, dict):
+        server = proxy.get("server") or ""
+    if not server.startswith("socks5"):
+        return True
+    try:
+        hostport = server.split("://", 1)[-1]
+        sh, sp = hostport.rsplit(":", 1)
+        sh = sh.strip("[]")
+        dest = "api.ipify.org"
+        s = socket.socket()
+        s.settimeout(6)
+        s.connect((sh, int(sp)))
+        s.send(b"\\x05\\x01\\x00")
+        greet = s.recv(2)
+        if not greet:
+            s.close()
+            return False
+        req = b"\\x05\\x01\\x00\\x03" + bytes([len(dest)]) + dest.encode() + (443).to_bytes(2, "big")
+        s.send(req)
+        resp = s.recv(16)
+        if not resp or len(resp) < 2 or resp[1] != 0:
+            s.close()
+            return False
+        ctx = ssl.create_default_context()
+        tls = ctx.wrap_socket(s, server_hostname=dest)
+        tls.send(b"GET / HTTP/1.1\\r\\nHost: api.ipify.org\\r\\nConnection: close\\r\\n\\r\\n")
+        body = tls.recv(256)
+        tls.close()
+        return b"." in body or b":" in body
+    except Exception:
+        return False
+
+def tunnel_down_error():
+    return (
+        "PROXY_TUNNEL_DOWN: Shadowsocks 隧道无法出网（本机 SOCKS 在听，但 HTTPS 被断开）。"
+        "云端执行器连不上这个节点。请在已开启 v2rayN 的电脑上，打开总览页下载并运行「本机 Worker」。"
+    )
 
 def job_proxy(body):
     p = body.get("proxy") or {}
@@ -542,6 +582,10 @@ def run_chat(body):
     proxy = job_proxy(body)
     if not proxy:
         return {"ok": False, "error": "PROXY_UNAVAILABLE: job missing account-bound proxy", "fault": "proxy"}
+    if not TEST_URL:
+        post_phase("checking_proxy")
+        if not socks_https_ok(proxy):
+            return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
 
     def first_visible(page, names):
         loc, _sel = pick_locator(page, names, 4)
@@ -553,7 +597,10 @@ def run_chat(body):
         try:
             page.goto(CHAT_URL if not real else "https://chatgpt.com/", wait_until="domcontentloaded", timeout=25000)
         except Exception as e:
-            return {"ok": False, "error": "CHAT_PAGE_TIMEOUT: 打不开 chatgpt.com（%s）" % str(e)[:160], "fault": "proxy"}
+            t = str(e)
+            if "ERR_CONNECTION_CLOSED" in t or "ERR_CONNECTION_RESET" in t or "ERR_TUNNEL" in t:
+                return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
+            return {"ok": False, "error": "CHAT_PAGE_TIMEOUT: 打不开 chatgpt.com（%s）" % t[:160], "fault": "proxy"}
         post_phase("page_ready")
         switched, actual = select_model(page, model)
         if not TEST_URL:
@@ -780,6 +827,8 @@ def run_image(body):
     proxy = job_proxy(body)
     if not proxy:
         return {"ok": False, "error": "PROXY_UNAVAILABLE: job missing account-bound proxy", "fault": "proxy"}
+    if not TEST_URL and not socks_https_ok(proxy):
+        return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
     sel = body.get("selectors") or {}
     inp = (sel.get("input") or ["div.ql-editor", "div[contenteditable='true']", "rich-textarea"])[:4]
     send = (sel.get("send") or ["button[aria-label*='Send']", "button[aria-label*='发送']"])[:4]
