@@ -33,7 +33,10 @@ export function proxyServer(proxy: {
   port: number;
   localPort?: number;
 }) {
-  if (proxy.type === "ss") return `socks5://127.0.0.1:${proxy.localPort || 10808}`;
+  if (proxy.type === "ss") {
+    const port = Number(process.env.RELAY_SS_LOCAL_PORT || proxy.localPort || 18080);
+    return `socks5://127.0.0.1:${port}`;
+  }
   const scheme = proxy.type === "socks5" ? "socks5" : "http";
   return `${scheme}://${proxy.host}:${proxy.port}`;
 }

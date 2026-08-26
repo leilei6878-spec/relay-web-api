@@ -46,10 +46,9 @@ def port_open(port):
         s.close()
 
 def pick_proxy():
-    if port_open(10808):
-        return {"server": "socks5://127.0.0.1:10808"}
-    if port_open(10809):
-        return {"server": "http://127.0.0.1:10809"}
+    for port, scheme in ((18080, "socks5"), (10808, "socks5"), (10809, "http")):
+        if port_open(port):
+            return {"server": "%s://127.0.0.1:%d" % (scheme, port)}
     return None
 
 def socks_https_ok(proxy):

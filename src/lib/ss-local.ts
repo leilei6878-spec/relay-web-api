@@ -10,6 +10,7 @@ const BIN = resolve("bin/xray");
 const CFG = resolve(DIR, "xray.json");
 const PID = resolve(DIR, "xray.pid");
 const LOG = resolve("/tmp/xray-local.log");
+const SERVER_SOCKS = Number(process.env.RELAY_SS_LOCAL_PORT || 18080);
 
 function alive(pid: number) {
   try {
@@ -129,7 +130,7 @@ export async function ensureSsLocal(proxy: {
   const password = (proxy.password || "").trim();
   if (!password || password === "***") return { ok: false as const, error: "SS 密码缺失" };
   if (!(await ensureBinary())) return { ok: false as const, error: "缺少 xray" };
-  const localPort = proxy.localPort || 10808;
+  const localPort = SERVER_SOCKS;
   let last = "SS 隧道失败";
   for (const method of methodsToTry(proxy.method, password)) {
     const cfg = xrayConfig({

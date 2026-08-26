@@ -121,7 +121,6 @@ export async function probeProxyJob(data: ProbeProxyInput) {
   }
 
   if (data.type === "ss") {
-    const local = data.localPort || 10808;
     if (!data.password || data.password === "***") {
       const { readControlPlane } = await import("./control-plane");
       const { getSecret, proxySecretKey } = await import("./secrets");
@@ -137,7 +136,6 @@ export async function probeProxyJob(data: ProbeProxyInput) {
       host: data.host,
       port: data.port,
       password: data.password,
-      localPort: local,
       method: data.method,
     });
     if (!startedLocal.ok) {
@@ -150,6 +148,7 @@ export async function probeProxyJob(data: ProbeProxyInput) {
         ms: port.ms,
       };
     }
+    const local = startedLocal.localPort;
     const started = Date.now();
     const tunnel = await runCurl(["-sS", "--max-time", "12", "--socks5-hostname", `127.0.0.1:${local}`, "https://api.ipify.org"]);
     const tunnelMs = Date.now() - started;
