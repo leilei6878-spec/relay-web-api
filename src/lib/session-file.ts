@@ -1,5 +1,6 @@
 import type { Account, Platform, Proxy } from "./types";
 import { singBoxConfig } from "./proxy-link";
+import { textFile } from "./zip-store";
 
 export type ParsedSession = {
   cookieCount: number;
@@ -939,6 +940,33 @@ finally:
 `;
 }
 
-export function safeName(email: string) {
-  return `relay-login-${email.replace(/[^a-zA-Z0-9._-]+/g, "_")}`;
+export function loginPackBat() {
+  return `@echo off
+cd /d "%~dp0"
+python -m pip install playwright -q
+python -m playwright install chromium
+python login.py
+echo.
+if exist "%~dp0state.json" (
+  echo state.json is here:
+  echo %~dp0state.json
+) else (
+  echo state.json not in this folder. Check Desktop.
+)
+pause
+`;
+}
+
+export function loginPackReadme(platform: Platform) {
+  return platform === "leonardo"
+    ? "1. Unzip\n2. Keep your daily Chrome open\n3. Double-click run.bat — it copies your Canva login into one dedicated window\n4. Only use that window: Canva should already be signed in, then authorize Leonardo. Drag state.json back.\n"
+    : "1. Unzip\n2. Double-click run.bat\n3. Login in the window, then press Enter in the terminal\n4. Drag state.json back to Relay\n";
+}
+
+export function loginPackTextFiles(account: Account, proxy: Proxy, password: string) {
+  return [
+    { name: "login.py", data: textFile(loginHelperScript(account, proxy, password)) },
+    { name: "run.bat", data: textFile(loginPackBat()) },
+    { name: "README.txt", data: textFile(loginPackReadme(account.platform)) },
+  ];
 }

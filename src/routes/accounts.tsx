@@ -10,8 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getApiKey, saveSessionFile } from "@/lib/gateway";
 import { whyBlocked } from "@/lib/readiness";
 import { useGateway } from "@/lib/store";
-import { loginHelperScript, safeName } from "@/lib/session-file";
-import { textFile, zipStore } from "@/lib/zip-store";
+import { safeName } from "@/lib/session-file";
 import type { Account, AccountStatus, Platform } from "@/lib/types";
 import { formatTime } from "@/lib/utils";
 
@@ -493,36 +492,21 @@ function LoginDialog({ account }: { account: Account }) {
     }
     setPacking(true);
     try {
-      const py = loginHelperScript(account, proxy, proxyPassword.trim());
-      const bat = `@echo off
-cd /d "%~dp0"
-python -m pip install playwright -q
-python -m playwright install chromium
-python login.py
-echo.
-if exist "%~dp0state.json" (
-  echo state.json is here:
-  echo %~dp0state.json
-) else (
-  echo state.json not in this folder. Check Desktop.
-)
-pause
-`;
-      const readme =
-        account.platform === "leonardo"
-          ? "1. Unzip\n2. Keep your daily Chrome open\n3. Double-click run.bat — it copies your Canva login into one dedicated window\n4. Only use that window: Canva should already be signed in, then authorize Leonardo. Drag state.json back.\n"
-          : "1. Unzip\n2. Double-click run.bat\n3. Login in the window, then press Enter in the terminal\n4. Drag state.json back to Relay\n";
-      const files: { name: string; data: Uint8Array }[] = [
-        { name: "login.py", data: textFile(py) },
-        { name: "run.bat", data: textFile(bat) },
-        { name: "README.txt", data: textFile(readme) },
-      ];
-      if (proxy.type === "ss") {
-        const res = await fetch("/login-kit/windows/sing-box.exe");
-        if (!res.ok) throw new Error("登录组件缺失，请刷新后重试");
-        files.push({ name: "sing-box.exe", data: new Uint8Array(await res.arrayBuffer()) });
+      const res = await fetch("/api/admin/login-pack", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(120_000),
+        body: JSON.stringify({ accountId: account.id, proxyPassword: proxyPassword.trim() }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error || `打包失败 ${res.status}`);
       }
-      const blob = zipStore(files);
+      const blob = await res.blob();
+      if (blob.size < 64 || (blob.type || "").includes("json")) {
+        throw new Error("打包失败，请刷新后重试");
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -532,7 +516,7 @@ pause
       setProxyPassword("");
       toast.success("已下载登录包，解压后双击 run.bat");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "打包失败";
+      const msg = err instanceof Error && err.name === "TimeoutError" ? "下载超时，请检查网络后重试" : err instanceof Error ? err.message : "打包失败";
       setError(msg);
       toast.error(msg);
     } finally {
@@ -647,7 +631,7 @@ pause
                 ）。解压后双击 run.bat，按平台这条节点出网，不用开 v2rayN。
               </p>
               <Button className="w-full" variant="secondary" onClick={() => void downloadHelper()} disabled={packing}>
-                {packing ? "正在打包…" : "下载一键登录包"}
+                {packing ? "正在下载登录包…" : "下载一键登录包"}
               </Button>
               <label
                 className={`flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-md border border-dashed px-3 py-6 text-center text-xs ${

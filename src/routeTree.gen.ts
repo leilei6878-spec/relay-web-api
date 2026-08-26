@@ -29,6 +29,7 @@ import { Route as V1ModelsRouteImport } from './routes/v1/models'
 import { Route as V1ResponsesRouteImport } from './routes/v1/responses'
 import { Route as ApiAccountsProbeRouteImport } from './routes/api/accounts/probe'
 import { Route as ApiAdminInvokeRouteImport } from './routes/api/admin/invoke'
+import { Route as ApiAdminLoginPackRouteImport } from './routes/api/admin/login-pack'
 import { Route as ApiAdminMetricsRouteImport } from './routes/api/admin/metrics'
 import { Route as ApiAdminPlaneRouteImport } from './routes/api/admin/plane'
 import { Route as ApiAdminSessionRouteImport } from './routes/api/admin/session'
@@ -142,6 +143,11 @@ const ApiAdminInvokeRoute = ApiAdminInvokeRouteImport.update({
   path: '/api/admin/invoke',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAdminLoginPackRoute = ApiAdminLoginPackRouteImport.update({
+  id: '/api/admin/login-pack',
+  path: '/api/admin/login-pack',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAdminMetricsRoute = ApiAdminMetricsRouteImport.update({
   id: '/api/admin/metrics',
   path: '/api/admin/metrics',
@@ -224,6 +230,7 @@ export interface FileRoutesByFullPath {
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
+  '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
   '/api/admin/plane': typeof ApiAdminPlaneRoute
   '/api/admin/session': typeof ApiAdminSessionRoute
@@ -258,6 +265,7 @@ export interface FileRoutesByTo {
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
+  '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
   '/api/admin/plane': typeof ApiAdminPlaneRoute
   '/api/admin/session': typeof ApiAdminSessionRoute
@@ -293,6 +301,7 @@ export interface FileRoutesById {
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
+  '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
   '/api/admin/plane': typeof ApiAdminPlaneRoute
   '/api/admin/session': typeof ApiAdminSessionRoute
@@ -329,6 +338,7 @@ export interface FileRouteTypes {
     | '/v1/responses'
     | '/api/accounts/probe'
     | '/api/admin/invoke'
+    | '/api/admin/login-pack'
     | '/api/admin/metrics'
     | '/api/admin/plane'
     | '/api/admin/session'
@@ -363,6 +373,7 @@ export interface FileRouteTypes {
     | '/v1/responses'
     | '/api/accounts/probe'
     | '/api/admin/invoke'
+    | '/api/admin/login-pack'
     | '/api/admin/metrics'
     | '/api/admin/plane'
     | '/api/admin/session'
@@ -397,6 +408,7 @@ export interface FileRouteTypes {
     | '/v1/responses'
     | '/api/accounts/probe'
     | '/api/admin/invoke'
+    | '/api/admin/login-pack'
     | '/api/admin/metrics'
     | '/api/admin/plane'
     | '/api/admin/session'
@@ -432,6 +444,7 @@ export interface RootRouteChildren {
   V1ResponsesRoute: typeof V1ResponsesRoute
   ApiAccountsProbeRoute: typeof ApiAccountsProbeRoute
   ApiAdminInvokeRoute: typeof ApiAdminInvokeRoute
+  ApiAdminLoginPackRoute: typeof ApiAdminLoginPackRoute
   ApiAdminMetricsRoute: typeof ApiAdminMetricsRoute
   ApiAdminPlaneRoute: typeof ApiAdminPlaneRoute
   ApiAdminSessionRoute: typeof ApiAdminSessionRoute
@@ -588,6 +601,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAdminInvokeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/admin/login-pack': {
+      id: '/api/admin/login-pack'
+      path: '/api/admin/login-pack'
+      fullPath: '/api/admin/login-pack'
+      preLoaderRoute: typeof ApiAdminLoginPackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/admin/metrics': {
       id: '/api/admin/metrics'
       path: '/api/admin/metrics'
@@ -696,6 +716,7 @@ const rootRouteChildren: RootRouteChildren = {
   V1ResponsesRoute: V1ResponsesRoute,
   ApiAccountsProbeRoute: ApiAccountsProbeRoute,
   ApiAdminInvokeRoute: ApiAdminInvokeRoute,
+  ApiAdminLoginPackRoute: ApiAdminLoginPackRoute,
   ApiAdminMetricsRoute: ApiAdminMetricsRoute,
   ApiAdminPlaneRoute: ApiAdminPlaneRoute,
   ApiAdminSessionRoute: ApiAdminSessionRoute,
