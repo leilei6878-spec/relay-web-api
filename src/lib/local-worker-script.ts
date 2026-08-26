@@ -13,6 +13,12 @@ STATE = os.path.join(HERE, "state.json")
 HEADLESS = os.environ.get("RELAY_HEADLESS") == "1"
 TEST_URL = os.environ.get("RELAY_TEST_URL") or ""
 CHAT_URL = os.environ.get("RELAY_CHAT_URL") or TEST_URL or "https://chatgpt.com/"
+DRAINING = False
+ACTIVE = 0
+BROWSERS = 0
+ACCOUNT_LOCKS = {}
+CAPACITY = int(os.environ.get("RELAY_CAPACITY") or os.environ.get("RELAY_CONCURRENCY") or "3")
+SEM = threading.Semaphore(max(1, CAPACITY))
 MOCK_HTML = """<!doctype html><meta charset="utf-8"><title>mock</title>
 <textarea id="prompt-textarea"></textarea>
 <button data-testid="send-button">Send</button>
@@ -54,7 +60,48 @@ def job_proxy(body):
             kw["username"] = p.get("username")
             kw["password"] = p.get("password") or ""
         return kw
-    return pick_proxy()
+    if os.environ.get("RELAY_ALLOW_MOCK") == "1":
+        return pick_proxy()
+    return None
+
+def account_lock(aid):
+    ACCOUNT_LOCKS.setdefault(aid or "_", threading.Lock())
+    return ACCOUNT_LOCKS[aid or "_"]
+
+def post_chunk(text):
+    gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
+    token = os.environ.get("RELAY_TOKEN") or ""
+    jid = os.environ.get("RELAY_JOB_ID") or ""
+    if not (gw and token and jid and text):
+        return
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            gw + "/api/worker/chunk",
+            data=json.dumps({
+                "id": jid,
+                "text": text,
+                "leaseId": os.environ.get("RELAY_LEASE_ID") or "",
+                "fencingToken": int(os.environ.get("RELAY_FENCE") or "0") or None,
+                "attemptId": os.environ.get("RELAY_ATTEMPT_ID") or "",
+            }).encode("utf-8"),
+            headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=8).read()
+    except Exception:
+        pass
+
+def exit_ip(context):
+    try:
+        r = context.request.get("https://api.ipify.org", timeout=8000)
+        return (r.text() or "").strip()
+    except Exception:
+        try:
+            r = context.request.get("https://ifconfig.me/ip", timeout=8000)
+            return (r.text() or "").strip()
+        except Exception:
+            return ""
 
 def extract_prompt_images(body):
     images = []
@@ -145,6 +192,242 @@ def attach_images(page, images):
             pass
 
 
+def detect_page_state(page, provider="chatgpt"):
+    url = ""
+    html = ""
+    try:
+        url = page.url or ""
+    except Exception:
+        url = ""
+    try:
+        html = (page.content() or "")[:12000].lower()
+    except Exception:
+        html = ""
+    if "captcha" in html or "cf-challenge" in html or "verify you are" in html or "turnstile" in html or "unusual traffic" in html:
+        return "CHALLENGE"
+    if "deactivated" in html or "suspended" in html or "account has been disabled" in html or "restricted" in html:
+        return "ACCOUNT_RESTRICTED"
+    if "too many requests" in html or "rate limit" in html or "try again later" in html or "usage limit" in html:
+        return "RATE_LIMITED"
+    if "accounts.google.com" in url or "/auth/login" in url or "/login" in url or "sign in to chatgpt" in html or "continue with google" in html:
+        return "LOGIN_REQUIRED"
+    stop = False
+    composer = False
+    send = False
+    assistant = False
+    try:
+        stop = page.locator("button[data-testid='stop-button'], button[aria-label*='Stop']").first.is_visible()
+    except Exception:
+        stop = False
+    try:
+        if provider == "gemini":
+            composer = page.locator("div.ql-editor, rich-textarea, div[contenteditable='true']").first.count() > 0
+            send = page.locator("button[aria-label*='Send'], button[aria-label*='发送']").first.count() > 0
+        else:
+            composer = page.locator("#prompt-textarea, textarea#prompt-textarea, div[contenteditable='true']#prompt-textarea").first.count() > 0
+            send = page.locator("button[data-testid='send-button'], button[aria-label='Send prompt']").first.count() > 0
+            assistant = page.locator("div[data-message-author-role='assistant']").first.count() > 0
+    except Exception:
+        pass
+    if stop:
+        return "GENERATING"
+    if assistant and not stop:
+        return "RESULT_READY"
+    if composer:
+        return "COMPOSER_READY"
+    if "chatgpt.com" in url or "gemini.google.com" in url:
+        return "AUTHENTICATED"
+    return "DOM_UNKNOWN"
+
+def page_state_error(state, selector_failed=False):
+    if state == "LOGIN_REQUIRED":
+        return "LOGIN_REQUIRED: provider login wall", "account"
+    if state == "CHALLENGE":
+        return "CHALLENGE: captcha or bot wall", "provider"
+    if state == "RATE_LIMITED":
+        return "ACCOUNT_RATE_LIMIT: provider throttle", "account"
+    if state == "ACCOUNT_RESTRICTED":
+        return "ACCOUNT_BANNED: account disabled", "account"
+    if state == "PROVIDER_ERROR":
+        return "PROVIDER_UNAVAILABLE: provider error page", "provider"
+    if selector_failed:
+        return "PROVIDER_DOM_CHANGED: selector miss (page_state=%s)" % state, "provider"
+    return "PROVIDER_UNAVAILABLE: page_state=%s" % state, "provider"
+
+def page_fingerprint(page, pack):
+    feats = []
+    for key, sels in (pack or {}).items():
+        if not isinstance(sels, list):
+            continue
+        present = False
+        for s in sels[:3]:
+            try:
+                if page.locator(s).first.count() > 0:
+                    present = True
+                    break
+            except Exception:
+                pass
+        feats.append("%s:%d" % (key, 1 if present else 0))
+    testds = []
+    try:
+        testds = page.eval_on_selector_all("[data-testid]", "els => els.map(e => e.getAttribute('data-testid')).filter(Boolean).slice(0, 16)") or []
+    except Exception:
+        testds = []
+    return {"features": feats, "testids": testds[:16], "pack": (pack or {}).get("version") or ""}
+
+def pick_locator(page, names, limit=4):
+    tried = 0
+    for s in names or []:
+        if tried >= limit:
+            break
+        tried += 1
+        loc = page.locator(s).first
+        try:
+            if loc.count() > 0 and loc.is_visible():
+                return loc, s
+        except Exception:
+            pass
+    return None, None
+
+def snapshot_image_srcs(page):
+    out = []
+    try:
+        n = page.locator("img").count()
+        for i in range(n):
+            src = page.locator("img").nth(i).get_attribute("src") or ""
+            if src:
+                out.append(src)
+    except Exception:
+        pass
+    return out
+
+def accept_result_image(src, baseline, box=None):
+    if not src:
+        return False
+    if src in (baseline or []):
+        return False
+    low = src.lower()
+    for bad in ("favicon", "avatar", "logo", "sprite", "icon", "/static/", "profile"):
+        if bad in low:
+            return False
+    if src.startswith("data:image/svg"):
+        return False
+    if src.startswith("data:image") and len(src) < 800:
+        return False
+    if box and (box.get("width", 0) < 64 or box.get("height", 0) < 64):
+        return False
+    if "googleusercontent" in src or (src.startswith("data:image") and len(src) > 800):
+        return True
+    return False
+
+def format_turns(turns):
+    if not turns:
+        return ""
+    blocks = []
+    last_i = len(turns) - 1
+    for i, turn in enumerate(turns):
+        if not isinstance(turn, dict):
+            continue
+        role = str(turn.get("role") or "user").upper()
+        text = turn.get("text") or ""
+        imgs = turn.get("images") or []
+        note = ("\\n[attached:%d image(s)]" % len(imgs)) if imgs else ""
+        cur = ' current="true"' if i == last_i else ""
+        blocks.append("<relay:%s%s>\\n%s%s\\n</relay:%s>" % (role, cur, text, note, role))
+    return "\\n\\n".join(blocks).strip()
+
+PW = None
+BROWSER_POOL = {}
+CTX_POOL = {}
+POOL_LOCK = threading.Lock()
+MAX_BROWSERS = int(os.environ.get("RELAY_MAX_BROWSERS") or "4")
+MAX_CTX = int(os.environ.get("RELAY_MAX_CTX_PER_BROWSER") or "8")
+CTX_IDLE = int(os.environ.get("RELAY_CTX_IDLE") or "180")
+CTX_MAX_REQ = int(os.environ.get("RELAY_CTX_MAX_REQ") or "20")
+
+def playwright_inst():
+    global PW
+    if PW is None:
+        from playwright.sync_api import sync_playwright
+        PW = sync_playwright().start()
+    return PW
+
+def pool_enabled():
+    if os.environ.get("RELAY_TEST_URL"):
+        return False
+    return os.environ.get("RELAY_BROWSER_POOL") == "1"
+
+def recycle_idle_contexts():
+    now = time.time()
+    dead = []
+    for key, row in list(CTX_POOL.items()):
+        if now - row.get("last", now) > CTX_IDLE or row.get("n", 0) >= CTX_MAX_REQ:
+            dead.append(key)
+    for key in dead:
+        row = CTX_POOL.pop(key, None)
+        try:
+            if row and row.get("ctx"):
+                row["ctx"].close()
+        except Exception:
+            pass
+
+def get_pooled_context(proxy, storage_state, account_id):
+    p = playwright_inst()
+    proxy_key = ((proxy or {}).get("server") if isinstance(proxy, dict) else "") or "direct"
+    with POOL_LOCK:
+        recycle_idle_contexts()
+        browser = BROWSER_POOL.get(proxy_key)
+        if browser is None or not getattr(browser, "is_connected", lambda: True)():
+            if len(BROWSER_POOL) >= MAX_BROWSERS:
+                old_key = next(iter(BROWSER_POOL))
+                try:
+                    BROWSER_POOL[old_key].close()
+                except Exception:
+                    pass
+                BROWSER_POOL.pop(old_key, None)
+                for k in [k for k in CTX_POOL if k.startswith(old_key + "|")]:
+                    try:
+                        CTX_POOL[k]["ctx"].close()
+                    except Exception:
+                        pass
+                    CTX_POOL.pop(k, None)
+            browser = open_browser(p, proxy)
+            BROWSER_POOL[proxy_key] = browser
+        ctx_key = "%s|%s" % (proxy_key, account_id or "_")
+        row = CTX_POOL.get(ctx_key)
+        if row and row.get("ctx") and row.get("n", 0) < CTX_MAX_REQ:
+            row["last"] = time.time()
+            row["n"] = row.get("n", 0) + 1
+            return browser, row["ctx"], False
+        if row:
+            try:
+                row["ctx"].close()
+            except Exception:
+                pass
+            CTX_POOL.pop(ctx_key, None)
+        same = [k for k in CTX_POOL if k.startswith(proxy_key + "|")]
+        if len(same) >= MAX_CTX:
+            old = same[0]
+            try:
+                CTX_POOL[old]["ctx"].close()
+            except Exception:
+                pass
+            CTX_POOL.pop(old, None)
+        kw = {
+            "storage_state": storage_state if (storage_state and (storage_state.get("cookies") or storage_state.get("origins"))) else None,
+            "locale": "en-US",
+            "viewport": {"width": 1365, "height": 900},
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        }
+        ctx = browser.new_context(**kw)
+        try:
+            ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        except Exception:
+            pass
+        CTX_POOL[ctx_key] = {"ctx": ctx, "last": time.time(), "n": 1}
+        return browser, ctx, True
+
+
 def open_browser(p, proxy):
     args = ["--disable-blink-features=AutomationControlled"]
     ignore = ["--enable-automation"]
@@ -175,10 +458,12 @@ def select_model(page, model):
         'button[aria-haspopup="menu"]',
         'button:has-text("GPT")',
     ]
+    switcher = None
     for sw in switchers:
         loc = page.locator(sw).first
         try:
             if loc.count() > 0 and loc.is_visible():
+                switcher = loc
                 loc.click(timeout=2500)
                 time.sleep(0.35)
                 break
@@ -190,13 +475,36 @@ def select_model(page, model):
             if opt.count() > 0:
                 opt.click(timeout=2500)
                 time.sleep(0.2)
-                return
+                break
         except Exception:
             continue
+    actual = ""
+    if switcher:
+        try:
+            actual = (switcher.inner_text() or "").strip()
+        except Exception:
+            actual = ""
+    if not actual:
+        try:
+            actual = (page.locator(switchers[0]).first.inner_text() or "").strip()
+        except Exception:
+            actual = ""
+    ok = any(lab.lower() in actual.lower() for lab in labels) if actual else False
+    return ok, actual
 
 def run_chat(body):
     from playwright.sync_api import sync_playwright
     prompt, images = extract_prompt_images(body)
+    if body.get("turns"):
+        formatted = format_turns(body.get("turns"))
+        if formatted:
+            prompt = formatted
+        for turn in body.get("turns") or []:
+            if isinstance(turn, dict):
+                for u in turn.get("images") or []:
+                    if u and u not in images:
+                        images.append(u)
+        images = images[:4]
     prompt = (prompt or "").strip()
     if not prompt and images:
         prompt = "请描述这张图片"
@@ -217,26 +525,127 @@ def run_chat(body):
     if not state:
         return {"ok": False, "error": "没有登录态。把 state.json 放到本目录，或从平台下发 Session"}
     sel = body.get("selectors") or {}
-    inp = sel.get("input") or ["#prompt-textarea", "textarea#prompt-textarea"]
-    send = sel.get("send") or ["button[data-testid='send-button']", "button[aria-label='Send prompt']"]
-    assistant = sel.get("assistant") or ["div[data-message-author-role='assistant']"]
-    stop = sel.get("streamingStop") or ["button[aria-label='Stop streaming']", "button[data-testid='stop-button']"]
+    inp = (sel.get("input") or ["#prompt-textarea", "textarea#prompt-textarea"])[:4]
+    send = (sel.get("send") or ["button[data-testid='send-button']", "button[aria-label='Send prompt']"])[:4]
+    assistant = (sel.get("assistant") or ["div[data-message-author-role='assistant']"])[:4]
+    stop = (sel.get("streamingStop") or ["button[aria-label='Stop streaming']", "button[data-testid='stop-button']"])[:4]
+    pack_version = body.get("selectorPackVersion") or sel.get("version") or "chatgpt-v1"
     timeout_ms = int(body.get("timeoutMs") or 90000)
     model = (body.get("model") or "gpt-5.6").strip()
-    proxy = None if (TEST_URL and not real) else pick_proxy()
-    if not proxy and not (TEST_URL and not real):
-        return {"ok": False, "error": "未检测到 v2rayN。请先打开并选中平台同一条节点（SOCKS 10808）"}
+    proxy = job_proxy(body)
+    if not proxy:
+        return {"ok": False, "error": "PROXY_UNAVAILABLE: job missing account-bound proxy", "fault": "proxy"}
 
     def first_visible(page, names):
-        for s in names:
-            loc = page.locator(s).first
+        loc, _sel = pick_locator(page, names, 4)
+        return loc
+
+    def run_on(page, context, close_browser):
+        t0 = time.time()
+        page.goto(CHAT_URL if not real else "https://chatgpt.com/", wait_until="domcontentloaded", timeout=45000)
+        time.sleep(0.3 if (TEST_URL and not real) else 0.6)
+        switched, actual = select_model(page, model)
+        if not TEST_URL:
+            ip = exit_ip(context)
+            if not ip:
+                return {"ok": False, "error": "PROXY_UNAVAILABLE: exit IP probe failed", "fault": "proxy"}
+        if not switched and not TEST_URL:
+            code = "MODEL_SELECTION_UNCONFIRMED" if not actual else "MODEL_MISMATCH"
+            return {"ok": False, "error": code + ": failed to select " + model, "fault": "provider", "modelActual": actual or ""}
+        attach_images(page, images)
+        box = first_visible(page, inp)
+        if box is None:
+            pst = detect_page_state(page, "chatgpt")
+            err, fault = page_state_error(pst, True)
+            return {"ok": False, "error": err, "fault": fault, "pageState": pst, "selectorPackVersion": pack_version, "fingerprint": page_fingerprint(page, sel)}
+        if body.get("kind") == "canary":
+            fp = page_fingerprint(page, sel)
+            pst = detect_page_state(page, "chatgpt")
+            send_ok = first_visible(page, send) is not None
+            return {
+                "ok": pst in ("COMPOSER_READY", "AUTHENTICATED", "RESULT_READY", "GENERATING") and send_ok,
+                "text": "CANARY",
+                "pageState": pst,
+                "fingerprint": fp,
+                "selectorPackVersion": pack_version,
+                "modelActual": actual or model,
+                "sessionBaseVersion": int(body.get("sessionVersion") or 0),
+                "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
+            }
+        before = page.locator(",".join(assistant)).count()
+        box.click()
+        box.fill(prompt)
+        btn = first_visible(page, send)
+        if btn:
+            btn.click()
+        else:
+            page.keyboard.press("Enter")
+        stop_sel = ",".join(stop)
+        stop_wait = 800 if TEST_URL else 12000
+        stop_seen = False
+        try:
+            page.locator(stop_sel).first.wait_for(state="visible", timeout=stop_wait)
+            stop_seen = True
+        except Exception:
+            pass
+        if stop_seen:
             try:
-                if loc.count() > 0 and loc.is_visible():
-                    return loc
+                page.locator(stop_sel).first.wait_for(state="hidden", timeout=3000 if TEST_URL else max(3000, timeout_ms))
             except Exception:
                 pass
-        return None
+        deadline = time.time() + timeout_ms / 1000
+        text = ""
+        stable = ""
+        same = 0
+        while time.time() < deadline:
+            nodes = page.locator(",".join(assistant))
+            n = nodes.count()
+            cur = ""
+            if n > before:
+                cur = (nodes.nth(n - 1).inner_text() or "").strip()
+            if cur:
+                if cur == stable:
+                    same += 1
+                    if same >= (1 if stop_seen else 2):
+                        text = cur
+                        break
+                else:
+                    stable = cur
+                    same = 0
+                    post_chunk(cur)
+            time.sleep(0.2 if stop_seen else 0.28)
+        if not text:
+            text = stable
+        if not text:
+            pst = detect_page_state(page, "chatgpt")
+            return {"ok": False, "error": "TIMEOUT: empty assistant", "fault": "provider", "pageState": pst}
+        try:
+            state_out = context.storage_state()
+        except Exception:
+            state_out = None
+        observe = int((time.time() - t0) * 1000)
+        return {
+            "ok": True,
+            "text": text,
+            "sessionState": state_out,
+            "sessionBaseVersion": int(body.get("sessionVersion") or 0),
+            "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
+            "modelActual": actual or model,
+            "selectorPackVersion": pack_version,
+            "pageState": "RESULT_READY",
+            "latencyMs": observe,
+        }
 
+    if pool_enabled():
+        browser, context, _fresh = get_pooled_context(proxy, state, body.get("accountId"))
+        page = context.new_page()
+        try:
+            return run_on(page, context, False)
+        finally:
+            try:
+                page.close()
+            except Exception:
+                pass
     with sync_playwright() as p:
         browser = open_browser(p, proxy)
         context = browser.new_context(
@@ -248,63 +657,7 @@ def run_chat(body):
         context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         page = context.new_page()
         try:
-            page.goto(CHAT_URL if not real else "https://chatgpt.com/", wait_until="domcontentloaded", timeout=45000)
-            time.sleep(0.3 if (TEST_URL and not real) else 0.6)
-            select_model(page, model)
-            attach_images(page, images)
-            box = first_visible(page, inp)
-            if box is None:
-                return {"ok": False, "error": "Session 失效或停在登录页，请重新登录"}
-            before = page.locator(",".join(assistant)).count()
-            box.click()
-            box.fill(prompt)
-            btn = first_visible(page, send)
-            if btn:
-                btn.click()
-            else:
-                page.keyboard.press("Enter")
-            stop_sel = ",".join(stop)
-            stop_wait = 800 if TEST_URL else 12000
-            stop_seen = False
-            try:
-                page.locator(stop_sel).first.wait_for(state="visible", timeout=stop_wait)
-                stop_seen = True
-            except Exception:
-                pass
-            if stop_seen:
-                try:
-                    page.locator(stop_sel).first.wait_for(state="hidden", timeout=3000 if TEST_URL else max(3000, timeout_ms))
-                except Exception:
-                    pass
-            deadline = time.time() + timeout_ms / 1000
-            text = ""
-            stable = ""
-            same = 0
-            while time.time() < deadline:
-                nodes = page.locator(",".join(assistant))
-                n = nodes.count()
-                cur = ""
-                if n > before:
-                    cur = (nodes.nth(n - 1).inner_text() or "").strip()
-                if cur:
-                    if cur == stable:
-                        same += 1
-                        if same >= (1 if stop_seen else 2):
-                            text = cur
-                            break
-                    else:
-                        stable = cur
-                        same = 0
-                time.sleep(0.2 if stop_seen else 0.28)
-            if not text:
-                text = stable
-            if not text:
-                return {"ok": False, "error": "等待回复超时或回复为空"}
-            try:
-                context.storage_state(path=STATE)
-            except Exception:
-                pass
-            return {"ok": True, "text": text}
+            return run_on(page, context, True)
         finally:
             browser.close()
 
@@ -335,8 +688,8 @@ class H(BaseHTTPRequestHandler):
             self._cors()
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            proxy = job_proxy(body)
-            self.wfile.write(json.dumps({"ok": True, "proxy": bool(proxy), "mode": "test" if TEST_URL else "live"}).encode("utf-8"))
+            proxy = bool(pick_proxy())
+            self.wfile.write(json.dumps({"ok": True, "proxy": proxy, "mode": "test" if TEST_URL else "live", "draining": DRAINING, "active": ACTIVE}).encode("utf-8"))
             return
         self.send_response(404)
         self.end_headers()
@@ -365,32 +718,27 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
 
 def exec_job(body):
+    global ACTIVE
     prompt, images = extract_prompt_images(body)
     body = dict(body)
     body["prompt"] = prompt
     body["images"] = images
-    if body.get("platform") in ("gemini", "image") or body.get("kind") == "image":
-        return run_image(body)
-    job = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
-    json.dump(body, job)
-    job.close()
-    env = os.environ.copy()
-    env["RELAY_CHAT_URL"] = CHAT_URL if CHAT_URL.startswith("http") else env.get("RELAY_CHAT_URL", "https://chatgpt.com/")
-    timeout_s = max(30, int(body.get("timeoutMs") or 90000) / 1000 + 20)
+    os.environ["RELAY_JOB_ID"] = str(body.get("id") or os.environ.get("RELAY_JOB_ID") or "")
+    os.environ["RELAY_LEASE_ID"] = str(body.get("leaseId") or "")
+    os.environ["RELAY_ATTEMPT_ID"] = str(body.get("attemptId") or "")
+    os.environ["RELAY_FENCE"] = str(body.get("fencingToken") or "0")
+    aid = str(body.get("accountId") or "")
+    SEM.acquire()
+    account_lock(aid).acquire()
+    ACTIVE += 1
     try:
-        out = subprocess.check_output(
-            [sys.executable, os.path.abspath(__file__), "--job", job.name],
-            stderr=subprocess.STDOUT,
-            timeout=timeout_s,
-            env=env,
-        )
-        line = out.decode("utf-8").strip().splitlines()[-1]
-        return json.loads(line)
-    except subprocess.CalledProcessError as e:
-        err = (e.output or b"").decode("utf-8", "replace")[-400:]
-        return {"ok": False, "error": err or str(e)}
-    except Exception as e:
-        return {"ok": False, "error": str(e)[:400]}
+        if body.get("platform") in ("gemini", "image") or body.get("kind") == "image":
+            return run_image(body)
+        return run_chat(body)
+    finally:
+        ACTIVE -= 1
+        account_lock(aid).release()
+        SEM.release()
 
 def run_image(body):
     prompt, images = extract_prompt_images(body)
@@ -405,15 +753,113 @@ def run_image(body):
         real = bool(names)
     except Exception:
         real = False
-    if TEST_URL or not real:
-        return make_image(prompt, images)
+    if os.environ.get("RELAY_ALLOW_MOCK") == "1":
+        img = make_image(prompt, images)
+        img["mode"] = "mock"
+        return img
+    if not real:
+        return {"ok": False, "error": "SESSION_INVALID: missing gemini cookies", "fault": "account"}
     from playwright.sync_api import sync_playwright
     proxy = job_proxy(body)
     if not proxy:
-        return make_image(prompt, images)
+        return {"ok": False, "error": "PROXY_UNAVAILABLE: job missing account-bound proxy", "fault": "proxy"}
     sel = body.get("selectors") or {}
-    inp = sel.get("input") or ["div.ql-editor", "div[contenteditable='true']", "rich-textarea"]
-    send = sel.get("send") or ["button[aria-label*='Send']", "button[aria-label*='发送']"]
+    inp = (sel.get("input") or ["div.ql-editor", "div[contenteditable='true']", "rich-textarea"])[:4]
+    send = (sel.get("send") or ["button[aria-label*='Send']", "button[aria-label*='发送']"])[:4]
+    pack_version = body.get("selectorPackVersion") or sel.get("version") or "gemini-v1"
+
+    def run_image_on(page, context):
+        page.goto("https://gemini.google.com/app", wait_until="domcontentloaded", timeout=45000)
+        time.sleep(1.2)
+        pst = detect_page_state(page, "gemini")
+        if pst in ("LOGIN_REQUIRED", "CHALLENGE", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
+            err, fault = page_state_error(pst, False)
+            return {"ok": False, "error": err, "fault": fault, "pageState": pst}
+        baseline = snapshot_image_srcs(page)
+        attach_images(page, images)
+        box, _ = pick_locator(page, inp, 4)
+        if box is None:
+            pst = detect_page_state(page, "gemini")
+            err, fault = page_state_error(pst, True)
+            return {"ok": False, "error": err, "fault": fault, "pageState": pst, "selectorPackVersion": pack_version, "fingerprint": page_fingerprint(page, sel)}
+        if body.get("kind") == "canary":
+            return {
+                "ok": True,
+                "url": "",
+                "text": "CANARY",
+                "pageState": detect_page_state(page, "gemini"),
+                "fingerprint": page_fingerprint(page, sel),
+                "selectorPackVersion": pack_version,
+            }
+        box.click()
+        box.fill(prompt)
+        btn, _ = pick_locator(page, send, 4)
+        try:
+            if btn:
+                btn.click()
+            else:
+                page.keyboard.press("Enter")
+        except Exception:
+            page.keyboard.press("Enter")
+        deadline = time.time() + int(body.get("timeoutMs") or 90000) / 1000
+        url = ""
+        box_info = None
+        while time.time() < deadline:
+            imgs = page.locator("img")
+            n = imgs.count()
+            for i in range(n):
+                el = imgs.nth(i)
+                src = el.get_attribute("src") or ""
+                try:
+                    box_info = el.bounding_box()
+                except Exception:
+                    box_info = None
+                if accept_result_image(src, baseline, box_info):
+                    url = src
+                    break
+            if url:
+                break
+            time.sleep(0.6)
+        if not url:
+            return {"ok": False, "error": "IMAGE_NOT_FOUND: no new result image", "fault": "provider", "pageState": detect_page_state(page, "gemini")}
+        if url.startswith("http"):
+            try:
+                resp = context.request.get(url, timeout=20000)
+                raw = resp.body()
+                mime = (resp.headers.get("content-type") or "image/png").split(";")[0]
+                if "svg" in mime:
+                    return {"ok": False, "error": "IMAGE_NOT_FOUND: svg placeholder rejected", "fault": "provider"}
+                if not raw or len(raw) < 2048:
+                    return {"ok": False, "error": "IMAGE_NOT_FOUND: image too small", "fault": "provider"}
+                url = "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode())
+            except Exception:
+                return {"ok": False, "error": "IMAGE_NOT_FOUND: download failed", "fault": "provider"}
+        if url.startswith("data:image/svg"):
+            return {"ok": False, "error": "IMAGE_NOT_FOUND: svg placeholder rejected", "fault": "provider"}
+        try:
+            state_out = context.storage_state()
+        except Exception:
+            state_out = None
+        return {
+            "ok": True,
+            "url": url,
+            "sessionState": state_out,
+            "sessionBaseVersion": int(body.get("sessionVersion") or 0),
+            "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
+            "selectorPackVersion": pack_version,
+            "pageState": "RESULT_READY",
+        }
+
+    if pool_enabled():
+        browser, context, _fresh = get_pooled_context(proxy, state, body.get("accountId"))
+        page = context.new_page()
+        try:
+            return run_image_on(page, context)
+        finally:
+            try:
+                page.close()
+            except Exception:
+                pass
     with sync_playwright() as p:
         browser = open_browser(p, proxy)
         context = browser.new_context(
@@ -423,47 +869,7 @@ def run_image(body):
         )
         page = context.new_page()
         try:
-            page.goto("https://gemini.google.com/app", wait_until="domcontentloaded", timeout=45000)
-            time.sleep(1.2)
-            attach_images(page, images)
-            box = None
-            for s in inp:
-                loc = page.locator(s).first
-                try:
-                    if loc.count() > 0 and loc.is_visible():
-                        box = loc
-                        break
-                except Exception:
-                    pass
-            if box is None:
-                return make_image(prompt, images)
-            box.click()
-            box.fill(prompt)
-            btn = page.locator(send[0]).first
-            try:
-                if btn.count() > 0:
-                    btn.click()
-                else:
-                    page.keyboard.press("Enter")
-            except Exception:
-                page.keyboard.press("Enter")
-            deadline = time.time() + int(body.get("timeoutMs") or 90000) / 1000
-            url = ""
-            while time.time() < deadline:
-                imgs = page.locator("img")
-                n = imgs.count()
-                for i in range(max(0, n - 6), n):
-                    src = imgs.nth(i).get_attribute("src") or ""
-                    if src.startswith("http") and "googleusercontent" in src:
-                        url = src
-                        break
-                    if src.startswith("data:image") and len(src) > 80:
-                        url = src
-                        break
-                if url:
-                    break
-                time.sleep(0.6)
-            return {"ok": True, "url": url} if url else make_image(prompt, images)
+            return run_image_on(page, context)
         finally:
             browser.close()
 
@@ -489,10 +895,20 @@ def poll_gateway():
     print("拉取网关任务", gw, flush=True)
     fail = 0
     while True:
+        if DRAINING and ACTIVE <= 0:
+            print("drain complete", flush=True)
+            break
         try:
             req = urllib.request.Request(
                 gw + "/api/worker/next",
-                headers={"Authorization": "Bearer " + token, "X-Worker-Name": os.environ.get("RELAY_WORKER_NAME") or "pc-1"},
+                headers={
+                    "Authorization": "Bearer " + token,
+                    "X-Worker-Name": os.environ.get("RELAY_WORKER_NAME") or "pc-1",
+                    "X-Worker-Capacity": str(CAPACITY),
+                    "X-Worker-Active": str(ACTIVE),
+                    "X-Worker-Browsers": str(ACTIVE),
+                    "X-Worker-Drain": "1" if DRAINING else "0",
+                },
             )
             with urllib.request.urlopen(req, timeout=20) as r:
                 data = json.loads(r.read().decode())
@@ -502,28 +918,51 @@ def poll_gateway():
                 time.sleep(1.2)
                 continue
             print("接到任务", job.get("id"), flush=True)
+            payload = {
+                "id": job.get("id"),
+                "accountId": job.get("accountId") or data.get("accountId"),
+                "prompt": job.get("prompt"),
+                "images": job.get("images") or [],
+                "storageState": data.get("storageState"),
+                "proxy": data.get("proxy"),
+                "timeoutMs": job.get("timeoutMs") or 90000,
+                "model": job.get("model"),
+                "sessionVersion": data.get("sessionVersion") or 0,
+                "selectors": data.get("selectors") or job.get("selectors"),
+                "selectorPackVersion": data.get("selectorPackVersion") or job.get("selectorPackVersion"),
+                "turns": data.get("turns") or job.get("turns") or [],
+                "kind": data.get("kind") or job.get("kind"),
+                "leaseId": (data.get("lease") or {}).get("leaseId") or job.get("leaseId"),
+                "fencingToken": (data.get("lease") or {}).get("fencingToken") or job.get("fencingToken"),
+                "attemptId": (data.get("lease") or {}).get("attemptId") or job.get("attemptId"),
+            }
             if job.get("platform") == "gemini":
-                result = exec_job({
-                    "platform": "gemini",
-                    "prompt": job.get("prompt"),
-                    "images": job.get("images") or [],
-                    "storageState": data.get("storageState"),
-                    "proxy": data.get("proxy"),
-                    "timeoutMs": job.get("timeoutMs") or 90000,
-                    "model": job.get("model") or "gemini-image",
-                })
+                payload["platform"] = "gemini"
+                payload["model"] = job.get("model") or "gemini-image"
             else:
-                result = exec_job({
-                    "prompt": job.get("prompt"),
-                    "images": job.get("images") or [],
-                    "storageState": data.get("storageState"),
-                    "proxy": data.get("proxy"),
-                    "timeoutMs": job.get("timeoutMs") or 90000,
-                    "model": job.get("model") or "gpt-5.6",
-                })
+                payload["model"] = job.get("model") or "gpt-5.6"
+            result = exec_job(payload)
             req2 = urllib.request.Request(
                 gw + "/api/worker/result",
-                data=json.dumps({"id": job.get("id"), "ok": result.get("ok"), "text": result.get("text"), "url": result.get("url"), "error": result.get("error")}, ensure_ascii=False).encode("utf-8"),
+                data=json.dumps({
+                    "id": job.get("id"),
+                    "ok": result.get("ok"),
+                    "text": result.get("text"),
+                    "url": result.get("url"),
+                    "error": result.get("error"),
+                    "fault": result.get("fault"),
+                    "leaseId": result.get("leaseId") or job.get("leaseId") or (data.get("lease") or {}).get("leaseId"),
+                    "fencingToken": result.get("fencingToken") if result.get("fencingToken") is not None else job.get("fencingToken") or (data.get("lease") or {}).get("fencingToken"),
+                    "attemptId": result.get("attemptId") or job.get("attemptId") or (data.get("lease") or {}).get("attemptId"),
+                    "workerId": os.environ.get("RELAY_WORKER_NAME") or "server-1",
+                    "sessionState": result.get("sessionState"),
+                    "sessionVersion": result.get("sessionVersion"),
+                    "sessionBaseVersion": result.get("sessionBaseVersion"),
+                    "modelActual": result.get("modelActual"),
+                    "pageState": result.get("pageState"),
+                    "fingerprint": result.get("fingerprint"),
+                    "selectorPackVersion": result.get("selectorPackVersion"),
+                }, ensure_ascii=False).encode("utf-8"),
                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
                 method="POST",
             )
@@ -540,6 +979,16 @@ class Server(ThreadingMixIn, HTTPServer):
     allow_reuse_address = True
 
 if __name__ == "__main__":
+    def _drain(signum, frame):
+        global DRAINING
+        DRAINING = True
+        print("SIGTERM drain", flush=True)
+    try:
+        import signal
+        signal.signal(signal.SIGTERM, _drain)
+        signal.signal(signal.SIGINT, _drain)
+    except Exception:
+        pass
     if len(sys.argv) > 2 and sys.argv[1] == "--job":
         with open(sys.argv[2], "r", encoding="utf-8") as f:
             payload = json.load(f)

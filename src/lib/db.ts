@@ -176,6 +176,11 @@ async function createSql(): Promise<Sql> {
         "or a server route loader, never from client code.",
     );
   }
+  const http = typeof process !== "undefined" ? process.env.RELAY_SQL_HTTP_URL?.trim() : "";
+  if (http && process.env.NODE_ENV !== "production") {
+    const { createHttpSql } = await import("./sql-http");
+    return createHttpSql(http);
+  }
   return dbSource === "neon" ? createNeonSql() : createPgliteSql();
 }
 
@@ -187,6 +192,14 @@ async function createSql(): Promise<Sql> {
  * both backends — define tables there, never inline in server functions.
  */
 export function getSql(): Promise<Sql> {
+  if (process.env.NODE_ENV === "production") {
+    const raw = typeof process !== "undefined" ? process.env.DATABASE_URL : undefined;
+    if (!raw || !raw.trim()) {
+      throw new Error(
+        "PRODUCTION_FAIL_CLOSED: DATABASE_URL is required; PGLite fallback is disabled in production",
+      );
+    }
+  }
   sqlPromise ??= createSql().catch((err) => {
     sqlPromise = null; // don't memoize failures — let the next call retry
     throw err;
@@ -229,7 +242,7 @@ export function ensureDbReady(): Promise<void> {
 const globalBoot = globalThis as typeof globalThis & {
   __pgBootstrapPromise__?: Promise<void>;
 };
-if (typeof window === "undefined" && dbSource === "pglite") {
+if (typeof window === "undefined" && dbSource === "pglite" && process.env.NODE_ENV !== "production") {
   globalBoot.__pgBootstrapPromise__ ??= ensureDbReady().catch((err) => {
     globalBoot.__pgBootstrapPromise__ = undefined;
     console.error("[db] PGLite bootstrap failed:", err);

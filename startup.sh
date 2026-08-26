@@ -19,8 +19,17 @@ if ! curl -sf -o /dev/null --max-time 2 http://127.0.0.1:8080/; then
   done
 fi
 node --experimental-strip-types --no-warnings scripts/bootstrap-runtime.mjs >/tmp/relay-api-key.txt
-TOKEN=$(cat /tmp/relay-api-key.txt | tail -n 1)
+WORKER_TOKEN=$(tr -d '\n' < /workspace/storage/worker-token.txt)
 fuser -k 18765/tcp >/dev/null 2>&1 || true
-RELAY_HEADLESS=1 RELAY_TEST_URL=self RELAY_WORKER_PORT=18765 \
-  RELAY_GATEWAY=http://127.0.0.1:8080 RELAY_TOKEN="$TOKEN" RELAY_WORKER_NAME=preview \
-  python3 /workspace/storage/worker.py >>/tmp/relay-worker.log 2>&1 &
+fuser -k 18766/tcp >/dev/null 2>&1 || true
+# Official daemon: worker credential only, never the customer API key.
+RELAY_HEADLESS=1 RELAY_WORKER_PORT=18766 RELAY_CAPACITY=3 \
+  RELAY_GATEWAY=http://127.0.0.1:8080 RELAY_TOKEN="$WORKER_TOKEN" RELAY_WORKER_NAME=server-1 \
+  python3 /workspace/storage/worker.py >>/tmp/relay-server-worker.log 2>&1 &
+echo $! > /workspace/storage/server-worker.pid
+echo 1 > /workspace/storage/server-worker.enabled
+if [ "${RELAY_DEMO_MODE:-}" = "true" ]; then
+  RELAY_HEADLESS=1 RELAY_TEST_URL=self RELAY_ALLOW_MOCK=1 RELAY_WORKER_PORT=18765 \
+    RELAY_GATEWAY=http://127.0.0.1:8080 RELAY_TOKEN="$WORKER_TOKEN" RELAY_WORKER_NAME=preview \
+    python3 /workspace/storage/worker.py >>/tmp/relay-worker.log 2>&1 &
+fi

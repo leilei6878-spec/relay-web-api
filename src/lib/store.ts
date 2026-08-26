@@ -14,7 +14,6 @@ import type {
 } from "./types";
 import { nowIso, uid } from "./utils";
 import { seedAccounts, seedLogs, seedProxies, seedWorkers } from "./seed";
-import { japanSsProxy } from "./proxy-link";
 
 type State = {
   accounts: Account[];
@@ -78,7 +77,7 @@ export const useGateway = create<State & Actions>()(
   persist(
     (set, get) => ({
       ...initial(),
-      hydrated: false,
+      hydrated: true,
       setHydrated: (v) => set({ hydrated: v }),
       addAccount: (data) => {
         const account: Account = {
@@ -320,25 +319,12 @@ export const useGateway = create<State & Actions>()(
     }),
     {
       name: "relay-gateway-v2",
-      partialize: (s) => ({
-        accounts: s.accounts,
-        proxies: s.proxies,
-        logs: s.logs,
-        workers: s.workers,
-        settings: s.settings,
-      }),
+      partialize: (s) => ({ logs: s.logs }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<State>;
-        return {
-          ...current,
-          ...p,
-          settings: { ...defaultSettings, ...(p.settings ?? {}) },
-        };
+        return { ...current, logs: p.logs ?? current.logs };
       },
       onRehydrateStorage: () => (state) => {
-        if (state && !state.proxies.some((p) => p.id === "px-jp-ss2022")) {
-          state.proxies = [japanSsProxy(), ...state.proxies];
-        }
         state?.setHydrated(true);
       },
     },

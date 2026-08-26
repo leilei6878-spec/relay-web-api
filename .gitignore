@@ -11,6 +11,19 @@ coverage/
 storage/
 !storage/.gitkeep
 
+# secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+secrets.json
+storage/sessions/
+storage/secrets.json
+storage/api-keys.json
+storage/admin-token.txt
+storage/worker-token.txt
 
 # binaries / local tools
 bin/

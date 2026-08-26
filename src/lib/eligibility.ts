@@ -16,7 +16,7 @@ export function eligibilityReason(
   settings: GatewaySettings,
   now = Date.now(),
 ): string | null {
-  if (account.status !== "healthy") return "状态不是健康";
+  if (account.status !== "healthy" && account.status !== "probing") return "状态不是健康";
   if (!account.sessionPath) return "没有 Session";
   if (isLocked(account, now)) return "账号占用中";
   if (settings.enforceProxy) {

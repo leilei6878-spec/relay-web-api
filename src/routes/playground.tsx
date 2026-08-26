@@ -74,11 +74,11 @@ function Playground() {
   }
 
   async function downloadWorker() {
-    const runtime = await fetch("/api/runtime").then(
-      (r) => r.json() as Promise<{ workerToken?: string; apiKey?: string }>,
+    const kit = await fetch("/api/admin/worker-kit", { credentials: "include" }).then(
+      (r) => r.json() as Promise<{ workerToken?: string; gateway?: string }>,
     );
-    const origin = window.location.origin;
-    const token = runtime.workerToken || runtime.apiKey || "";
+    const origin = kit.gateway || window.location.origin;
+    const token = kit.workerToken || "";
     const bat = `@echo off
 cd /d "%~dp0"
 set RELAY_GATEWAY=${origin}
@@ -107,7 +107,6 @@ pause
   }
 
   async function runViaApi(kind: "chat" | "image", promptText: string) {
-    const runtime = await fetch("/api/runtime").then((r) => r.json() as Promise<{ apiKey: string }>);
     const payload =
       kind === "chat"
         ? {
@@ -126,13 +125,14 @@ pause
             ],
           }
         : { prompt: promptText, ...(images[0] ? { image: images[0], images } : {}) };
-    const res = await fetch(kind === "chat" ? "/v1/chat/completions" : "/v1/images/generations", {
+    const res = await fetch("/api/admin/invoke", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${runtime.apiKey}`,
-      },
-      body: JSON.stringify(payload),
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path: kind === "chat" ? "/v1/chat/completions" : "/v1/images/generations",
+        payload,
+      }),
     });
     const body = (await res.json()) as {
       error?: { message?: string };

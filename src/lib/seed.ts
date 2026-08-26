@@ -1,12 +1,10 @@
 import type { Account, Proxy, RequestLog, WorkerNode } from "./types";
-import { japanSsProxy } from "./proxy-link";
 
 const t = (minsAgo: number) =>
   new Date(Date.now() - minsAgo * 60_000).toISOString();
 
 export function seedProxies(): Proxy[] {
   return [
-    japanSsProxy(),
     {
       id: "px-tokyo-a",
       name: "Tokyo sticky A",

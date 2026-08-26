@@ -10,7 +10,7 @@ import {
   TerminalSquare,
   Users,
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -62,11 +62,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   const proxies = useGateway((s) => s.proxies);
   const settings = useGateway((s) => s.settings);
   const [open, setOpen] = useState(false);
+  const planeSnap = useRef("");
 
   useEffect(() => {
     const unsub = useGateway.persist.onFinishHydration(() => setHydrated(true));
     if (useGateway.persist.hasHydrated()) setHydrated(true);
-    const fallback = setTimeout(() => setHydrated(true), 800);
+    const fallback = setTimeout(() => setHydrated(true), 50);
     return () => {
       unsub();
       clearTimeout(fallback);
@@ -80,8 +81,33 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!hydrated) return;
+    void fetch("/api/admin/session", { credentials: "include" })
+      .then(() => fetch("/api/admin/plane", { credentials: "include" }))
+      .then((r) => r.json())
+      .then((plane: { accounts?: typeof accounts; proxies?: typeof proxies; settings?: typeof settings }) => {
+        if (!plane.accounts) return;
+        useGateway.setState({
+          accounts: plane.accounts,
+          proxies: plane.proxies || [],
+          settings: { ...settings, ...(plane.settings || {}) },
+        });
+        planeSnap.current = JSON.stringify({
+          accounts: plane.accounts,
+          proxies: plane.proxies || [],
+          settings: { ...settings, ...(plane.settings || {}) },
+        });
+      })
+      .catch(() => undefined);
+  }, [hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const snap = JSON.stringify({ accounts, proxies, settings });
+    if (!planeSnap.current || snap === planeSnap.current) return;
     const t = setTimeout(() => {
-      void saveControlPlane({ data: { accounts, proxies, settings } });
+      void saveControlPlane({ data: { accounts, proxies, settings } }).then(() => {
+        planeSnap.current = snap;
+      });
     }, 400);
     return () => clearTimeout(t);
   }, [hydrated, accounts, proxies, settings]);

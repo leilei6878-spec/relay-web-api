@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { audit } from "./audit";
@@ -21,6 +22,10 @@ const FILE = resolve("storage", "api-keys.json");
 
 function mintKey() {
   return `sk-relay-${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
+}
+
+export function hashApiKey(token: string) {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 async function load(): Promise<Store> {
@@ -51,6 +56,9 @@ async function load(): Promise<Store> {
 async function save(store: Store) {
   await mkdir(resolve("storage"), { recursive: true });
   await writeFile(FILE, JSON.stringify(store, null, 2), { encoding: "utf8", mode: 0o600 });
+  if (process.env.RELAY_SKIP_DB === "1") return;
+  const { dbUpsertKey, safeDb } = await import("./relay-db");
+  await Promise.all(store.keys.map((k) => safeDb(() => dbUpsertKey(k, hashApiKey(k.key)))));
 }
 
 export async function listApiKeys() {
@@ -106,7 +114,8 @@ export async function patchApiKey(id: string, patch: Partial<Pick<ApiKeyRecord, 
 export async function findApiKey(token: string) {
   if (!token) return null;
   const keys = await listApiKeys();
-  return keys.find((k) => k.key === token) ?? null;
+  const hashed = hashApiKey(token);
+  return keys.find((k) => k.key === token || hashApiKey(k.key) === hashed) ?? null;
 }
 
 export function publicKey(row: ApiKeyRecord) {

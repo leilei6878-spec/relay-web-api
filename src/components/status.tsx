@@ -5,6 +5,7 @@ const accountMap: Record<AccountStatus, { label: string; tone: "ok" | "warn" | "
   healthy: { label: "健康", tone: "ok" },
   pending_login: { label: "待登录", tone: "info" },
   cooling: { label: "冷却", tone: "warn" },
+  probing: { label: "探活", tone: "info" },
   invalid: { label: "失效", tone: "danger" },
   banned: { label: "封禁", tone: "danger" },
 };

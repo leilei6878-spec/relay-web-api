@@ -1,11 +1,31 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { chatgptAdapter, geminiAdapter } from "@/lib/provider/index";
+
+function asModel(id: string, owned: string, caps: ReturnType<typeof chatgptAdapter.capabilities>, description: string) {
+  return {
+    id,
+    object: "model",
+    owned_by: owned,
+    description,
+    capabilities: {
+      chat: caps.chat,
+      vision: caps.vision,
+      image_generation: caps.imageGeneration,
+      image_edit: caps.imageEdit,
+      streaming: caps.streaming,
+      multi_turn: caps.multiTurn,
+    },
+  };
+}
+
+const chatgpt = chatgptAdapter.capabilities();
+const gemini = geminiAdapter.capabilities();
 
 const MODELS = [
-  { id: "gpt-5.6", object: "model", owned_by: "relay", description: "ChatGPT 最新，支持图片输入" },
-  { id: "gpt-5", object: "model", owned_by: "relay", description: "GPT-5 Auto，支持图片输入" },
-  { id: "gpt-5-thinking", object: "model", owned_by: "relay", description: "GPT-5 Thinking，支持图片输入" },
-  { id: "gpt-4o", object: "model", owned_by: "relay", description: "GPT-4o Vision" },
-  { id: "gemini-image", object: "model", owned_by: "relay", description: "Gemini 出图，支持参考图" },
+  ...chatgpt.models.map((id) =>
+    asModel(id, "relay-chatgpt", chatgpt, id === "gpt-4o" ? "GPT-4o Vision" : "ChatGPT web, vision + multi-turn"),
+  ),
+  asModel("gemini-image", "relay-gemini", gemini, "Gemini 出图 / 参考图编辑（mask 不支持）"),
 ];
 
 export const Route = createFileRoute("/v1/models")({

@@ -18,10 +18,15 @@ export async function audit(action: string, detail: string) {
   } catch {
     rows = [];
   }
-  rows.unshift({ id: uid(), at: new Date().toISOString(), action, detail });
+  const row: AuditRow = { id: uid(), at: new Date().toISOString(), action, detail };
+  rows.unshift(row);
   rows = rows.slice(0, 500);
   await mkdir(resolve("storage"), { recursive: true });
   await writeFile(FILE, JSON.stringify({ rows }), "utf8");
+  if (process.env.RELAY_SKIP_DB !== "1") {
+    const { dbInsertAudit, safeDb } = await import("./relay-db");
+    await safeDb(() => dbInsertAudit(row));
+  }
 }
 
 export async function listAudit(limit = 50) {

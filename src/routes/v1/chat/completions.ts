@@ -1,11 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertApiKey, pickAccount, readControlPlane } from "@/lib/control-plane";
-import { enqueueChat, liveWorkerOnline, waitJob } from "@/lib/job-queue";
-import { defaultPrompt, parseMessageContent } from "@/lib/media";
+import { getCircuit } from "@/lib/circuit";
+import { decide } from "@/lib/fault-matrix";
+import { enqueueChat, getJob, liveWorkerOnline, waitJob, cancelJob } from "@/lib/job-queue";
+import { subscribeJob } from "@/lib/job-events";
+import { parseMessageContent } from "@/lib/media";
+import { prepareChatRequest } from "@/lib/provider/index";
+import type { ChatTurn } from "@/lib/provider/types";
 import type { ApiKeyRecord } from "@/lib/api-keys";
+import { completeRequest, createRelayRequest } from "@/lib/requests";
+import { attachSseLifecycle, enqueueWithBackpressure, sseUsageChunk } from "@/lib/sse-runtime";
 import { fallbackChat, openPreviewChatStream } from "@/lib/upstream";
 import { appendUsage } from "@/lib/usage";
+import { estimateTokens } from "@/lib/tokens";
 import { uid } from "@/lib/utils";
+import { bootProductionGuard } from "@/lib/production-guard";
 
 type ChatBody = {
   messages?: { role?: string; content?: unknown }[];
@@ -20,14 +29,30 @@ type ChatOk = {
   text: string;
   accountEmail: string;
   mode: string;
+  requestId?: string;
+  traceId?: string;
+  attemptId?: string;
+  workerId?: string;
+  accountId?: string;
+  proxyId?: string;
 };
 type ChatFail = { ok: false; status: number; error: string };
+
+const ALLOWED = new Set(["messages", "model", "stream"]);
 
 export const Route = createFileRoute("/v1/chat/completions")({
   server: {
     handlers: {
       OPTIONS: async () => new Response(null, { status: 204, headers: cors() }),
       POST: async ({ request }) => {
+        try {
+          bootProductionGuard();
+        } catch (err) {
+          return Response.json(
+            { error: { message: err instanceof Error ? err.message : "fail-closed", type: "server_error" } },
+            { status: 503, headers: cors() },
+          );
+        }
         const auth = await assertApiKey(request, "chat");
         if (!auth.ok) {
           return Response.json({ error: { message: auth.error, type: "auth" } }, { status: auth.status, headers: cors() });
@@ -40,33 +65,39 @@ export const Route = createFileRoute("/v1/chat/completions")({
         }
         const last = [...(body.messages || [])].reverse().find((m) => m.role === "user");
         const parsed = parseMessageContent(last?.content);
-        const prompt = defaultPrompt("chat", parsed.text, parsed.images);
-        if (!prompt) {
+        const prepared = prepareChatRequest("chatgpt", {
+          messages: body.messages,
+          model: body.model || "gpt-5.6",
+          images: parsed.images,
+        });
+        const prompt = prepared.webPrompt;
+        if (!prompt && !prepared.images.length) {
           return Response.json({ error: { message: "缺少 user 消息或图片" } }, { status: 400, headers: cors() });
         }
-        const model = body.model || "gpt-5.6";
+        if (!prepared.turns.some((t) => t.role === "user") && !prepared.images.length) {
+          return Response.json({ error: { message: "缺少 user 消息" } }, { status: 400, headers: cors() });
+        }
+        const unsupported = Object.keys(body).filter((k) => !ALLOWED.has(k));
+        if (unsupported.length) {
+          return Response.json(
+            { error: { message: `unsupported parameter: ${unsupported.join(", ")}`, type: "invalid_request_error" } },
+            { status: 400, headers: cors() },
+          );
+        }
+        const model = prepared.model;
         const started = Date.now();
-        if (body.stream) return streamChat(prompt, model, parsed.images, auth.record);
-        const result = await runChat(prompt, model, parsed.images);
-        await appendUsage({
-          keyId: auth.record.id,
-          keyName: auth.record.name,
-          platform: "chatgpt",
-          model,
-          accountEmail: result.ok ? result.accountEmail : "",
-          ok: result.ok,
-          latencyMs: Date.now() - started,
-          images: parsed.images.length,
-          promptPreview: prompt.slice(0, 80),
-          error: result.ok ? undefined : result.error,
-          mode: result.ok ? result.mode : undefined,
-          jobId: result.ok ? result.id : undefined,
-        });
+        const idem = request.headers.get("idempotency-key") || undefined;
+        const requestId = request.headers.get("x-request-id") || uid();
+        if (body.stream) {
+          return streamChat(prompt, model, prepared.images, auth.record, idem, requestId, request.signal, prepared.turns, prepared.selectorPackVersion);
+        }
+        const result = await runChat(prompt, model, prepared.images, idem, requestId, auth.record.id, prepared.turns, prepared.selectorPackVersion);
+        await logUsage(auth.record, model, parsed, prompt, started, result);
         if (!result.ok) {
           return Response.json({ error: { message: result.error } }, { status: result.status, headers: cors() });
         }
         return Response.json(
-          completion(result.id, result.model, result.text, result.accountEmail, result.mode, parsed.images.length),
+          completion(result, parsed.images.length, estimateTokens(prompt), estimateTokens(result.text)),
           { headers: cors() },
         );
       },
@@ -74,176 +105,355 @@ export const Route = createFileRoute("/v1/chat/completions")({
   },
 });
 
-async function runChat(prompt: string, model: string, images: string[] = []): Promise<ChatOk | ChatFail> {
-  const account = await pickAccount("chatgpt");
-  if (!account) {
-    return { ok: false, status: 503, error: "没有可调度的健康 ChatGPT 账号（需已登录 Session + sticky）" };
-  }
-  const live = await liveWorkerOnline();
-  if (!live) {
-    const plane = await readControlPlane();
-    if (!plane.settings.allowPreviewFallback) {
-      return {
-        ok: false,
-        status: 503,
-        error: "没有在线的网页执行器。请在电脑上运行本机 Worker，才能返回 ChatGPT 原文。",
-      };
-    }
-    const fb = await fallbackChat(prompt, 60_000, images);
-    if (!fb.ok) return { ok: false, status: 502, error: fb.error };
-    return { ok: true, id: uid(), model, text: fb.text, accountEmail: account.email, mode: "preview" };
-  }
-  const queued = await enqueueChat(prompt, model, 90_000, images);
-  if (!queued.ok) return { ok: false, status: 503, error: queued.error };
-  const done = await waitJob(queued.job.id, queued.job.timeoutMs);
-  if (!done.ok) return { ok: false, status: 504, error: done.error };
-  const text = done.text || "";
-  if (text.startsWith("MOCK:")) {
-    return { ok: false, status: 502, error: "执行器仍是测试模式，没有返回模型原文" };
-  }
-  if (!text) return { ok: false, status: 504, error: "空回复" };
-  return {
-    ok: true,
-    id: queued.job.id,
-    model: queued.job.model,
-    text,
-    accountEmail: queued.job.accountEmail,
-    mode: "live",
-  };
+async function logUsage(
+  key: ApiKeyRecord,
+  model: string,
+  parsed: { images: string[] },
+  prompt: string,
+  started: number,
+  result: ChatOk | ChatFail,
+) {
+  await appendUsage({
+    keyId: key.id,
+    keyName: key.name,
+    platform: "chatgpt",
+    model,
+    accountEmail: result.ok ? result.accountEmail : "",
+    ok: result.ok,
+    latencyMs: Date.now() - started,
+    images: parsed.images.length,
+    promptPreview: prompt.slice(0, 80),
+    error: result.ok ? undefined : result.error,
+    mode: result.ok ? result.mode : undefined,
+    jobId: result.ok ? result.id : undefined,
+    requestId: result.ok ? result.requestId : undefined,
+    traceId: result.ok ? result.traceId : undefined,
+    attemptId: result.ok ? result.attemptId : undefined,
+    workerId: result.ok ? result.workerId : undefined,
+    accountId: result.ok ? result.accountId : undefined,
+    proxyId: result.ok ? result.proxyId : undefined,
+    promptTokens: estimateTokens(prompt),
+    completionTokens: result.ok ? estimateTokens(result.text) : 0,
+  });
 }
 
-function streamChat(prompt: string, model: string, images: string[], key: ApiKeyRecord) {
+export async function runChat(
+  prompt: string,
+  model: string,
+  images: string[] = [],
+  idempotencyKey?: string,
+  requestId?: string,
+  keyId?: string,
+  turns?: ChatTurn[],
+  selectorPackVersion?: string,
+): Promise<ChatOk | ChatFail> {
+  const plane = await readControlPlane();
+  const maxRetry = plane.settings.maxRetry || 3;
+  const exclude: string[] = [];
+  const live = await liveWorkerOnline();
+  const traceId = uid();
+  const created = await createRelayRequest({
+    id: requestId,
+    idempotencyKey,
+    keyId,
+    provider: "chatgpt",
+    model,
+  });
+  const reqId = created.request.id;
+  if (!live) {
+    if (!plane.settings.allowPreviewFallback) {
+      await completeRequest(reqId, { ok: false, finalError: "WORKER_DEAD: 没有在线的网页执行器" });
+      return { ok: false, status: 503, error: "WORKER_DEAD: 没有在线的网页执行器" };
+    }
+    const account = await pickAccount("chatgpt");
+    if (!account) {
+      await completeRequest(reqId, { ok: false, finalError: "没有可调度的健康 ChatGPT 账号" });
+      return { ok: false, status: 503, error: "没有可调度的健康 ChatGPT 账号" };
+    }
+    const fb = await fallbackChat(prompt, 60_000, images);
+    if (!fb.ok) {
+      await completeRequest(reqId, { ok: false, finalError: fb.error });
+      return { ok: false, status: 502, error: fb.error };
+    }
+    await completeRequest(reqId, { ok: true });
+    return {
+      ok: true,
+      id: reqId,
+      model,
+      text: fb.text,
+      accountEmail: account.email,
+      mode: "preview",
+      requestId: reqId,
+      traceId,
+      accountId: account.id,
+      proxyId: account.proxyId || undefined,
+    };
+  }
+  const circuit = await getCircuit("chatgpt");
+  if (circuit.state === "OPEN") {
+    const canary = await pickAccount("chatgpt");
+    if (!canary) {
+      await completeRequest(reqId, { ok: false, finalError: "PROVIDER_UNAVAILABLE: circuit OPEN, no canary" });
+      return { ok: false, status: 503, error: "PROVIDER_UNAVAILABLE: circuit OPEN, no canary" };
+    }
+  }
+  let last: ChatFail = { ok: false, status: 503, error: "没有可调度账号" };
+  for (let i = 0; i <= maxRetry; i++) {
+    const account = await pickAccount("chatgpt", exclude);
+    if (!account) break;
+    const queued = await enqueueChat(prompt, model, 90_000, images, {
+      idempotencyKey,
+      requestId: reqId,
+      traceId,
+      excludeAccountIds: exclude,
+      turns,
+      selectorPackVersion,
+    });
+    if (!queued.ok) {
+      last = { ok: false, status: 503, error: queued.error };
+      if (queued.error.includes("circuit OPEN")) break;
+      exclude.push(account.id);
+      continue;
+    }
+    const done = await waitJob(queued.job.id, queued.job.timeoutMs);
+    const fresh = (await getJob(queued.job.id)) || done.job || queued.job;
+    if (done.ok && done.text && !done.text.startsWith("MOCK:")) {
+      await completeRequest(reqId, { ok: true, finalAttemptId: fresh.attemptId });
+      return {
+        ok: true,
+        id: queued.job.id,
+        model: queued.job.model,
+        text: done.text,
+        accountEmail: queued.job.accountEmail,
+        mode: "live",
+        requestId: reqId,
+        traceId: queued.job.traceId,
+        attemptId: fresh.attemptId,
+        workerId: fresh.workerId,
+        accountId: fresh.accountId || undefined,
+        proxyId: fresh.proxyId,
+      };
+    }
+    const err = done.ok ? "执行器未返回模型原文" : done.error;
+    const decision = decide(err, fresh.fault);
+    last = { ok: false, status: 504, error: err };
+    if (!decision.switch_account) {
+      break;
+    }
+    exclude.push(account.id);
+  }
+  await completeRequest(reqId, { ok: false, finalError: last.error });
+  return last;
+}
+
+export function streamChat(
+  prompt: string,
+  model: string,
+  images: string[],
+  key: ApiKeyRecord,
+  idem?: string,
+  requestId?: string,
+  abortSignal?: AbortSignal,
+  turns?: ChatTurn[],
+  selectorPackVersion?: string,
+) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
-      const finish = () => controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      const send = async (obj: unknown) => {
+        await enqueueWithBackpressure(controller, encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      };
+      const finish = async () => {
+        await enqueueWithBackpressure(controller, encoder.encode("data: [DONE]\n\n"));
+      };
+      const started = Date.now();
+      const id = uid();
+      let jobId: string | undefined;
+      const life = attachSseLifecycle({
+        signal: abortSignal,
+        timeoutMs: 90_000,
+        onAbort: (reason) => {
+          if (jobId) void cancelJob(jobId, reason === "disconnect" ? "REQUEST_CANCELLED: disconnect" : `REQUEST_CANCELLED: ${reason}`);
+        },
+      });
       try {
-        const account = await pickAccount("chatgpt");
-        if (!account) {
-          send({ error: { message: "没有可调度的健康 ChatGPT 账号（需已登录 Session + sticky）" }, relay: { phase: "error" } });
-          finish();
-          return;
-        }
-        const id = uid();
-        send({
-          id: `chatcmpl-${id}`,
+        await send({
           object: "chat.completion.chunk",
           model,
           choices: [{ index: 0, delta: { role: "assistant" } }],
-          relay: { phase: "start", images: images.length, accountEmail: account.email },
+          relay: { phase: "start", images: images.length, requestId },
         });
+        const plane = await readControlPlane();
         const live = await liveWorkerOnline();
-        if (!live) {
-          const plane = await readControlPlane();
-          if (!plane.settings.allowPreviewFallback) {
-            const msg = "没有在线的网页执行器。请在电脑上运行本机 Worker，才能返回 ChatGPT 原文。";
-            send({ error: { message: msg }, relay: { phase: "error" } });
-            await appendUsage({
-              keyId: key.id,
-              keyName: key.name,
-              platform: "chatgpt",
-              model,
-              accountEmail: account.email,
-              ok: false,
-              latencyMs: 0,
-              images: images.length,
-              promptPreview: prompt.slice(0, 80),
-              error: msg,
-            });
-            finish();
-            return;
-          }
+        if (!live && !plane.settings.allowPreviewFallback) {
+          await send({ error: { message: "WORKER_DEAD: 没有在线的网页执行器" }, relay: { phase: "error" } });
+          await logUsage(key, model, { images }, prompt, started, { ok: false, status: 503, error: "WORKER_DEAD: 没有在线的网页执行器" });
+          await finish();
+          return;
+        }
+        if (!live && plane.settings.allowPreviewFallback) {
           const up = await openPreviewChatStream(prompt, images);
-          if (!up.ok) {
-            send({ error: { message: up.error }, relay: { phase: "error" } });
-            finish();
-            return;
-          }
-          const decoder = new TextDecoder();
-          const reader = up.body.getReader();
-          let buf = "";
-          while (true) {
-            const step = await reader.read();
-            if (step.done) break;
-            buf += decoder.decode(step.value, { stream: true });
-            const parts = buf.split("\n\n");
-            buf = parts.pop() || "";
-            for (const part of parts) {
-              const line = part.split("\n").find((l) => l.startsWith("data:"));
-              if (!line) continue;
-              const data = line.slice(5).trim();
-              if (!data || data === "[DONE]") continue;
-              try {
-                const json = JSON.parse(data) as { choices?: { delta?: { content?: string } }[] };
-                const content = json.choices?.[0]?.delta?.content;
-                if (content) {
-                  send({
-                    id: `chatcmpl-${id}`,
-                    object: "chat.completion.chunk",
-                    model,
-                    choices: [{ index: 0, delta: { content } }],
-                    relay: { phase: "streaming", accountEmail: account.email, mode: "preview", jobId: id },
-                  });
+          if (up.ok) {
+            const decoder = new TextDecoder();
+            const reader = up.body.getReader();
+            let buf = "";
+            let text = "";
+            while (true) {
+              if (life.aborted()) break;
+              const step = await reader.read();
+              if (step.done) break;
+              buf += decoder.decode(step.value, { stream: true });
+              const parts = buf.split("\n\n");
+              buf = parts.pop() || "";
+              for (const part of parts) {
+                const line = part.split("\n").find((l) => l.startsWith("data:"));
+                if (!line) continue;
+                const data = line.slice(5).trim();
+                if (!data || data === "[DONE]") continue;
+                try {
+                  const json = JSON.parse(data) as { choices?: { delta?: { content?: string } }[] };
+                  const content = json.choices?.[0]?.delta?.content;
+                  if (content) {
+                    text += content;
+                    await send({
+                      id: `chatcmpl-${id}`,
+                      object: "chat.completion.chunk",
+                      model,
+                      choices: [{ index: 0, delta: { content } }],
+                      relay: { phase: "streaming", mode: "preview" },
+                    });
+                  }
+                } catch {
+                  /* keep-alive */
                 }
-              } catch {
-                /* skip keep-alive */
               }
             }
+            await send({
+              id: `chatcmpl-${id}`,
+              object: "chat.completion.chunk",
+              model,
+              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+              relay: { phase: "done", mode: "preview" },
+            });
+            await send(sseUsageChunk(model, id, estimateTokens(prompt), estimateTokens(text)));
+            await logUsage(key, model, { images }, prompt, started, {
+              ok: true,
+              id,
+              model,
+              text,
+              accountEmail: "preview",
+              mode: "preview",
+              requestId,
+            });
+            await finish();
+            return;
           }
-          send({
-            id: `chatcmpl-${id}`,
-            object: "chat.completion.chunk",
-            model,
-            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-            relay: { phase: "done", accountEmail: account.email, mode: "preview", jobId: id, images: images.length },
-          });
-          finish();
-          return;
         }
-        const queued = await enqueueChat(prompt, model, 90_000, images);
+        const queued = await enqueueChat(prompt, model, 90_000, images, {
+          idempotencyKey: idem,
+          requestId,
+          turns,
+          selectorPackVersion,
+        });
         if (!queued.ok) {
-          send({ error: { message: queued.error }, relay: { phase: "error" } });
-          finish();
+          await send({ error: { message: queued.error }, relay: { phase: "error" } });
+          await logUsage(key, model, { images }, prompt, started, { ok: false, status: 503, error: queued.error });
+          await finish();
           return;
         }
-        send({
+        jobId = queued.job.id;
+        await send({
           id: `chatcmpl-${queued.job.id}`,
           object: "chat.completion.chunk",
           model,
           choices: [{ index: 0, delta: {} }],
-          relay: { phase: "waiting_worker", accountEmail: queued.job.accountEmail, jobId: queued.job.id },
+          relay: { phase: "waiting_worker", accountEmail: queued.job.accountEmail, jobId: queued.job.id, requestId },
         });
-        const result = await waitJob(queued.job.id, queued.job.timeoutMs);
-        if (!result.ok || !result.text || result.text.startsWith("MOCK:")) {
-          send({ error: { message: result.ok ? "执行器未返回模型原文" : result.error }, relay: { phase: "error" } });
-          finish();
+        let assembled = "";
+        await new Promise<void>((resolve) => {
+          const unsub = subscribeJob(queued.job.id, (ev) => {
+            if (ev.type === "delta" && ev.text) {
+              const chunk = ev.text.startsWith(assembled) ? ev.text.slice(assembled.length) : ev.text;
+              if (chunk) {
+                assembled += chunk;
+                void send({
+                  id: `chatcmpl-${queued.job.id}`,
+                  object: "chat.completion.chunk",
+                  model,
+                  choices: [{ index: 0, delta: { content: chunk } }],
+                  relay: { phase: "streaming", jobId: queued.job.id },
+                });
+              }
+            }
+            if (ev.type === "done" || ev.type === "error") {
+              unsub();
+              resolve();
+            }
+          });
+          void waitJob(queued.job.id, queued.job.timeoutMs).then(() => {
+            unsub();
+            resolve();
+          });
+        });
+        if (life.aborted()) {
+          await send({ error: { message: `REQUEST_CANCELLED: ${life.reason()}` }, relay: { phase: "error" } });
+          await logUsage(key, model, { images }, prompt, started, { ok: false, status: 499, error: `REQUEST_CANCELLED: ${life.reason()}` });
+          await finish();
           return;
         }
-        send({
+        const done = await getJob(queued.job.id);
+        const text = done?.text || assembled;
+        if (!done || done.status !== "done" || !text || text.startsWith("MOCK:")) {
+          const error = done?.error || "执行器未返回模型原文";
+          await send({ error: { message: error }, relay: { phase: "error" } });
+          await logUsage(key, model, { images }, prompt, started, { ok: false, status: 504, error });
+          await finish();
+          return;
+        }
+        if (!assembled) {
+          await send({
+            id: `chatcmpl-${queued.job.id}`,
+            object: "chat.completion.chunk",
+            model,
+            choices: [{ index: 0, delta: { content: text } }],
+          });
+        }
+        await send({
           id: `chatcmpl-${queued.job.id}`,
           object: "chat.completion.chunk",
           model,
-          choices: [{ index: 0, delta: { content: result.text } }],
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
           relay: {
             phase: "done",
             accountEmail: queued.job.accountEmail,
             mode: "live",
             jobId: queued.job.id,
-            images: images.length,
+            requestId: queued.job.requestId,
+            attemptId: done.attemptId,
+            workerId: done.workerId,
           },
         });
-        send({
-          id: `chatcmpl-${queued.job.id}`,
-          object: "chat.completion.chunk",
+        await send(sseUsageChunk(model, queued.job.id, estimateTokens(prompt), estimateTokens(text)));
+        await logUsage(key, model, { images }, prompt, started, {
+          ok: true,
+          id: queued.job.id,
           model,
-          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          text,
+          accountEmail: queued.job.accountEmail,
+          mode: "live",
+          requestId: queued.job.requestId,
+          traceId: queued.job.traceId,
+          attemptId: done.attemptId,
+          workerId: done.workerId,
+          accountId: done.accountId || undefined,
+          proxyId: done.proxyId,
         });
-        finish();
+        await finish();
       } catch (err) {
-        send({ error: { message: err instanceof Error ? err.message : "流式失败" }, relay: { phase: "error" } });
-        finish();
+        await send({ error: { message: err instanceof Error ? err.message : "流式失败" }, relay: { phase: "error" } });
+        await finish();
       } finally {
+        life.dispose();
         controller.close();
       }
     },
@@ -258,22 +468,37 @@ function streamChat(prompt: string, model: string, images: string[], key: ApiKey
   });
 }
 
-function completion(id: string, model: string, content: string, accountEmail: string, mode: string, imageCount = 0) {
+function completion(result: ChatOk, imageCount: number, promptTokens: number, completionTokens: number) {
   return {
-    id: `chatcmpl-${id}`,
+    id: `chatcmpl-${result.id}`,
     object: "chat.completion",
     created: Math.floor(Date.now() / 1000),
-    model,
-    choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
-    usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-    relay: { accountEmail, jobId: id, mode, images: imageCount },
+    model: result.model,
+    choices: [{ index: 0, message: { role: "assistant", content: result.text }, finish_reason: "stop" }],
+    usage: {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens,
+    },
+    relay: {
+      accountEmail: result.accountEmail,
+      jobId: result.id,
+      mode: result.mode,
+      images: imageCount,
+      requestId: result.requestId,
+      traceId: result.traceId,
+      attemptId: result.attemptId,
+      workerId: result.workerId,
+      accountId: result.accountId,
+      proxyId: result.proxyId,
+    },
   };
 }
 
 function cors() {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "authorization, content-type, x-api-key",
+    "Access-Control-Allow-Headers": "authorization, content-type, x-api-key, idempotency-key, x-request-id",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
   };
 }

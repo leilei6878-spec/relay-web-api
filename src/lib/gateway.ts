@@ -73,6 +73,9 @@ type SaveSessionInput = { accountId: string; json: string };
 export const saveSessionFile = createServerFn({ method: "POST" })
   .validator((input: SaveSessionInput) => input)
   .handler(async ({ data }) => {
+    const { assertAdminFromFn } = await import("./authz");
+    const auth = await assertAdminFromFn();
+    if (!auth.ok) return { ok: false as const, error: auth.error };
     const { writeSessionFile } = await import("./chatgpt-runner");
     return writeSessionFile(data.accountId, data.json);
   });
@@ -80,6 +83,9 @@ export const saveSessionFile = createServerFn({ method: "POST" })
 export const readSessionFile = createServerFn({ method: "POST" })
   .validator((input: { accountId: string }) => input)
   .handler(async ({ data }) => {
+    const { assertAdminFromFn } = await import("./authz");
+    const auth = await assertAdminFromFn();
+    if (!auth.ok) return { ok: false as const, error: auth.error };
     const { readSessionJson } = await import("./chatgpt-runner");
     return readSessionJson(data.accountId);
   });
@@ -87,6 +93,9 @@ export const readSessionFile = createServerFn({ method: "POST" })
 export const runChatgptWeb = createServerFn({ method: "POST" })
   .validator((input: ChatgptWebInput) => input)
   .handler(async ({ data }) => {
+    const { assertAdminFromFn } = await import("./authz");
+    const auth = await assertAdminFromFn();
+    if (!auth.ok) return { ok: false as const, error: auth.error };
     const { runChatgptJob } = await import("./chatgpt-runner");
     const result = await runChatgptJob(data);
     if (!result.ok) return { ok: false as const, error: result.error };
@@ -96,6 +105,9 @@ export const runChatgptWeb = createServerFn({ method: "POST" })
 export const probeProxy = createServerFn({ method: "POST" })
   .validator((input: ProbeProxyInput) => input)
   .handler(async ({ data }) => {
+    const { assertAdminFromFn } = await import("./authz");
+    const auth = await assertAdminFromFn();
+    if (!auth.ok) return { ok: false as const, error: auth.error };
     const { probeProxyJob } = await import("./chatgpt-runner");
     return probeProxyJob(data);
   });
@@ -103,16 +115,24 @@ export const probeProxy = createServerFn({ method: "POST" })
 export const saveControlPlane = createServerFn({ method: "POST" })
   .validator((input: { accounts: Account[]; proxies: Proxy[]; settings: GatewaySettings }) => input)
   .handler(async ({ data }) => {
+    const { assertAdminFromFn } = await import("./authz");
+    const auth = await assertAdminFromFn();
+    if (!auth.ok) return { ok: false as const, error: auth.error };
     const { writeControlPlane } = await import("./control-plane");
     return writeControlPlane(data);
   });
 
 export const getApiKey = createServerFn({ method: "GET" }).handler(async () => {
-  const { primaryApiKey } = await import("./api-keys");
-  return { apiKey: await primaryApiKey() };
+  const { assertAdminFromFn } = await import("./authz");
+  const auth = await assertAdminFromFn();
+  if (!auth.ok) return { apiKey: "", error: auth.error };
+  return { apiKey: "", admin: true as const };
 });
 
 export const listGatewayJobs = createServerFn({ method: "GET" }).handler(async () => {
+  const { assertAdminFromFn } = await import("./authz");
+  const auth = await assertAdminFromFn();
+  if (!auth.ok) return { jobs: [], workers: [] };
   const { listJobs } = await import("./job-queue");
   return listJobs();
 });

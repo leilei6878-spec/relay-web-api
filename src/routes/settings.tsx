@@ -4,7 +4,6 @@ import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
-import { getApiKey } from "@/lib/gateway";
 import { defaultSettings, useGateway } from "@/lib/store";
 import type { SelectorPack } from "@/lib/types";
 
@@ -172,21 +171,16 @@ function ApiKeyCard() {
   const [name, setName] = useState("调用方");
   const [limit, setLimit] = useState("0");
 
-  async function authHeader() {
-    const r = await getApiKey();
-    return { Authorization: `Bearer ${r.apiKey}`, "Content-Type": "application/json" };
-  }
-
   async function reload() {
-    const headers = await authHeader();
-    const res = await fetch("/api/keys", { headers });
+    const res = await fetch("/api/keys", { credentials: "include" });
     const body = (await res.json()) as { keys?: typeof keys };
     setKeys(body.keys || []);
     const first = body.keys?.find((k) => k.enabled) || body.keys?.[0];
     if (first) setApiKey(first.hint);
-    const runtime = await fetch("/api/runtime").then((r) => r.json() as Promise<{ workerToken?: string; apiKey?: string }>);
-    if (runtime.workerToken) setWorkerToken(runtime.workerToken);
-    if (runtime.apiKey) setApiKey(runtime.apiKey);
+    const kit = await fetch("/api/admin/worker-kit", { credentials: "include" }).then(
+      (r) => r.json() as Promise<{ workerToken?: string }>,
+    );
+    if (kit.workerToken) setWorkerToken(`${kit.workerToken.slice(0, 10)}…`);
   }
 
   useEffect(() => {
@@ -220,8 +214,12 @@ function ApiKeyCard() {
                 variant="secondary"
                 type="button"
                 onClick={() => {
-                  void navigator.clipboard.writeText(apiKey);
-                  toast.success("已复制当前可用密钥");
+                  if (!created) {
+                    toast.message("完整密钥只在新建时显示一次");
+                    return;
+                  }
+                  void navigator.clipboard.writeText(created);
+                  toast.success("已复制刚创建的密钥");
                 }}
               >
                 复制
@@ -231,13 +229,12 @@ function ApiKeyCard() {
                 variant="ghost"
                 type="button"
                 onClick={() => {
-                  void authHeader().then((headers) =>
-                    fetch("/api/keys", {
-                      method: "PATCH",
-                      headers,
-                      body: JSON.stringify({ id: k.id, enabled: !k.enabled }),
-                    }).then(() => reload()),
-                  );
+                  void fetch("/api/keys", {
+                    method: "PATCH",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ id: k.id, enabled: !k.enabled }),
+                  }).then(() => reload());
                 }}
               >
                 {k.enabled ? "停用" : "启用"}
@@ -253,22 +250,21 @@ function ApiKeyCard() {
           type="button"
           variant="secondary"
           onClick={() => {
-            void authHeader().then((headers) =>
-              fetch("/api/keys", {
-                method: "POST",
-                headers,
-                body: JSON.stringify({ name, dailyLimit: Number(limit) || 0 }),
-              })
-                .then((r) => r.json() as Promise<{ secret?: string }>)
-                .then((body) => {
-                  if (body.secret) {
-                    setCreated(body.secret);
-                    void navigator.clipboard.writeText(body.secret);
-                    toast.success("新密钥只显示一次，已复制");
-                  }
-                  void reload();
-                }),
-            );
+            void fetch("/api/keys", {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name, dailyLimit: Number(limit) || 0 }),
+            })
+              .then((r) => r.json() as Promise<{ secret?: string }>)
+              .then((body) => {
+                if (body.secret) {
+                  setCreated(body.secret);
+                  void navigator.clipboard.writeText(body.secret);
+                  toast.success("新密钥只显示一次，已复制");
+                }
+                void reload();
+              });
           }}
         >
           新建 Key

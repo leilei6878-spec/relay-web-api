@@ -105,10 +105,6 @@ function Console() {
       toast.error("请输入内容或添加图片");
       return;
     }
-    if (!apiKey.trim()) {
-      toast.error("请填写 API Key");
-      return;
-    }
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -125,15 +121,23 @@ function Console() {
     setRawReq(reqText);
     setRawRes("");
     try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        signal: ac.signal,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey.trim()}`,
-        },
-        body: JSON.stringify(body),
-      });
+      const res = apiKey.trim()
+        ? await fetch(endpoint, {
+            method: "POST",
+            signal: ac.signal,
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey.trim()}`,
+            },
+            body: JSON.stringify(body),
+          })
+        : await fetch("/api/admin/invoke", {
+            method: "POST",
+            signal: ac.signal,
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: endpoint, payload: body }),
+          });
       setStatus(res.status);
       const ctype = res.headers.get("content-type") || "";
       if (kind === "chat" && ctype.includes("text/event-stream")) {

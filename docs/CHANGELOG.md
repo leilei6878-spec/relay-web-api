@@ -1,0 +1,31 @@
+# Changelog
+
+## Production Resilience Campaign (2026-08-25)
+
+- Fail-closed: `RELAY_SECRETS_KEY`, `provider_config`, `bootProductionGuard` on chat + `/internal/readiness` (admin).
+- Postgres row-level claim/finish (`UPDATE … WHERE status='queued'`, fencing token in SQL). JSON is not a scheduling SoT.
+- Redis compare-and-renew (`EVAL` PEXPIRE). `REDIS_URL` set ⇒ no memory fallback (`RELAY_REQUIRE_REDIS`).
+- Two Gateway OS processes + shared SQL + Redis: chaos harness **18/18 PASS**.
+- Reliability 3 min: **1504/1504**, lost=0, duplicate_execution=0. 1h not completed in this turn.
+- Reports: `NIGHTLY_RESILIENCE_REPORT.md`, `DISTRIBUTED_CORRECTNESS.md`, `CHAOS_TEST_MATRIX.md`, `CHAOS_TEST_REPORT.md`, `RESTART_RECOVERY.md`, `RELIABILITY_METRICS.md`.
+
+## Production semantics (this pass)
+
+- Production fail-closed: DATABASE_URL, REDIS_URL, admin/worker secrets, object media, mock-mode forbidden. `GET /api/ready`.
+- PostgreSQL is the only production Source of Truth for scheduling. JSON limited to import/fixture/dev bootstrap.
+- Redis atomic job claim, lease compare-and-del, fencing `INCR`, idempotency `SET NX`. Dual-process tests against a RESP server.
+- Request is a first-class entity; failover creates Attempts, not a new client Request.
+- Formal failure matrix. PROVIDER_DOM_CHANGED trips the provider circuit and does not walk the account pool.
+- ChatGPT/Gemini circuit breaker + canary accounts.
+- MediaStore: Local (dev) vs S3-compatible object store (production).
+- SSE disconnect/cancel/timeout/usage/backpressure. Chaos suite + 8s soak recorded. 1h+ soak not run.
+
+## Commercial hardening
+
+- Isolated admin / customer / worker credentials. Runtime no longer returns secrets.
+- Job leases, fencing tokens, idempotency, dead-letter, `maxRetry`.
+- Same-request account failover. Cooling expires into probing then healthy.
+- Gemini: no SVG fake-success; images persisted under `/api/media`.
+- ChatGPT: job-bound proxy, exit-IP probe, model switch assert, session_version.
+- `/v1/responses`, multipart `/v1/images/edits`, unsupported-parameter 400s, non-zero token usage.
+- Server worker daemon in `startup.sh` using `wk-relay-` token.

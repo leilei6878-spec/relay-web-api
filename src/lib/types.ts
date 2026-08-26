@@ -1,5 +1,5 @@
 export type Platform = "chatgpt" | "gemini";
-export type AccountStatus = "pending_login" | "healthy" | "cooling" | "invalid" | "banned";
+export type AccountStatus = "pending_login" | "healthy" | "cooling" | "probing" | "invalid" | "banned";
 export type ProxyStatus = "active" | "disabled";
 export type ProxyType = "http" | "socks5" | "ss";
 export type LogStatus = "success" | "fail" | "switched";
@@ -22,6 +22,14 @@ export type Account = {
   sessionCookieCount?: number;
   sessionSavedAt?: string | null;
   sessionWarning?: string | null;
+  sessionVersion?: number;
+  canary?: boolean;
+  lastRefreshAt?: string | null;
+  lastValidatedAt?: string | null;
+  expiresHint?: number | null;
+  activeProbeAt?: string | null;
+  pageFingerprint?: string | null;
+  selectorPackVersion?: string | null;
 };
 
 export type Proxy = {

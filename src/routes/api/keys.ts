@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createApiKey, listApiKeys, patchApiKey, publicKey } from "@/lib/api-keys";
-import { assertApiKey } from "@/lib/control-plane";
+import { assertAdmin } from "@/lib/authz";
 import { usageToday } from "@/lib/usage";
 
 export const Route = createFileRoute("/api/keys")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const auth = await assertApiKey(request);
+        const auth = await assertAdmin(request);
         if (!auth.ok) return Response.json({ error: auth.error }, { status: 401 });
         const keys = await listApiKeys();
         const data = await Promise.all(
@@ -16,7 +16,7 @@ export const Route = createFileRoute("/api/keys")({
         return Response.json({ keys: data });
       },
       POST: async ({ request }) => {
-        const auth = await assertApiKey(request);
+        const auth = await assertAdmin(request);
         if (!auth.ok) return Response.json({ error: auth.error }, { status: 401 });
         const body = (await request.json().catch(() => ({}))) as {
           name?: string;
@@ -31,7 +31,7 @@ export const Route = createFileRoute("/api/keys")({
         return Response.json({ key: publicKey(row), secret: row.key });
       },
       PATCH: async ({ request }) => {
-        const auth = await assertApiKey(request);
+        const auth = await assertAdmin(request);
         if (!auth.ok) return Response.json({ error: auth.error }, { status: 401 });
         const body = (await request.json().catch(() => ({}))) as {
           id?: string;

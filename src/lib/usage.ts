@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { observeCall } from "./metrics";
 import { uid } from "./utils";
 
 export type UsageRow = {
@@ -17,6 +18,14 @@ export type UsageRow = {
   error?: string;
   mode?: string;
   jobId?: string;
+  requestId?: string;
+  traceId?: string;
+  attemptId?: string;
+  workerId?: string;
+  accountId?: string;
+  proxyId?: string;
+  promptTokens?: number;
+  completionTokens?: number;
 };
 
 const FILE = resolve("storage", "usage.json");
@@ -40,6 +49,11 @@ export async function appendUsage(row: Omit<UsageRow, "id" | "createdAt">) {
   store.rows.unshift(full);
   store.rows = store.rows.slice(0, 2000);
   await save(store);
+  observeCall({ latencyMs: full.latencyMs, ok: full.ok, platform: full.platform });
+  if (process.env.RELAY_SKIP_DB !== "1") {
+    const { dbInsertUsage, safeDb } = await import("./relay-db");
+    await safeDb(() => dbInsertUsage(full as unknown as Record<string, unknown>));
+  }
   return full;
 }
 

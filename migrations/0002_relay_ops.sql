@@ -1,0 +1,22 @@
+ALTER TABLE relay_accounts ADD COLUMN IF NOT EXISTS extra JSONB;
+ALTER TABLE relay_proxies ADD COLUMN IF NOT EXISTS extra JSONB;
+ALTER TABLE relay_jobs ADD COLUMN IF NOT EXISTS extra JSONB;
+ALTER TABLE relay_jobs ADD COLUMN IF NOT EXISTS images JSONB;
+ALTER TABLE relay_jobs ADD COLUMN IF NOT EXISTS exclude_ids JSONB;
+ALTER TABLE relay_usage ADD COLUMN IF NOT EXISTS extra JSONB;
+
+CREATE TABLE IF NOT EXISTS relay_workers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  last_beat TIMESTAMPTZ NOT NULL DEFAULT now(),
+  capacity INTEGER NOT NULL DEFAULT 1,
+  active_jobs INTEGER NOT NULL DEFAULT 0,
+  cpu REAL,
+  ram REAL,
+  browsers INTEGER NOT NULL DEFAULT 0,
+  draining BOOLEAN NOT NULL DEFAULT FALSE,
+  extra JSONB
+);
+
+CREATE INDEX IF NOT EXISTS relay_jobs_status_idx ON relay_jobs (status);
+CREATE INDEX IF NOT EXISTS relay_jobs_account_idx ON relay_jobs (account_id);

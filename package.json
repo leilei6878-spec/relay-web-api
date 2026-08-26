@@ -17,6 +17,9 @@
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
     "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts",
+    "test:relay": "RELAY_SKIP_DB=1 RELAY_TEST=1 node --experimental-strip-types --import ./scripts/register-ts-ext.mjs --test src/lib/*.test.ts src/lib/provider/*.test.ts",
+    "test:chaos": "node scripts/chaos-harness.mjs",
+    "test:reliability": "node scripts/reliability-run.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

@@ -18,10 +18,20 @@ import { Route as ProxiesRouteImport } from './routes/proxies'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ApiJobsRouteImport } from './routes/api/jobs'
 import { Route as ApiKeysRouteImport } from './routes/api/keys'
+import { Route as ApiReadyRouteImport } from './routes/api/ready'
 import { Route as ApiRuntimeRouteImport } from './routes/api/runtime'
 import { Route as ApiUsageRouteImport } from './routes/api/usage'
+import { Route as InternalReadinessRouteImport } from './routes/internal/readiness'
 import { Route as V1ModelsRouteImport } from './routes/v1/models'
+import { Route as V1ResponsesRouteImport } from './routes/v1/responses'
 import { Route as ApiAccountsProbeRouteImport } from './routes/api/accounts/probe'
+import { Route as ApiAdminInvokeRouteImport } from './routes/api/admin/invoke'
+import { Route as ApiAdminMetricsRouteImport } from './routes/api/admin/metrics'
+import { Route as ApiAdminPlaneRouteImport } from './routes/api/admin/plane'
+import { Route as ApiAdminSessionRouteImport } from './routes/api/admin/session'
+import { Route as ApiAdminWorkerKitRouteImport } from './routes/api/admin/worker-kit'
+import { Route as ApiMediaIdRouteImport } from './routes/api/media/$id'
+import { Route as ApiWorkerChunkRouteImport } from './routes/api/worker/chunk'
 import { Route as ApiWorkerControlRouteImport } from './routes/api/worker/control'
 import { Route as ApiWorkerNextRouteImport } from './routes/api/worker/next'
 import { Route as ApiWorkerResultRouteImport } from './routes/api/worker/result'
@@ -74,6 +84,11 @@ const ApiKeysRoute = ApiKeysRouteImport.update({
   path: '/api/keys',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiReadyRoute = ApiReadyRouteImport.update({
+  id: '/api/ready',
+  path: '/api/ready',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiRuntimeRoute = ApiRuntimeRouteImport.update({
   id: '/api/runtime',
   path: '/api/runtime',
@@ -84,14 +99,59 @@ const ApiUsageRoute = ApiUsageRouteImport.update({
   path: '/api/usage',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InternalReadinessRoute = InternalReadinessRouteImport.update({
+  id: '/internal/readiness',
+  path: '/internal/readiness',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const V1ModelsRoute = V1ModelsRouteImport.update({
   id: '/v1/models',
   path: '/v1/models',
   getParentRoute: () => rootRouteImport,
 } as any)
+const V1ResponsesRoute = V1ResponsesRouteImport.update({
+  id: '/v1/responses',
+  path: '/v1/responses',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAccountsProbeRoute = ApiAccountsProbeRouteImport.update({
   id: '/api/accounts/probe',
   path: '/api/accounts/probe',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminInvokeRoute = ApiAdminInvokeRouteImport.update({
+  id: '/api/admin/invoke',
+  path: '/api/admin/invoke',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminMetricsRoute = ApiAdminMetricsRouteImport.update({
+  id: '/api/admin/metrics',
+  path: '/api/admin/metrics',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminPlaneRoute = ApiAdminPlaneRouteImport.update({
+  id: '/api/admin/plane',
+  path: '/api/admin/plane',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminSessionRoute = ApiAdminSessionRouteImport.update({
+  id: '/api/admin/session',
+  path: '/api/admin/session',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminWorkerKitRoute = ApiAdminWorkerKitRouteImport.update({
+  id: '/api/admin/worker-kit',
+  path: '/api/admin/worker-kit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMediaIdRoute = ApiMediaIdRouteImport.update({
+  id: '/api/media/$id',
+  path: '/api/media/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiWorkerChunkRoute = ApiWorkerChunkRouteImport.update({
+  id: '/api/worker/chunk',
+  path: '/api/worker/chunk',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiWorkerControlRoute = ApiWorkerControlRouteImport.update({
@@ -135,10 +195,20 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/api/jobs': typeof ApiJobsRoute
   '/api/keys': typeof ApiKeysRoute
+  '/api/ready': typeof ApiReadyRoute
   '/api/runtime': typeof ApiRuntimeRoute
   '/api/usage': typeof ApiUsageRoute
+  '/internal/readiness': typeof InternalReadinessRoute
   '/v1/models': typeof V1ModelsRoute
+  '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/admin/invoke': typeof ApiAdminInvokeRoute
+  '/api/admin/metrics': typeof ApiAdminMetricsRoute
+  '/api/admin/plane': typeof ApiAdminPlaneRoute
+  '/api/admin/session': typeof ApiAdminSessionRoute
+  '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
+  '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
   '/api/worker/next': typeof ApiWorkerNextRoute
   '/api/worker/result': typeof ApiWorkerResultRoute
@@ -156,10 +226,20 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/api/jobs': typeof ApiJobsRoute
   '/api/keys': typeof ApiKeysRoute
+  '/api/ready': typeof ApiReadyRoute
   '/api/runtime': typeof ApiRuntimeRoute
   '/api/usage': typeof ApiUsageRoute
+  '/internal/readiness': typeof InternalReadinessRoute
   '/v1/models': typeof V1ModelsRoute
+  '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/admin/invoke': typeof ApiAdminInvokeRoute
+  '/api/admin/metrics': typeof ApiAdminMetricsRoute
+  '/api/admin/plane': typeof ApiAdminPlaneRoute
+  '/api/admin/session': typeof ApiAdminSessionRoute
+  '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
+  '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
   '/api/worker/next': typeof ApiWorkerNextRoute
   '/api/worker/result': typeof ApiWorkerResultRoute
@@ -178,10 +258,20 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/api/jobs': typeof ApiJobsRoute
   '/api/keys': typeof ApiKeysRoute
+  '/api/ready': typeof ApiReadyRoute
   '/api/runtime': typeof ApiRuntimeRoute
   '/api/usage': typeof ApiUsageRoute
+  '/internal/readiness': typeof InternalReadinessRoute
   '/v1/models': typeof V1ModelsRoute
+  '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/admin/invoke': typeof ApiAdminInvokeRoute
+  '/api/admin/metrics': typeof ApiAdminMetricsRoute
+  '/api/admin/plane': typeof ApiAdminPlaneRoute
+  '/api/admin/session': typeof ApiAdminSessionRoute
+  '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
+  '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
   '/api/worker/next': typeof ApiWorkerNextRoute
   '/api/worker/result': typeof ApiWorkerResultRoute
@@ -201,10 +291,20 @@ export interface FileRouteTypes {
     | '/settings'
     | '/api/jobs'
     | '/api/keys'
+    | '/api/ready'
     | '/api/runtime'
     | '/api/usage'
+    | '/internal/readiness'
     | '/v1/models'
+    | '/v1/responses'
     | '/api/accounts/probe'
+    | '/api/admin/invoke'
+    | '/api/admin/metrics'
+    | '/api/admin/plane'
+    | '/api/admin/session'
+    | '/api/admin/worker-kit'
+    | '/api/media/$id'
+    | '/api/worker/chunk'
     | '/api/worker/control'
     | '/api/worker/next'
     | '/api/worker/result'
@@ -222,10 +322,20 @@ export interface FileRouteTypes {
     | '/settings'
     | '/api/jobs'
     | '/api/keys'
+    | '/api/ready'
     | '/api/runtime'
     | '/api/usage'
+    | '/internal/readiness'
     | '/v1/models'
+    | '/v1/responses'
     | '/api/accounts/probe'
+    | '/api/admin/invoke'
+    | '/api/admin/metrics'
+    | '/api/admin/plane'
+    | '/api/admin/session'
+    | '/api/admin/worker-kit'
+    | '/api/media/$id'
+    | '/api/worker/chunk'
     | '/api/worker/control'
     | '/api/worker/next'
     | '/api/worker/result'
@@ -243,10 +353,20 @@ export interface FileRouteTypes {
     | '/settings'
     | '/api/jobs'
     | '/api/keys'
+    | '/api/ready'
     | '/api/runtime'
     | '/api/usage'
+    | '/internal/readiness'
     | '/v1/models'
+    | '/v1/responses'
     | '/api/accounts/probe'
+    | '/api/admin/invoke'
+    | '/api/admin/metrics'
+    | '/api/admin/plane'
+    | '/api/admin/session'
+    | '/api/admin/worker-kit'
+    | '/api/media/$id'
+    | '/api/worker/chunk'
     | '/api/worker/control'
     | '/api/worker/next'
     | '/api/worker/result'
@@ -265,10 +385,20 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   ApiJobsRoute: typeof ApiJobsRoute
   ApiKeysRoute: typeof ApiKeysRoute
+  ApiReadyRoute: typeof ApiReadyRoute
   ApiRuntimeRoute: typeof ApiRuntimeRoute
   ApiUsageRoute: typeof ApiUsageRoute
+  InternalReadinessRoute: typeof InternalReadinessRoute
   V1ModelsRoute: typeof V1ModelsRoute
+  V1ResponsesRoute: typeof V1ResponsesRoute
   ApiAccountsProbeRoute: typeof ApiAccountsProbeRoute
+  ApiAdminInvokeRoute: typeof ApiAdminInvokeRoute
+  ApiAdminMetricsRoute: typeof ApiAdminMetricsRoute
+  ApiAdminPlaneRoute: typeof ApiAdminPlaneRoute
+  ApiAdminSessionRoute: typeof ApiAdminSessionRoute
+  ApiAdminWorkerKitRoute: typeof ApiAdminWorkerKitRoute
+  ApiMediaIdRoute: typeof ApiMediaIdRoute
+  ApiWorkerChunkRoute: typeof ApiWorkerChunkRoute
   ApiWorkerControlRoute: typeof ApiWorkerControlRoute
   ApiWorkerNextRoute: typeof ApiWorkerNextRoute
   ApiWorkerResultRoute: typeof ApiWorkerResultRoute
@@ -342,6 +472,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiKeysRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/ready': {
+      id: '/api/ready'
+      path: '/api/ready'
+      fullPath: '/api/ready'
+      preLoaderRoute: typeof ApiReadyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/runtime': {
       id: '/api/runtime'
       path: '/api/runtime'
@@ -356,6 +493,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiUsageRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/internal/readiness': {
+      id: '/internal/readiness'
+      path: '/internal/readiness'
+      fullPath: '/internal/readiness'
+      preLoaderRoute: typeof InternalReadinessRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/v1/models': {
       id: '/v1/models'
       path: '/v1/models'
@@ -363,11 +507,67 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof V1ModelsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/v1/responses': {
+      id: '/v1/responses'
+      path: '/v1/responses'
+      fullPath: '/v1/responses'
+      preLoaderRoute: typeof V1ResponsesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/accounts/probe': {
       id: '/api/accounts/probe'
       path: '/api/accounts/probe'
       fullPath: '/api/accounts/probe'
       preLoaderRoute: typeof ApiAccountsProbeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/invoke': {
+      id: '/api/admin/invoke'
+      path: '/api/admin/invoke'
+      fullPath: '/api/admin/invoke'
+      preLoaderRoute: typeof ApiAdminInvokeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/metrics': {
+      id: '/api/admin/metrics'
+      path: '/api/admin/metrics'
+      fullPath: '/api/admin/metrics'
+      preLoaderRoute: typeof ApiAdminMetricsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/plane': {
+      id: '/api/admin/plane'
+      path: '/api/admin/plane'
+      fullPath: '/api/admin/plane'
+      preLoaderRoute: typeof ApiAdminPlaneRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/session': {
+      id: '/api/admin/session'
+      path: '/api/admin/session'
+      fullPath: '/api/admin/session'
+      preLoaderRoute: typeof ApiAdminSessionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/worker-kit': {
+      id: '/api/admin/worker-kit'
+      path: '/api/admin/worker-kit'
+      fullPath: '/api/admin/worker-kit'
+      preLoaderRoute: typeof ApiAdminWorkerKitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/media/$id': {
+      id: '/api/media/$id'
+      path: '/api/media/$id'
+      fullPath: '/api/media/$id'
+      preLoaderRoute: typeof ApiMediaIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/worker/chunk': {
+      id: '/api/worker/chunk'
+      path: '/api/worker/chunk'
+      fullPath: '/api/worker/chunk'
+      preLoaderRoute: typeof ApiWorkerChunkRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/worker/control': {
@@ -425,10 +625,20 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   ApiJobsRoute: ApiJobsRoute,
   ApiKeysRoute: ApiKeysRoute,
+  ApiReadyRoute: ApiReadyRoute,
   ApiRuntimeRoute: ApiRuntimeRoute,
   ApiUsageRoute: ApiUsageRoute,
+  InternalReadinessRoute: InternalReadinessRoute,
   V1ModelsRoute: V1ModelsRoute,
+  V1ResponsesRoute: V1ResponsesRoute,
   ApiAccountsProbeRoute: ApiAccountsProbeRoute,
+  ApiAdminInvokeRoute: ApiAdminInvokeRoute,
+  ApiAdminMetricsRoute: ApiAdminMetricsRoute,
+  ApiAdminPlaneRoute: ApiAdminPlaneRoute,
+  ApiAdminSessionRoute: ApiAdminSessionRoute,
+  ApiAdminWorkerKitRoute: ApiAdminWorkerKitRoute,
+  ApiMediaIdRoute: ApiMediaIdRoute,
+  ApiWorkerChunkRoute: ApiWorkerChunkRoute,
   ApiWorkerControlRoute: ApiWorkerControlRoute,
   ApiWorkerNextRoute: ApiWorkerNextRoute,
   ApiWorkerResultRoute: ApiWorkerResultRoute,

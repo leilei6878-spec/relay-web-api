@@ -1,0 +1,26 @@
+# Soak Test Report
+
+Harness: `node scripts/soak.mjs`
+
+**Do not read this as a 48h soak.** Longer windows were not run in this session.
+
+| Gate | How | Status | Data |
+|---|---|---|---|
+| 8s smoke (this pass) | `RELAY_SOAK_MS=8000` against `http://127.0.0.1:8080` | **PASS** | 30/30, successRate 1, p50 19ms, p95 31ms, p99 59ms, 2026-08-25T17:11:30Z |
+| 60s smoke | `RELAY_SOAK=smoke` | harness ready, **not re-run this pass** | — |
+| 1h | `RELAY_SOAK=1h` | **NOT RUN** | — |
+| 12h | `RELAY_SOAK=12h` | **NOT RUN** | — |
+| 24h | `RELAY_SOAK=24h` | **NOT RUN** | — |
+| 48h | `RELAY_SOAK=48h` | **NOT RUN** | — |
+
+Because 1h was not run, the sequence **must not** advance to 12h/24h/48h.
+
+Pass bar for a round: success rate ≥ 95%, **and** no lost request, **and** no duplicate execution (those last two are asserted in chaos tests, not in `soak.mjs` which currently hits admin session/runtime/metrics/invoke).
+
+Live ChatGPT/Gemini quality, browser crash rate, and RAM growth over hours are out of scope of the 8s smoke.
+
+## Browser pool baseline
+
+Collected from worker beats (`src/lib/browser-baseline.ts`): `browser_start_latency`, `browser_crash_rate`, `RAM_per_request`, `CPU_per_request`.
+
+No data in this pass proved browser startup is the bottleneck. **No resident browser-pool refactor was done.**

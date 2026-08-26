@@ -105,36 +105,6 @@ export function singBoxConfig(proxy: Pick<Proxy, "host" | "port" | "password" | 
   };
 }
 
-export function japanSsProxy(): Proxy {
-  const parsed = parseShareLink(
-    "ss://MjAyMi1ibGFrZTMtYWVzLTEyOC1nY206SjNkN1JjTnBnV3hjMEMwWWp0MmdCdmUybFVLOTNaWTV1VGRLa2hoMTV0az0@38.175.201.137:8443#Japan-BGP-SS2022",
-  );
-  if (!parsed.ok) {
-    return {
-      id: "px-jp-ss2022",
-      name: "Japan-BGP-SS2022",
-      type: "ss",
-      host: "38.175.201.137",
-      port: 8443,
-      username: "",
-      stickySessionId: "japan-bgp-ss2022",
-      region: "JP",
-      status: "active",
-      maxAccounts: 8,
-      remark: "导入失败",
-      createdAt: nowIso(),
-    };
-  }
-  return {
-    id: "px-jp-ss2022",
-    createdAt: nowIso(),
-    ...parsed.data,
-    name: "Japan-BGP-SS2022",
-    region: "JP",
-    stickySessionId: "japan-bgp-ss2022",
-  };
-}
-
 export function newProxyFromLink(data: ParsedShareLink): Proxy {
   return { ...data, id: uid(), createdAt: nowIso() };
 }
