@@ -1,5 +1,14 @@
 # Changelog
 
+## Leonardo Image Generator (2026-08-26)
+
+- Third provider `leonardo` with logical models `leonardo-gpt-image-2` and `leonardo-gemini`.
+- Default backend `web_account`. Official API adapter exists but is not production.
+- Scheduler skips TOKEN_EXHAUSTED and known-missing models. DOM faults trip the Leonardo circuit.
+- Recon: public home selectors only; logged-in generation **BLOCKED_NO_SESSION**.
+
+# Changelog
+
 ## Production Resilience Campaign (2026-08-25)
 
 - Fail-closed: `RELAY_SECRETS_KEY`, `provider_config`, `bootProductionGuard` on chat + `/internal/readiness` (admin).

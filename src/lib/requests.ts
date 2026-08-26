@@ -9,7 +9,7 @@ export type RelayRequest = {
   idempotencyKey?: string;
   tenantId?: string;
   keyId?: string;
-  provider: "chatgpt" | "gemini";
+  provider: "chatgpt" | "gemini" | "leonardo";
   model: string;
   createdAt: string;
   startedAt?: string;
@@ -62,7 +62,7 @@ export async function createRelayRequest(input: {
   idempotencyKey?: string;
   tenantId?: string;
   keyId?: string;
-  provider: "chatgpt" | "gemini";
+  provider: "chatgpt" | "gemini" | "leonardo";
   model: string;
 }): Promise<{ request: RelayRequest; replay: boolean }> {
   if (pgSotActive()) {

@@ -58,3 +58,17 @@ test("LOGIN_REQUIRED is session, CHALLENGE is not, DOM miss does not pollute poo
 test("normalizeError maps unconfirmed model", () => {
   assert.equal(normalizeError("MODEL_SELECTION_UNCONFIRMED: empty switcher"), "MODEL_SELECTION_UNCONFIRMED");
 });
+
+test("LEONARDO_DOM_CHANGED does not switch accounts or bump health", () => {
+  const d = decide("LEONARDO_DOM_CHANGED: composer missing");
+  assert.equal(d.code, "LEONARDO_DOM_CHANGED");
+  assert.equal(d.switch_account, false);
+  assert.equal(d.account_health_effect, "none");
+  assert.equal(d.provider_circuit_effect, "trip");
+});
+
+test("LEONARDO_TOKEN_EXHAUSTED switches account", () => {
+  const d = decide("LEONARDO_TOKEN_EXHAUSTED");
+  assert.equal(d.switch_account, true);
+  assert.equal(d.account_health_effect, "cool");
+});

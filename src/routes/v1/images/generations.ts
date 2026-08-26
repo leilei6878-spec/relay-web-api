@@ -2,14 +2,15 @@ import { createFileRoute } from "@tanstack/react-router";
 import { assertApiKey, pickAccount, readControlPlane } from "@/lib/control-plane";
 import { decide } from "@/lib/fault-matrix";
 import { enqueueImage, getJob, liveWorkerOnline, waitJob } from "@/lib/job-queue";
-import { defaultPrompt, parseImageRequest } from "@/lib/media";
+import { defaultPrompt, MAX_IMAGES_LEONARDO, parseImageRequest } from "@/lib/media";
 import { completeRequest, createRelayRequest } from "@/lib/requests";
 import { fallbackImage } from "@/lib/upstream";
 import { appendUsage } from "@/lib/usage";
 import { estimateTokens } from "@/lib/tokens";
 import { uid } from "@/lib/utils";
+import { isLeonardoModel, mapLogicalModel, validateLeonardoParams } from "@/lib/provider/leonardo-models";
 
-const ALLOWED = new Set(["prompt", "model", "image", "image_url", "images"]);
+const ALLOWED = new Set(["prompt", "model", "image", "image_url", "images", "n", "size", "quality", "width", "height"]);
 
 export const Route = createFileRoute("/v1/images/generations")({
   server: {
@@ -42,17 +43,44 @@ async function parseBody(request: Request) {
     for (const key of ["image", "image_url"]) await addFile(form.get(key));
     for (const item of form.getAll("images")) await addFile(item);
     for (const [key] of form.entries()) {
-      if (!["prompt", "model", "image", "image_url", "images", "mask"].includes(key)) {
+      if (!["prompt", "model", "image", "image_url", "images", "mask", "n", "size", "quality", "width", "height"].includes(key)) {
         extra.push(key);
       }
     }
-    return { prompt, model, images, extra };
+    return {
+      prompt,
+      model,
+      images,
+      extra,
+      n: Number(form.get("n") || 1),
+      size: String(form.get("size") || "") || undefined,
+      quality: String(form.get("quality") || "") || undefined,
+      width: form.get("width") ? Number(form.get("width")) : undefined,
+      height: form.get("height") ? Number(form.get("height")) : undefined,
+    };
   }
   const body = (await request.json()) as Record<string, unknown>;
-  const parsed = parseImageRequest(body);
+  const parsed = parseImageRequest(body, {
+    maxImages: isLeonardoModel(String(body.model || "")) ? MAX_IMAGES_LEONARDO : 4,
+  });
   const extra = Object.keys(body).filter((k) => !ALLOWED.has(k));
   if (body.mask) extra.push("mask");
-  return { prompt: parsed.prompt, model: String(body.model || ""), images: parsed.images, extra };
+  const width = typeof body.width === "number" ? body.width : undefined;
+  const height = typeof body.height === "number" ? body.height : undefined;
+  const size =
+    (typeof body.size === "string" && body.size) ||
+    (width && height ? `${width}x${height}` : undefined);
+  return {
+    prompt: parsed.prompt,
+    model: String(body.model || ""),
+    images: parsed.images,
+    extra,
+    n: typeof body.n === "number" ? body.n : Number(body.n || 1),
+    size,
+    quality: typeof body.quality === "string" ? body.quality : undefined,
+    width,
+    height,
+  };
 }
 
 export async function handleImage(request: Request, kind: "image" | "edit" = "image") {
@@ -61,7 +89,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
   if (!auth.ok) {
     return Response.json({ error: { message: auth.error } }, { status: auth.status, headers: cors() });
   }
-  let parsed: { prompt: string; model: string; images: string[]; extra: string[] };
+  let parsed: Awaited<ReturnType<typeof parseBody>>;
   try {
     parsed = await parseBody(request);
   } catch {
@@ -90,13 +118,33 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     return Response.json({ error: { message: "缺少 prompt 或参考图" } }, { status: 400, headers: cors() });
   }
   const model = parsed.model || "gemini-image";
+  const platform = isLeonardoModel(model) ? "leonardo" : "gemini";
+  let n = 1;
+  let size = "1024x1024";
+  let quality = "MEDIUM";
+  if (platform === "leonardo") {
+    const mapped = mapLogicalModel(model);
+    const gate = validateLeonardoParams({
+      n: parsed.n,
+      size: parsed.size,
+      quality: parsed.quality,
+      images: parsed.images,
+      logical: mapped.logical,
+    });
+    if (!gate.ok) {
+      return Response.json({ error: { message: gate.error, type: "invalid_request_error" } }, { status: 400, headers: cors() });
+    }
+    n = gate.n;
+    size = gate.size;
+    quality = gate.quality;
+  }
   const requestId = request.headers.get("x-request-id") || uid();
   const idem = request.headers.get("idempotency-key") || undefined;
   const created = await createRelayRequest({
     id: requestId,
     idempotencyKey: idem,
     keyId: auth.record.id,
-    provider: "gemini",
+    provider: platform,
     model,
   });
   const reqId = created.request.id;
@@ -116,7 +164,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     appendUsage({
       keyId: auth.record.id,
       keyName: auth.record.name,
-      platform: "gemini",
+      platform,
       model,
       accountEmail: row.accountEmail || "",
       ok: row.ok,
@@ -124,7 +172,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
       images: parsed.images.length,
       promptPreview: prompt.slice(0, 80),
       error: row.error,
-      mode: row.mode,
+      mode: row.mode || (platform === "leonardo" ? "web_account" : row.mode),
       jobId: row.jobId,
       requestId: reqId,
       attemptId: row.attemptId,
@@ -136,13 +184,16 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     });
 
   if (!live) {
-    if (!plane.settings.allowPreviewFallback) {
-      const error = "WORKER_DEAD: 没有在线的网页执行器";
+    if (!plane.settings.allowPreviewFallback || platform === "leonardo") {
+      const error =
+        platform === "leonardo"
+          ? "WORKER_DEAD: Leonardo web_account 禁止预览假图"
+          : "WORKER_DEAD: 没有在线的网页执行器";
       await completeRequest(reqId, { ok: false, finalError: error });
       await log({ ok: false, error });
       return Response.json({ error: { message: error } }, { status: 503, headers: cors() });
     }
-    const account = await pickAccount("gemini");
+    const account = await pickAccount(platform, [], { model });
     const fb = await fallbackImage(prompt, 90_000, parsed.images);
     if (!fb.ok) {
       await completeRequest(reqId, { ok: false, finalError: fb.error });
@@ -157,16 +208,19 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
   }
   const exclude: string[] = [];
   const maxRetry = plane.settings.maxRetry || 3;
-  let last = "没有可调度的健康 Gemini 账号（需 Session + sticky）";
+  let last = platform === "leonardo" ? "没有可调度的健康 Leonardo 账号（需 Session + sticky）" : "没有可调度的健康 Gemini 账号（需 Session + sticky）";
   for (let i = 0; i <= maxRetry; i++) {
-    const account = await pickAccount("gemini", exclude);
+    const account = await pickAccount(platform, exclude, { model });
     if (!account) break;
     const queued = await enqueueImage(prompt, model, 90_000, parsed.images, {
       idempotencyKey: idem,
       requestId: reqId,
       excludeAccountIds: exclude,
       kind: kind === "edit" ? "edit" : "image",
-      selectorPackVersion: "gemini-v1",
+      selectorPackVersion: platform === "leonardo" ? "leonardo-image-v1" : "gemini-v1",
+      n,
+      size,
+      quality,
     });
     if (!queued.ok) {
       last = queued.error;
@@ -181,7 +235,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
       await log({
         ok: true,
         accountEmail: queued.job.accountEmail,
-        mode: "live",
+        mode: platform === "leonardo" ? "web_account" : "live",
         jobId: queued.job.id,
         attemptId: fresh.attemptId,
         workerId: fresh.workerId,
@@ -189,7 +243,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
         proxyId: fresh.proxyId,
       });
       return Response.json(
-        imagePayload(done.url, queued.job.accountEmail, queued.job.id, parsed.images.length, "live", reqId, fresh),
+        imagePayload(done.url, queued.job.accountEmail, queued.job.id, parsed.images.length, platform === "leonardo" ? "web_account" : "live", reqId, fresh),
         { headers: cors() },
       );
     }
@@ -227,6 +281,7 @@ function imagePayload(
       accountId: extra?.accountId,
       proxyId: extra?.proxyId,
       traceId: extra?.traceId,
+      backend_mode: mode === "web_account" ? "web_account" : undefined,
     },
   };
 }

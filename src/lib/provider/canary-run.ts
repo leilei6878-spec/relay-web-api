@@ -39,7 +39,7 @@ export async function enqueueProviderCanary(provider: ProviderId) {
     kind: "canary",
   });
   const queued =
-    provider === "gemini"
+    provider === "gemini" || provider === "leonardo"
       ? await enqueueImage(prepared.webPrompt, prepared.model, 45_000, [], {
           kind: "canary",
           selectorPackVersion: prepared.selectorPackVersion,

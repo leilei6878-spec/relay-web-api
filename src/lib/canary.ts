@@ -21,7 +21,7 @@ export type CanaryProbe = {
 };
 
 export function canaryStepsFor(provider: ProviderId): CanaryStep[] {
-  if (provider === "gemini") return [...CANARY_STEPS];
+  if (provider === "gemini" || provider === "leonardo") return [...CANARY_STEPS];
   return CANARY_STEPS.filter((s) => s !== "image_generation_path");
 }
 

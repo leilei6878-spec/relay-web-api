@@ -20,6 +20,16 @@ export const SELECTOR_PACKS: Record<string, VersionedSelectorPack> = {
     modelSwitcher: ['[data-testid="model-switcher-dropdown-button"]'],
     fileInput: ["input[type=file]"],
   },
+  "leonardo-image-v1": {
+    version: "leonardo-image-v1",
+    input: ["#home-prompt-textarea", "textarea[placeholder*='prompt' i]", "textarea[placeholder*='Prompt']"],
+    send: ['button[aria-label="Generate"]', 'button:has-text("Generate")'],
+    assistant: [],
+    streamingStop: [],
+    modelSwitcher: ['button[aria-label^="Model:"]', '[data-slot="dropdown-menu-trigger"][aria-label^="Model"]'],
+    fileInput: ['input[type=file]', 'button[aria-label="Add image reference"]'],
+    imageResult: ["img[src*='leonardo']", "img[src*='cdn']", "img[src^='https://']"],
+  },
   "gemini-v1": {
     version: "gemini-v1",
     input: ["div.ql-editor", "rich-textarea", "div[contenteditable='true']"],
@@ -34,6 +44,7 @@ export const SELECTOR_PACKS: Record<string, VersionedSelectorPack> = {
 export const CURRENT_PACK: Record<ProviderId, string> = {
   chatgpt: "chatgpt-v1",
   gemini: "gemini-v1",
+  leonardo: "leonardo-image-v1",
 };
 
 export function packFor(provider: ProviderId, version?: string): VersionedSelectorPack {

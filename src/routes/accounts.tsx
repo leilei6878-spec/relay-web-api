@@ -122,7 +122,7 @@ function AccountsView() {
         <li>
           <p className="font-medium text-fg">2. 在你电脑登录</p>
           <p className="mt-1 text-xs leading-relaxed text-subtle">
-            点「登录」下载登录包，双击 run.bat，在弹出的窗口里登 ChatGPT。
+            点「登录」下载登录包，双击 run.bat，在弹出的窗口里登对应平台（ChatGPT / Gemini / Leonardo）。
           </p>
         </li>
         <li>
@@ -148,6 +148,7 @@ function AccountsView() {
             <SelectItem value="all">全部平台</SelectItem>
             <SelectItem value="chatgpt">ChatGPT</SelectItem>
             <SelectItem value="gemini">Gemini</SelectItem>
+            <SelectItem value="leonardo">Leonardo</SelectItem>
           </SelectContent>
         </Select>
         <Select value={status} onValueChange={(v) => setStatus(v as typeof status)}>
@@ -226,6 +227,12 @@ function AccountsView() {
                   <p className="text-[11px] text-subtle">{a.remark || "无备注"}</p>
                   {a.sessionWarning && <p className="text-[11px] text-warn">{a.sessionWarning}</p>}
                   {a.lastError && <p className="text-[11px] text-danger">{a.lastError}</p>}
+                  {a.platform === "leonardo" && a.tokenState && (
+                    <p className="text-[11px] text-subtle">Token {a.tokenState}</p>
+                  )}
+                  {a.platform === "leonardo" && a.availableModels?.length ? (
+                    <p className="text-[11px] text-subtle">模型 {a.availableModels.slice(0, 4).join(" · ")}</p>
+                  ) : null}
                   {a.sessionCookieCount ? (
                     <p className="text-[11px] text-subtle">已登记 {a.sessionCookieCount} 枚 Cookie</p>
                   ) : null}
@@ -359,6 +366,7 @@ function AddDialog() {
               <SelectContent>
                 <SelectItem value="chatgpt">ChatGPT · LLM / Vision</SelectItem>
                 <SelectItem value="gemini">Gemini · Image</SelectItem>
+                <SelectItem value="leonardo">Leonardo · Image</SelectItem>
               </SelectContent>
             </Select>
           </Field>
@@ -395,7 +403,7 @@ function AddDialog() {
 function ImportDialog() {
   const importAccounts = useGateway((s) => s.importAccounts);
   const [open, setOpen] = useState(false);
-  const [text, setText] = useState("chatgpt,new.one@mail.test,批次A\ngemini,new.two@mail.test,批次A");
+  const [text, setText] = useState("chatgpt,new.one@mail.test,批次A\ngemini,new.two@mail.test,批次A\nleonardo,new.three@mail.test,批次A");
 
   function submit() {
     const rows = text
@@ -404,7 +412,7 @@ function ImportDialog() {
       .filter(Boolean)
       .map((line) => {
         const [p, email, remark] = line.split(",").map((s) => s.trim());
-        const platform: Platform = p === "gemini" ? "gemini" : "chatgpt";
+        const platform: Platform = p === "gemini" ? "gemini" : p === "leonardo" ? "leonardo" : "chatgpt";
         return { platform, email: email ?? "", remark };
       });
     const n = importAccounts(rows);
@@ -444,7 +452,7 @@ function LoginDialog({ account }: { account: Account }) {
   const bound = Boolean(account.proxyId);
   const activeProxies = proxies.filter((p) => p.status === "active");
   const proxy = proxies.find((p) => p.id === account.proxyId) ?? null;
-  const site = account.platform === "gemini" ? "Gemini" : "ChatGPT";
+  const site = account.platform === "gemini" ? "Gemini" : account.platform === "leonardo" ? "Leonardo" : "ChatGPT";
 
   function bind() {
     setError("");

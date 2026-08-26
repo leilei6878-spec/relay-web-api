@@ -1,9 +1,11 @@
 import { chatgptAdapter } from "./chatgpt";
 import { geminiAdapter } from "./gemini";
+import { leonardoAdapter } from "./leonardo";
 import type { ProviderAdapter, ProviderId } from "./types";
 
 export { chatgptAdapter } from "./chatgpt";
 export { geminiAdapter } from "./gemini";
+export { leonardoAdapter } from "./leonardo";
 export { detectPageState, errorForPageState } from "./page-state";
 export { prepareChatRequest, toWebPrompt, turnsFromMessages } from "./prompt-map";
 export { packFor, selectorCandidates, CURRENT_PACK } from "./selectors";
@@ -15,6 +17,7 @@ export type { ProviderAdapter, ProviderId, PageState, ChatTurn, PreparedRequest 
 const ADAPTERS: Record<ProviderId, ProviderAdapter> = {
   chatgpt: chatgptAdapter,
   gemini: geminiAdapter,
+  leonardo: leonardoAdapter,
 };
 
 export function getAdapter(id: ProviderId): ProviderAdapter {

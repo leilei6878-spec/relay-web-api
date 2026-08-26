@@ -24,7 +24,9 @@ export function parseStorageState(raw: string): { ok: true; data: ParsedSession 
 }
 
 export function loginUrl(platform: Platform) {
-  return platform === "gemini" ? "https://gemini.google.com/app" : "https://chatgpt.com";
+  if (platform === "gemini") return "https://gemini.google.com/app";
+  if (platform === "leonardo") return "https://app.leonardo.ai/";
+  return "https://chatgpt.com";
 }
 
 export function proxyServer(proxy: {
@@ -43,14 +45,20 @@ export function proxyServer(proxy: {
 
 export function loginHelperScript(account: Account, proxy: Proxy, password: string) {
   const url =
-    account.platform === "gemini" ? "https://gemini.google.com/app" : "https://chatgpt.com/auth/login";
+    account.platform === "gemini"
+      ? "https://gemini.google.com/app"
+      : account.platform === "leonardo"
+        ? "https://app.leonardo.ai/"
+        : "https://chatgpt.com/auth/login";
   const pw = password || proxy.password || "";
   const email = JSON.stringify(account.email);
   const node = JSON.stringify(`${proxy.name} ${proxy.host}:${proxy.port}`);
   const readySel =
     account.platform === "gemini"
       ? "div.ql-editor, rich-textarea, div[contenteditable='true']"
-      : "#prompt-textarea, textarea#prompt-textarea, [data-testid='send-button']";
+      : account.platform === "leonardo"
+        ? "#home-prompt-textarea, button[aria-label='Generate']"
+        : "#prompt-textarea, textarea#prompt-textarea, [data-testid='send-button']";
 
   const waitSave = `
 HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()

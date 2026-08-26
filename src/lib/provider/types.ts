@@ -1,4 +1,4 @@
-export type ProviderId = "chatgpt" | "gemini";
+export type ProviderId = "chatgpt" | "gemini" | "leonardo";
 
 export type PageState =
   | "AUTHENTICATED"
@@ -10,7 +10,16 @@ export type PageState =
   | "GENERATING"
   | "RESULT_READY"
   | "PROVIDER_ERROR"
-  | "DOM_UNKNOWN";
+  | "DOM_UNKNOWN"
+  | "IMAGE_GENERATOR_READY"
+  | "MODEL_SELECTOR_READY"
+  | "TOKEN_EXHAUSTED"
+  | "QUEUE_FULL"
+  | "GENERATION_PENDING"
+  | "GENERATION_RUNNING"
+  | "GENERATION_COMPLETE"
+  | "GENERATION_FAILED"
+  | "MODEL_UNAVAILABLE";
 
 export type ChatRole = "system" | "user" | "assistant";
 
@@ -121,7 +130,7 @@ export type ProviderAdapter = {
   }): PreparedRequest;
   normalizeError(error?: string, pageState?: PageState): NormalizedProviderError;
   verifyModel(requested: string, actual?: string): ModelVerdict;
-  extractResult(raw: { text?: string; url?: string; ok?: boolean; error?: string; mode?: string }): ExtractedResult;
+  extractResult(raw: { text?: string; url?: string; ok?: boolean; error?: string; mode?: string; actualModel?: string }): ExtractedResult;
   fingerprint(features: DomFeature[], packVersion: string): Fingerprint;
-  healthCheck(): { provider: ProviderId };
+  healthCheck(): { provider: ProviderId; backend_mode?: string };
 };

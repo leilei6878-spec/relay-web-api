@@ -8,7 +8,7 @@ export type UsageRow = {
   createdAt: string;
   keyId: string;
   keyName: string;
-  platform: "chatgpt" | "gemini";
+  platform: "chatgpt" | "gemini" | "leonardo";
   model: string;
   accountEmail: string;
   ok: boolean;

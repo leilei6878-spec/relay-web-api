@@ -31,6 +31,12 @@ const CHAT_MODELS = [
   { id: "gpt-4o", label: "GPT-4o" },
 ];
 
+const IMAGE_MODELS = [
+  { id: "gemini-image", label: "Gemini / 出图" },
+  { id: "leonardo-gpt-image-2", label: "Leonardo / GPT Image 2" },
+  { id: "leonardo-gemini", label: "Leonardo / Gemini" },
+];
+
 function Playground() {
   const [mode, setMode] = useState<"chat" | "image">("chat");
   const [prompt, setPrompt] = useState("用三句话说明为什么账号必须绑定 sticky IP。");
@@ -43,6 +49,7 @@ function Playground() {
   const [forceFailFirst, setForceFailFirst] = useState(false);
   const [liveWeb, setLiveWeb] = useState(true);
   const [chatModel, setChatModel] = useState("gpt-5.6");
+  const [imageModel, setImageModel] = useState("gemini-image");
   const [switched, setSwitched] = useState(0);
   const [workerOn, setWorkerOn] = useState<boolean | null>(null);
   const [replySource, setReplySource] = useState("");
@@ -124,7 +131,7 @@ pause
               },
             ],
           }
-        : { prompt: promptText, ...(images[0] ? { image: images[0], images } : {}) };
+        : { prompt: promptText, model: imageModel, ...(images[0] ? { image: images[0], images } : {}) };
     const res = await fetch("/api/admin/invoke", {
       method: "POST",
       credentials: "include",
@@ -187,7 +194,7 @@ pause
   }
 
   async function send() {
-    const platform: Platform = mode === "chat" ? "chatgpt" : "gemini";
+    const platform: Platform = mode === "chat" ? "chatgpt" : imageModel.startsWith("leonardo-") ? "leonardo" : "gemini";
     const promptText =
       prompt.trim() || (images.length ? (mode === "chat" ? "请描述这张图片" : "根据参考图生成一张新图") : "");
     if (!promptText) {
@@ -202,7 +209,7 @@ pause
     setSwitched(0);
     setSteps([]);
     const started = performance.now();
-    const model = mode === "chat" ? chatModel : "gemini-image";
+    const model = mode === "chat" ? chatModel : imageModel;
 
     try {
       if (forceFailFirst) {
@@ -290,7 +297,8 @@ pause
           <ImageInput
             images={images}
             onChange={setImages}
-            hint={mode === "chat" ? "对话识图" : "出图参考图"}
+            hint={mode === "chat" ? "对话识图" : imageModel.startsWith("leonardo-") ? "Leonardo 参考图最多 6 张" : "出图参考图"}
+            max={mode === "image" && imageModel.startsWith("leonardo-") ? 6 : 4}
           />
         </div>
         {mode === "chat" && (
@@ -302,6 +310,22 @@ pause
               onChange={(e) => setChatModel(e.target.value)}
             >
               {CHAT_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {mode === "image" && (
+          <label className="mt-3 block text-sm">
+            <span className="mb-1 block text-xs text-muted">模型</span>
+            <select
+              className="h-11 w-full rounded-sm border border-border bg-elevated px-3 text-sm"
+              value={imageModel}
+              onChange={(e) => setImageModel(e.target.value)}
+            >
+              {IMAGE_MODELS.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
                 </option>

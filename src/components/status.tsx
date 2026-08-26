@@ -36,10 +36,8 @@ export function LogStatusBadge({ status }: { status: LogStatus }) {
   return <Badge tone={m.tone}>{m.label}</Badge>;
 }
 
-export function PlatformBadge({ platform }: { platform: "chatgpt" | "gemini" }) {
-  return (
-    <Badge tone={platform === "chatgpt" ? "info" : "accent"}>
-      {platform === "chatgpt" ? "ChatGPT" : "Gemini"}
-    </Badge>
-  );
+export function PlatformBadge({ platform }: { platform: "chatgpt" | "gemini" | "leonardo" }) {
+  const label = platform === "chatgpt" ? "ChatGPT" : platform === "gemini" ? "Gemini" : "Leonardo";
+  const tone = platform === "chatgpt" ? "info" : platform === "gemini" ? "accent" : "warn";
+  return <Badge tone={tone}>{label}</Badge>;
 }

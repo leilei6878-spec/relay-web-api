@@ -26,6 +26,10 @@ export const Route = createFileRoute("/api/worker/result")({
           pageState?: string;
           fingerprint?: unknown;
           selectorPackVersion?: string;
+          availableModels?: string[];
+          tokenState?: string;
+          backendMode?: "web_account" | "official_api";
+          queueDepth?: number;
         };
         if (!body.id) return Response.json({ error: "缺少任务 id" }, { status: 400 });
         return Response.json(
@@ -45,6 +49,10 @@ export const Route = createFileRoute("/api/worker/result")({
             modelActual: body.modelActual,
             pageState: body.pageState,
             selectorPackVersion: body.selectorPackVersion,
+            availableModels: body.availableModels,
+            tokenState: body.tokenState,
+            backendMode: body.backendMode,
+            queueDepth: body.queueDepth,
           }),
         );
       },

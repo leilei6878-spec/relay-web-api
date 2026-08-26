@@ -1,3 +1,4 @@
+import { accountHasLeonardoModel } from "./provider/leonardo-models";
 import type { Account, GatewaySettings, Platform, Proxy } from "./types";
 
 export function isLocked(account: Account, now = Date.now()) {
@@ -15,6 +16,7 @@ export function eligibilityReason(
   proxies: Proxy[],
   settings: GatewaySettings,
   now = Date.now(),
+  requestedModel?: string,
 ): string | null {
   if (account.status !== "healthy" && account.status !== "probing") return "状态不是健康";
   if (!account.sessionPath) return "没有 Session";
@@ -23,6 +25,10 @@ export function eligibilityReason(
     const p = proxyOf(account, proxies);
     if (!p) return "未绑定 sticky 代理";
     if (p.status !== "active") return "代理已停用";
+  }
+  if (account.tokenState === "TOKEN_EXHAUSTED") return "额度用尽";
+  if (requestedModel && account.platform === "leonardo" && !accountHasLeonardoModel(account, requestedModel)) {
+    return `模型不可用（${requestedModel}）`;
   }
   return null;
 }
@@ -34,13 +40,14 @@ export function listEligible(
   platform: Platform,
   excludeIds: string[] = [],
   now = Date.now(),
+  requestedModel?: string,
 ) {
   return accounts
     .filter(
       (a) =>
         a.platform === platform &&
         !excludeIds.includes(a.id) &&
-        !eligibilityReason(a, proxies, settings, now),
+        !eligibilityReason(a, proxies, settings, now, requestedModel),
     )
     .sort((a, b) => (a.lastUsedAt ?? "").localeCompare(b.lastUsedAt ?? ""));
 }
@@ -55,14 +62,15 @@ export function poolUnavailableMessage(
   proxies: Proxy[],
   settings: GatewaySettings,
   extra: Record<string, string> = {},
+  requestedModel?: string,
 ) {
-  const label = platform === "gemini" ? "Gemini" : "ChatGPT";
+  const label = platform === "gemini" ? "Gemini" : platform === "leonardo" ? "Leonardo" : "ChatGPT";
   const mine = accounts.filter((a) => a.platform === platform);
   if (!mine.length) {
     return `没有可调度的健康 ${label} 账号：账号池是空的，请先添加并完成登录`;
   }
   const lines = mine.map((a) => {
-    const why = extra[a.id] || eligibilityReason(a, proxies, settings) || "可调度";
+    const why = extra[a.id] || eligibilityReason(a, proxies, settings, Date.now(), requestedModel) || "可调度";
     return `${a.email}（${why}）`;
   });
   return `没有可调度的健康 ${label} 账号。当前：${lines.join("；")}`;
@@ -80,5 +88,11 @@ export const defaultSelectors = {
     send: ["button[aria-label*='Send']"],
     assistant: ["model-response"],
     streamingStop: ["button[aria-label*='Stop']"],
+  },
+  leonardo: {
+    input: ["#home-prompt-textarea", "textarea[placeholder*='prompt' i]"],
+    send: ['button[aria-label="Generate"]'],
+    assistant: [],
+    streamingStop: [],
   },
 };

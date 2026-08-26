@@ -7,6 +7,7 @@ Worker  --wk-relay-*--------->  Gateway (/api/worker/*)
 Gateway --SQL-------------->  PostgreSQL (SoT)
 Gateway --SET NX/EVAL------>  Redis (claim, lease, fencing, idempotency, limiter)
 Worker  --Playwright------->  ChatGPT / Gemini (account-bound proxy)
+Worker  --Playwright------->  Leonardo Image Generator (account-bound proxy)
 Worker  --image bytes------>  Gateway --> MediaStore (S3/R2/MinIO)
 ```
 

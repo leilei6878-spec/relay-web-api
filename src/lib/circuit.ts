@@ -1,7 +1,7 @@
 import { coordDel, coordGet, coordIncr, coordSet, coordSetNx } from "./coord";
 
 export type CircuitState = "HEALTHY" | "DEGRADED" | "OPEN" | "HALF_OPEN";
-export type ProviderId = "chatgpt" | "gemini";
+export type ProviderId = "chatgpt" | "gemini" | "leonardo";
 
 const WINDOW_MS = Number(process.env.RELAY_CIRCUIT_WINDOW_MS || 60_000);
 const TRIP = Number(process.env.RELAY_CIRCUIT_TRIP || 3);
@@ -24,7 +24,9 @@ export async function recordProviderFault(
   code: string,
   accountId?: string | null,
 ) {
-  if (code !== "PROVIDER_DOM_CHANGED" && code !== "PROVIDER_UNAVAILABLE") return getCircuit(provider);
+  if (code !== "PROVIDER_DOM_CHANGED" && code !== "PROVIDER_UNAVAILABLE" && code !== "LEONARDO_DOM_CHANGED") {
+    return getCircuit(provider);
+  }
   const w = windowId();
   if (accountId) {
     const first = await coordSetNx(`circuit:${provider}:${code}:acct:${accountId}:${w}`, "1", WINDOW_MS);

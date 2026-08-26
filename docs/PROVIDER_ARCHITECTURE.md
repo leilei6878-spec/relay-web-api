@@ -1,6 +1,6 @@
 # Provider Architecture
 
-Gateway no longer owns ChatGPT/Gemini DOM details. Provider-specific logic lives in `src/lib/provider/`.
+Gateway no longer owns ChatGPT/Gemini/Leonardo DOM details. Provider-specific logic lives in `src/lib/provider/`.
 
 ```
 Client → /v1/* → Adapter.prepareRequest() → Job queue → Worker
@@ -34,3 +34,6 @@ Worker → page-state + selector pack + result → Adapter.verifyModel / extract
 ## Conversion layer
 
 ChatGPT web cannot inject a native OpenAI conversation. `toWebPrompt` emits `<relay:ROLE>` blocks so roles stay distinct. This is intentional, not a silent concat.
+
+
+Leonardo adapter: `src/lib/provider/leonardo.ts`, pack `leonardo-image-v1`. See [LEONARDO_PROVIDER.md](./LEONARDO_PROVIDER.md).

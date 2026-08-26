@@ -18,3 +18,5 @@ goto(url)
 | AUTHENTICATED / COMPOSER_READY / DOM_UNKNOWN | PROVIDER_DOM_CHANGED | **no** (trips provider circuit) |
 
 Code: `src/lib/provider/page-state.ts` + Python `detect_page_state`.
+
+Leonardo adds IMAGE_GENERATOR_READY, TOKEN_EXHAUSTED, QUEUE_FULL, MODEL_UNAVAILABLE. See [LEONARDO_PAGE_STATE.md](./LEONARDO_PAGE_STATE.md).

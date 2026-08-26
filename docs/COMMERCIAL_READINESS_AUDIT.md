@@ -69,3 +69,17 @@ This preview is **not** production: `production: false`. That is allowed.
 - Live S3/R2/MinIO PUT: **NOT_RUN**
 - Neon / packaged Redis: **NOT_RUN** (PGLite-HTTP + RESP server used)
 - RSS / connection leak over hours: **NOT_RUN**
+
+
+## Leonardo Provider (2026-08-26)
+
+| Item | Status | Evidence |
+|---|---|---|
+| Account platform `leonardo` | **COMPLETE** | types, admin UI, session helper |
+| Independent session + proxy | **COMPLETE** | same pool contracts |
+| `/v1/models` logical ids | **COMPLETE** | `leonardo-gpt-image-2`, `leonardo-gemini` |
+| `/v1/images/generations` routing | **COMPLETE** | platform from model; no preview fake image |
+| Fail-closed no mock | **COMPLETE** | worker + extractResult |
+| Token / capability scheduler | **COMPLETE** | eligibilityReason |
+| Live GPT Image 2 / Gemini generate | **NOT_RUN** | BLOCKED_NO_SESSION |
+| Logged-in UI recon | **PARTIAL** | public home + login redirect only |

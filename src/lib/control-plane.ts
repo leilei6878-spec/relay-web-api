@@ -214,12 +214,16 @@ export async function patchAccount(id: string, patch: Partial<Account>) {
   await syncDb(next);
 }
 
-export async function pickAccount(platform: "chatgpt" | "gemini", exclude: string[] = []) {
+export async function pickAccount(
+  platform: "chatgpt" | "gemini" | "leonardo",
+  exclude: string[] = [],
+  opts?: { model?: string },
+) {
   const plane = await readControlPlane();
   const now = Date.now();
   const minGap = plane.settings.intervalMinMs || 0;
   const circuit = await getCircuit(platform);
-  const list = listEligible(plane.accounts, plane.proxies, plane.settings, platform, exclude);
+  const list = listEligible(plane.accounts, plane.proxies, plane.settings, platform, exclude, Date.now(), opts?.model);
   if (circuit.state === "OPEN" || circuit.state === "HALF_OPEN") {
     const canaries = list.filter((a) => isCanaryAccount(a));
     return canaries[0] ?? null;

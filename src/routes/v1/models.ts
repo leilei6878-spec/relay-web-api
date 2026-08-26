@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { chatgptAdapter, geminiAdapter } from "@/lib/provider/index";
+import { chatgptAdapter, geminiAdapter, leonardoAdapter } from "@/lib/provider/index";
 
 function asModel(id: string, owned: string, caps: ReturnType<typeof chatgptAdapter.capabilities>, description: string) {
   return {
@@ -20,12 +20,15 @@ function asModel(id: string, owned: string, caps: ReturnType<typeof chatgptAdapt
 
 const chatgpt = chatgptAdapter.capabilities();
 const gemini = geminiAdapter.capabilities();
+const leonardo = leonardoAdapter.capabilities();
 
 const MODELS = [
   ...chatgpt.models.map((id) =>
     asModel(id, "relay-chatgpt", chatgpt, id === "gpt-4o" ? "GPT-4o Vision" : "ChatGPT web, vision + multi-turn"),
   ),
   asModel("gemini-image", "relay-gemini", gemini, "Gemini 出图 / 参考图编辑（mask 不支持）"),
+  asModel("leonardo-gpt-image-2", "relay-leonardo", leonardo, "Leonardo web GPT Image 2"),
+  asModel("leonardo-gemini", "relay-leonardo", leonardo, "Leonardo web Gemini / Nano Banana family"),
 ];
 
 export const Route = createFileRoute("/v1/models")({

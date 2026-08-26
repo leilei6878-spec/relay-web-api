@@ -6,10 +6,10 @@ Auth: `Authorization: Bearer sk-relay-…` (or `x-api-key`). Worker/Admin tokens
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/v1/models` | ChatGPT + Gemini capabilities |
+| GET | `/v1/models` | ChatGPT + Gemini + `leonardo-gpt-image-2` + `leonardo-gemini` |
 | POST | `/v1/chat/completions` | Multi-turn, vision, `stream: true` SSE |
 | POST | `/v1/responses` | OpenAI responses subset |
-| POST | `/v1/images/generations` | Gemini; fail-closed; stable media URL |
+| POST | `/v1/images/generations` | Gemini or Leonardo (`leonardo-*`); fail-closed; stable media URL |
 | POST | `/v1/images/edits` | multipart; `mask` → 400 |
 
 Unsupported JSON fields on chat completions are **rejected**, not ignored.

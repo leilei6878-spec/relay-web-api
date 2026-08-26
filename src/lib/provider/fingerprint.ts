@@ -26,6 +26,6 @@ export function featureDelta(prev: Fingerprint | null | undefined, next: Fingerp
 }
 
 export function criticalKeys(provider: ProviderId): string[] {
-  if (provider === "gemini") return ["composer", "send", "image_slot"];
+  if (provider === "gemini" || provider === "leonardo") return ["composer", "send", "image_slot"];
   return ["composer", "send", "assistant", "model_switcher"];
 }

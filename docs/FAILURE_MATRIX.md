@@ -35,3 +35,23 @@ Must:
 - leave the Request failed (or waiting for half-open canary), not “try the next cookie”
 
 Verified: `src/lib/fault-matrix.test.ts`, `src/lib/chaos.test.ts` “chaos 10”.
+
+
+## Leonardo codes
+
+| code | fault_domain | switch_account | circuit | account_health |
+|---|---|---|---|---|
+| LEONARDO_LOGIN_REQUIRED | account | yes | none | invalid |
+| LEONARDO_SESSION_EXPIRED | account | yes | none | invalid |
+| LEONARDO_CHALLENGE | provider | no | none | none |
+| LEONARDO_TOKEN_EXHAUSTED | account | yes | none | cool |
+| LEONARDO_QUEUE_FULL | account | yes | none | cool |
+| LEONARDO_RATE_LIMITED | account | yes | none | cool |
+| LEONARDO_ACCOUNT_RESTRICTED | account | yes | none | banned |
+| LEONARDO_MODEL_UNAVAILABLE | account | yes | none | cool |
+| LEONARDO_DOM_CHANGED | provider | **no** | **trip** | **none** |
+| LEONARDO_GENERATION_FAILED | account | yes | none | failCount |
+| LEONARDO_GENERATION_TIMEOUT | infra | no (retry same) | none | none |
+| LEONARDO_RESULT_NOT_FOUND | provider | no | none | none |
+| LEONARDO_DOWNLOAD_FAILED | infra | no (retry same) | none | none |
+| LEONARDO_PROXY_UNAVAILABLE | proxy | no | none | none |

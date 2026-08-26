@@ -22,7 +22,7 @@ import type { ChatTurn } from "./provider/types";
 export type Job = {
   id: string;
   status: "queued" | "running" | "done" | "error" | "cancelled" | "dead";
-  platform: "chatgpt" | "gemini";
+  platform: "chatgpt" | "gemini" | "leonardo";
   prompt: string;
   model: string;
   accountId: string | null;
@@ -58,6 +58,10 @@ export type Job = {
   actualProfile?: string;
   profileVerified?: boolean;
   recoveryLevel?: number;
+  n?: number;
+  size?: string;
+  quality?: string;
+  backendMode?: "web_account" | "official_api";
 };
 
 export type EnqueueOpts = {
@@ -68,6 +72,9 @@ export type EnqueueOpts = {
   kind?: Job["kind"];
   turns?: ChatTurn[];
   selectorPackVersion?: string;
+  n?: number;
+  size?: string;
+  quality?: string;
 };
 
 export type WorkerRow = {
@@ -303,7 +310,7 @@ async function enqueue(
       }
     }
     const exclude = [...(opts.excludeAccountIds || [])];
-    let account = await pickAccount(platform, exclude);
+    let account = await pickAccount(platform, exclude, { model });
     while (account) {
       const allowed = await canDispatch(platform, isCanaryAccount(account));
       if (!allowed) {
@@ -320,7 +327,7 @@ async function enqueue(
           if (retry) break;
         }
         exclude.push(account.id);
-        account = await pickAccount(platform, exclude);
+        account = await pickAccount(platform, exclude, { model });
         continue;
       }
       break;
@@ -339,7 +346,7 @@ async function enqueue(
       accountEmail: account.email,
       createdAt: new Date().toISOString(),
       timeoutMs,
-      images: images.slice(0, 4),
+      images: images.slice(0, platform === "leonardo" ? 6 : 4),
       attempts: 0,
       requestId: opts.requestId || uid(),
       traceId: opts.traceId || uid(),
@@ -350,6 +357,10 @@ async function enqueue(
       turns: opts.turns,
       selectorPackVersion: opts.selectorPackVersion,
       requestedModel: model,
+      n: opts.n,
+      size: opts.size,
+      quality: opts.quality,
+      backendMode: platform === "leonardo" ? "web_account" : undefined,
     };
     if (opts.idempotencyKey) await coordSet(`idem:${opts.idempotencyKey}`, job.id, 86_400_000);
     await patchAccount(account.id, {
@@ -384,10 +395,11 @@ export function enqueueImage(
   images: string[] = [],
   opts?: EnqueueOpts,
 ) {
+  const platform = model.startsWith("leonardo-") || model === "gpt-image-2" ? "leonardo" : "gemini";
   if (pgSotActive()) {
-    return import("./pg-jobs").then((m) => m.enqueuePg("gemini", prompt, model, timeoutMs, images, opts));
+    return import("./pg-jobs").then((m) => m.enqueuePg(platform, prompt, model, timeoutMs, images, opts));
   }
-  return enqueue("gemini", prompt, model, timeoutMs, images, opts);
+  return enqueue(platform, prompt, model, timeoutMs, images, opts);
 }
 
 export function claimNext(workerName = "local", stats?: { capacity?: number; activeJobs?: number; cpu?: number; ram?: number; browsers?: number; draining?: boolean; browserStartMs?: number }) {
@@ -568,6 +580,10 @@ export function finishJob(
     actualProfile?: string;
     profileVerified?: boolean;
     recoveryLevel?: number;
+    availableModels?: string[];
+    tokenState?: string;
+    backendMode?: "web_account" | "official_api";
+    queueDepth?: number;
   },
 ) {
   if (pgSotActive()) {
@@ -610,7 +626,7 @@ export function finishJob(
       }
     }
     let url = result.url;
-    if (job.platform === "gemini" && result.ok && job.kind !== "canary" && result.text !== "CANARY") {
+    if ((job.platform === "gemini" || job.platform === "leonardo") && result.ok && job.kind !== "canary" && result.text !== "CANARY") {
       const gate = assertGeneratedImage(url, { allowSvg: process.env.RELAY_ALLOW_MOCK === "1" });
       if (!gate.ok) {
         result = { ...result, ok: false, error: gate.error };
@@ -618,7 +634,7 @@ export function finishJob(
         url = gate.url;
       }
     }
-    if (url && result.ok && job.platform === "gemini" && job.kind !== "canary") {
+    if (url && result.ok && (job.platform === "gemini" || job.platform === "leonardo") && job.kind !== "canary") {
       const stored = await persistImageUrl(url);
       if (stored.ok) url = stored.url;
       else {
@@ -671,6 +687,20 @@ export function finishJob(
       const threshold = plane.settings.failThreshold || 5;
       const cool = (plane.settings.coolDownSeconds || 300) * 1000;
       if (acc) {
+        const capabilityPatch: Record<string, unknown> = {};
+        if (Array.isArray(result.availableModels) && result.availableModels.length) {
+          capabilityPatch.availableModels = result.availableModels;
+        }
+        if (result.tokenState === "TOKEN_EXHAUSTED" || decision.code === "LEONARDO_TOKEN_EXHAUSTED") {
+          capabilityPatch.tokenState = "TOKEN_EXHAUSTED";
+        } else if (result.tokenState === "TOKEN_AVAILABLE" || result.tokenState === "TOKEN_LOW" || result.tokenState === "UNKNOWN") {
+          capabilityPatch.tokenState = result.tokenState;
+        }
+        if (result.pageState) capabilityPatch.lastPageState = result.pageState;
+        if (typeof result.queueDepth === "number") capabilityPatch.queueDepthHint = result.queueDepth;
+        if (Object.keys(capabilityPatch).length) {
+          await patchAccount(acc.id, capabilityPatch as never);
+        }
         if (result.ok && has) {
           if (isCanaryAccount(acc) || job.kind === "canary") await recordCanaryResult(job.platform, true);
           await patchAccount(acc.id, {

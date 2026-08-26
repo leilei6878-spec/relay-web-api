@@ -11,7 +11,7 @@ import { featureDelta, fingerprint } from "./fingerprint.ts";
 import { packFor, selectorCandidates } from "./selectors.ts";
 
 test("adapters expose the required surface", () => {
-  for (const id of ["chatgpt", "gemini"] as const) {
+  for (const id of ["chatgpt", "gemini", "leonardo"] as const) {
     const a = getAdapter(id);
     for (const method of [
       "capabilities",
@@ -31,6 +31,7 @@ test("adapters expose the required surface", () => {
   assert.equal(chatgptAdapter.capabilities().chat, true);
   assert.equal(geminiAdapter.capabilities().imageGeneration, true);
   assert.equal(geminiAdapter.capabilities().imageEdit, true);
+  assert.equal(getAdapter("leonardo").capabilities().imageGeneration, true);
 });
 
 test("page state does not map composer miss to session death", () => {

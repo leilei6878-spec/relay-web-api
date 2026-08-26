@@ -16,6 +16,12 @@ const CHAT_MODELS = [
   { id: "gpt-4o", label: "GPT-4o" },
 ];
 
+const IMAGE_MODELS = [
+  { id: "gemini-image", label: "Gemini / 出图" },
+  { id: "leonardo-gpt-image-2", label: "Leonardo / GPT Image 2" },
+  { id: "leonardo-gemini", label: "Leonardo / Gemini" },
+];
+
 type Phase = "idle" | "sending" | "streaming" | "done" | "error";
 type Kind = "chat" | "image";
 type HistoryItem = {
@@ -44,6 +50,7 @@ function Page() {
 function Console() {
   const [kind, setKind] = useState<Kind>("chat");
   const [model, setModel] = useState("gpt-5.6");
+  const [imageModel, setImageModel] = useState("gemini-image");
   const [apiKey, setApiKey] = useState("");
   const [prompt, setPrompt] = useState("你好，你是什么模型？用三句话说明。");
   const [images, setImages] = useState<string[]>([]);
@@ -85,7 +92,7 @@ function Console() {
     if (kind === "image") {
       return {
         prompt,
-        model: "gemini-image",
+        model: imageModel,
         ...(images[0] ? { image: images[0], images } : {}),
       };
     }
@@ -97,7 +104,7 @@ function Console() {
             ...images.map((url) => ({ type: "image_url", image_url: { url } })),
           ];
     return { model, stream: true, messages: [{ role: "user", content }] };
-  }, [kind, model, prompt, images]);
+  }, [kind, model, imageModel, prompt, images]);
 
   async function run() {
     if (!prompt.trim() && images.length === 0) {
@@ -223,7 +230,7 @@ function Console() {
         id: String(Date.now()),
         at: new Date().toISOString(),
         kind,
-        model: kind === "chat" ? model : "gemini-image",
+        model: kind === "chat" ? model : imageModel,
         prompt: prompt.trim(),
         status: res.status,
         latencyMs,
@@ -293,7 +300,7 @@ function Console() {
               后台已登录时不必填 Key。若填写客户 Key，将按开放 API 的鉴权发送。
             </span>
           </label>
-          {kind === "chat" && (
+          {kind === "chat" ? (
             <label className="block text-sm">
               <span className="mb-1 block text-xs text-muted">模型</span>
               <select
@@ -308,6 +315,21 @@ function Console() {
                 ))}
               </select>
             </label>
+          ) : (
+            <label className="block text-sm">
+              <span className="mb-1 block text-xs text-muted">模型</span>
+              <select
+                className="h-11 w-full rounded-sm border border-border bg-elevated px-3 text-sm"
+                value={imageModel}
+                onChange={(e) => setImageModel(e.target.value)}
+              >
+                {IMAGE_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
           <label className="block text-sm">
             <span className="mb-1 block text-xs text-muted">内容</span>
@@ -316,7 +338,8 @@ function Console() {
           <ImageInput
             images={images}
             onChange={setImages}
-            hint={kind === "chat" ? "对话识图，OpenAI Vision 格式" : "出图参考图，写入 image / images"}
+            hint={kind === "chat" ? "对话识图，OpenAI Vision 格式" : imageModel.startsWith("leonardo-") ? "Leonardo 参考图最多 6 张" : "出图参考图，写入 image / images"}
+            max={kind === "image" && imageModel.startsWith("leonardo-") ? 6 : 4}
           />
           <div className="flex gap-2">
             <Button className="flex-1" type="button" onClick={() => void run()} disabled={phase === "sending" || phase === "streaming"}>

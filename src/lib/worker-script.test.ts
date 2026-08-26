@@ -19,7 +19,7 @@ test("worker python compiles and gemini has no fake success", () => {
     { encoding: "utf8" },
   );
   assert.equal(live.status, 0, live.stderr);
-  const body = JSON.parse(live.stdout.trim().split("\n").pop() || "{}");
+  const body = JSON.parse(live.stdout.trim().split("\\n").pop() || "{}");
   assert.equal(body.ok, false);
   assert.match(body.error || "", /SESSION_INVALID/);
 
@@ -45,6 +45,39 @@ test("page state error mapping and image false-positive rejection", () => {
     [
       "-c",
       "import importlib.util, os\nos.environ.pop('RELAY_ALLOW_MOCK', None)\nspec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py')\nm=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\nerr, fault = m.page_state_error('AUTHENTICATED', True)\nassert 'PROVIDER_DOM_CHANGED' in err, err\nassert fault == 'provider'\nerr2, fault2 = m.page_state_error('LOGIN_REQUIRED', True)\nassert 'LOGIN_REQUIRED' in err2\nassert fault2 == 'account'\nassert m.accept_result_image('https://x/favicon.ico', []) is False\nassert m.accept_result_image('https://lh3.googleusercontent.com/old', ['https://lh3.googleusercontent.com/old']) is False\nassert m.accept_result_image('https://lh3.googleusercontent.com/new', ['https://lh3.googleusercontent.com/old']) is True\nassert m.accept_result_image('data:image/svg+xml;base64,AAA', []) is False\nprint('ok')\n",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /ok/);
+});
+
+test("run_leonardo without session is LOGIN_REQUIRED and never fake-success", () => {
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  const live = spawnSync(
+    "python3",
+    [
+      "-c",
+      "import importlib.util, os, json; os.environ.pop('RELAY_ALLOW_MOCK', None); os.environ.pop('RELAY_TEST_URL', None); spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(json.dumps(m.run_leonardo({'prompt':'cat','model':'leonardo-gemini'})))",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(live.status, 0, live.stderr);
+  const body = JSON.parse(live.stdout.trim().split("\\n").pop() || "{}");
+  assert.equal(body.ok, false);
+  assert.match(body.error || "", /LEONARDO_LOGIN_REQUIRED|LEONARDO_PROXY/);
+  assert.notEqual(body.mode, "mock");
+});
+
+test("leonardo accept_result_image rejects history and icons", () => {
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      "import importlib.util, os\nspec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py')\nm=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\nassert m.accept_result_image('https://cdn.leonardo.ai/favicon.ico', []) is False\nassert m.accept_result_image('https://cdn.leonardo.ai/old.png', ['https://cdn.leonardo.ai/old.png']) is False\nassert m.accept_result_image('https://cdn.leonardo.ai/users/new.png', ['https://cdn.leonardo.ai/old.png']) is True\nassert m.accept_result_image('data:image/svg+xml;base64,AAA', []) is False\nprint('ok')\n",
     ],
     { encoding: "utf8" },
   );

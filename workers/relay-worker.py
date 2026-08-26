@@ -273,6 +273,10 @@ def detect_page_state(page, provider="chatgpt"):
         return "CHALLENGE"
     if "deactivated" in html or "suspended" in html or "account has been disabled" in html or "restricted" in html:
         return "ACCOUNT_RESTRICTED"
+    if "out of tokens" in html or "no tokens remaining" in html or "insufficient tokens" in html or "token bank empty" in html:
+        return "TOKEN_EXHAUSTED"
+    if "queue is full" in html or "too many pending generations" in html or "queue full" in html:
+        return "QUEUE_FULL"
     if "too many requests" in html or "rate limit" in html or "try again later" in html or "usage limit" in html:
         return "RATE_LIMITED"
     if "accounts.google.com" in url or "/auth/login" in url or "/login" in url or "sign in to chatgpt" in html or "continue with google" in html:
@@ -286,7 +290,15 @@ def detect_page_state(page, provider="chatgpt"):
     except Exception:
         stop = False
     try:
-        if provider == "gemini":
+        if provider == "leonardo":
+            try:
+                if page.locator('a:has-text("Sign In"), a:has-text("Sign Up")').count() > 0:
+                    return "LOGIN_REQUIRED"
+            except Exception:
+                pass
+            composer = page.locator("#home-prompt-textarea, textarea[placeholder*='prompt' i]").first.count() > 0
+            send = page.locator('button[aria-label="Generate"]').first.count() > 0
+        elif provider == "gemini":
             composer = page.locator("div.ql-editor, rich-textarea, div[contenteditable='true']").first.count() > 0
             send = page.locator("button[aria-label*='Send'], button[aria-label*='发送']").first.count() > 0
         else:
@@ -299,24 +311,42 @@ def detect_page_state(page, provider="chatgpt"):
         return "GENERATING"
     if assistant and not stop:
         return "RESULT_READY"
+    if provider == "leonardo" and composer and send:
+        return "IMAGE_GENERATOR_READY"
     if composer:
         return "COMPOSER_READY"
-    if "chatgpt.com" in url or "gemini.google.com" in url:
+    if "chatgpt.com" in url or "gemini.google.com" in url or "leonardo.ai" in url:
         return "AUTHENTICATED"
     return "DOM_UNKNOWN"
 
-def page_state_error(state, selector_failed=False):
+def page_state_error(state, selector_failed=False, provider="chatgpt"):
     if state == "LOGIN_REQUIRED":
+        if provider == "leonardo":
+            return "LEONARDO_LOGIN_REQUIRED", "account"
         return "LOGIN_REQUIRED: provider login wall", "account"
     if state == "CHALLENGE":
+        if provider == "leonardo":
+            return "LEONARDO_CHALLENGE", "provider"
         return "CHALLENGE: captcha or bot wall", "provider"
+    if state == "TOKEN_EXHAUSTED":
+        return "LEONARDO_TOKEN_EXHAUSTED", "account"
+    if state == "QUEUE_FULL":
+        return "LEONARDO_QUEUE_FULL", "account"
+    if state == "MODEL_UNAVAILABLE":
+        return "LEONARDO_MODEL_UNAVAILABLE", "account"
     if state == "RATE_LIMITED":
+        if provider == "leonardo":
+            return "LEONARDO_RATE_LIMITED", "account"
         return "ACCOUNT_RATE_LIMIT: provider throttle", "account"
     if state == "ACCOUNT_RESTRICTED":
+        if provider == "leonardo":
+            return "LEONARDO_ACCOUNT_RESTRICTED", "account"
         return "ACCOUNT_BANNED: account disabled", "account"
     if state == "PROVIDER_ERROR":
         return "PROVIDER_UNAVAILABLE: provider error page", "provider"
     if selector_failed:
+        if provider == "leonardo":
+            return "LEONARDO_DOM_CHANGED: selector miss (page_state=%s)" % state, "provider"
         return "PROVIDER_DOM_CHANGED: selector miss (page_state=%s)" % state, "provider"
     return "PROVIDER_UNAVAILABLE: page_state=%s" % state, "provider"
 
@@ -541,7 +571,7 @@ def accept_result_image(src, baseline, box=None):
         return False
     if box and (box.get("width", 0) < 64 or box.get("height", 0) < 64):
         return False
-    if "googleusercontent" in src or (src.startswith("data:image") and len(src) > 800):
+    if "googleusercontent" in src or "leonardo.ai" in src or "leonardousercontent" in src or (src.startswith("data:image") and len(src) > 800):
         return True
     return False
 
@@ -1203,7 +1233,8 @@ class H(BaseHTTPRequestHandler):
         except Exception:
             body = {}
         if self.path in ("/image", "/v1/images/generations", "/v1/images/edits"):
-            body["platform"] = "gemini"
+            model = (body.get("model") or "")
+            body["platform"] = "leonardo" if str(model).startswith("leonardo-") else "gemini"
         try:
             result = exec_job(body)
         except Exception as e:
@@ -1241,7 +1272,9 @@ def exec_job_run(body):
     account_lock(aid).acquire()
     ACTIVE += 1
     try:
-        if body.get("platform") in ("gemini", "image") or body.get("kind") == "image":
+        if body.get("platform") in ("gemini", "image", "leonardo") or body.get("kind") == "image":
+            if body.get("platform") == "leonardo" or str(body.get("model") or "").startswith("leonardo-"):
+                return run_leonardo(body)
             return run_image(body)
         return run_chat(body)
     except Exception as e:
@@ -1395,6 +1428,269 @@ def make_image(prompt, images=None):
     )
     return {"ok": True, "url": "data:image/svg+xml;charset=utf-8," + urllib.parse.quote(svg)}
 
+def size_to_aspect(size):
+    try:
+        parts = str(size or "1024x1024").lower().replace(" ", "").split("x")
+        w, h = int(parts[0]), int(parts[1])
+        r = w / float(h)
+    except Exception:
+        return "1:1"
+    opts = [("1:1", 1.0), ("4:3", 4.0/3), ("16:9", 16.0/9), ("4:5", 4.0/5), ("2:3", 2.0/3), ("9:16", 9.0/16)]
+    best, dist = "1:1", 99.0
+    for lab, ar in opts:
+        d = abs(r - ar)
+        if d < dist:
+            dist, best = d, lab
+    return best
+
+def download_result_image(context, url):
+    if not url:
+        return None, "LEONARDO_RESULT_NOT_FOUND"
+    if url.startswith("data:image/svg"):
+        return None, "LEONARDO_RESULT_NOT_FOUND: svg rejected"
+    if url.startswith("data:image"):
+        return url, None
+    if url.startswith("http"):
+        try:
+            resp = context.request.get(url, timeout=20000)
+            raw = resp.body()
+            mime = (resp.headers.get("content-type") or "image/png").split(";")[0]
+            if "svg" in mime:
+                return None, "LEONARDO_RESULT_NOT_FOUND: svg rejected"
+            if not raw or len(raw) < 2048:
+                return None, "LEONARDO_RESULT_NOT_FOUND: image too small"
+            return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode()), None
+        except Exception:
+            return None, "LEONARDO_DOWNLOAD_FAILED"
+    return None, "LEONARDO_RESULT_NOT_FOUND"
+
+def run_leonardo(body):
+    from playwright.sync_api import sync_playwright
+    prompt, images = extract_prompt_images(body)
+    if not prompt and images:
+        prompt = "根据参考图生成一张新图"
+    if not prompt:
+        return {"ok": False, "error": "LEONARDO_GENERATION_FAILED: empty prompt", "fault": "client", "backendMode": "web_account"}
+    state = body.get("storageState")
+    if TEST_URL:
+        return {"ok": False, "error": "LEONARDO_GENERATION_FAILED: mock forbidden in web_account", "fault": "provider", "mode": "mock", "backendMode": "web_account"}
+    if not state:
+        return {"ok": False, "error": "LEONARDO_LOGIN_REQUIRED: no storage state", "fault": "account", "backendMode": "web_account"}
+    model = (body.get("model") or "leonardo-gemini").strip()
+    gpt = "gpt-image" in model
+    labels = ["GPT Image 2", "GPT Image", "gpt-image-2"] if gpt else ["Nano Banana 2", "Nano Banana", "Gemini Image 2", "Gemini 2.5 Flash Image", "gemini-image-2", "Gemini 2.5"]
+    proxy = job_proxy(body)
+    if not proxy:
+        return {"ok": False, "error": "LEONARDO_PROXY_UNAVAILABLE: job missing account-bound proxy", "fault": "proxy", "backendMode": "web_account"}
+    if not socks_https_ok(proxy):
+        return {"ok": False, "error": tunnel_down_error(), "fault": "proxy", "backendMode": "web_account"}
+    target = os.environ.get("LEONARDO_URL") or "https://app.leonardo.ai/generate"
+    home = "https://app.leonardo.ai/"
+    want_n = int(body.get("n") or 1)
+    want_size = body.get("size") or "1024x1024"
+    want_quality = str(body.get("quality") or "MEDIUM").upper()
+    kind = body.get("kind") or "image"
+    pack_version = body.get("selectorPackVersion") or "leonardo-image-v1"
+
+    def enum_model_labels(page):
+        found = []
+        try:
+            page.evaluate("() => { var n = document.querySelector('[aria-label^=Model]'); if (n) n.click(); }")
+            page.wait_for_timeout(500)
+            texts = page.evaluate("""() => [...document.querySelectorAll('[role=menuitem], [role=option], button, [data-slot=dropdown-menu-item]')].map(e => (e.innerText||'').trim()).filter(t => t && t.length < 80)""")
+            if isinstance(texts, list):
+                for t in texts:
+                    if t and t not in found:
+                        found.append(t)
+        except Exception:
+            pass
+        return found
+
+    def run_on(page, context):
+        t0 = time.time()
+        arm_page(page)
+        try:
+            page.set_default_timeout(4000)
+        except Exception:
+            pass
+        try:
+            page.goto(target, wait_until="domcontentloaded", timeout=25000)
+        except Exception:
+            page.goto(home, wait_until="domcontentloaded", timeout=25000)
+        page.wait_for_timeout(1200)
+        pst = detect_page_state(page, "leonardo")
+        if pst in ("LOGIN_REQUIRED", "CHALLENGE", "TOKEN_EXHAUSTED", "QUEUE_FULL", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
+            err, fault = page_state_error(pst, False, "leonardo")
+            return {"ok": False, "error": err, "fault": fault, "pageState": pst, "backendMode": "web_account", "selectorPackVersion": pack_version}
+        box = page.locator("#home-prompt-textarea, textarea[placeholder*='prompt' i]").first
+        gen = page.locator('button[aria-label="Generate"]').first
+        if box.count() == 0 or gen.count() == 0:
+            err, fault = page_state_error(pst or "DOM_UNKNOWN", True, "leonardo")
+            return {"ok": False, "error": err, "fault": fault, "pageState": pst, "backendMode": "web_account"}
+        available = enum_model_labels(page)
+        picked = ""
+        for lab in labels:
+            for item in available:
+                if lab.lower() in item.lower() or item.lower() in lab.lower():
+                    picked = item
+                    break
+            if picked:
+                break
+        if not available:
+            return {"ok": False, "error": "LEONARDO_DOM_CHANGED: model menu empty", "fault": "provider", "pageState": "MODEL_SELECTOR_READY", "backendMode": "web_account", "availableModels": []}
+        if not picked:
+            return {"ok": False, "error": "LEONARDO_MODEL_UNAVAILABLE: " + model, "fault": "account", "pageState": "MODEL_UNAVAILABLE", "backendMode": "web_account", "availableModels": available, "modelActual": ""}
+        try:
+            page.get_by_text(picked, exact=False).first.click(timeout=1500, force=True)
+        except Exception:
+            page.evaluate("(t) => { const n=[...document.querySelectorAll('[role=menuitem],button,[role=option]')].find(e => (e.innerText||'').includes(t)); if(n) n.click(); }", picked)
+        if kind == "canary":
+            return {
+                "ok": True,
+                "url": "",
+                "text": "CANARY",
+                "pageState": detect_page_state(page, "leonardo"),
+                "modelActual": picked,
+                "availableModels": available,
+                "backendMode": "web_account",
+                "selectorPackVersion": pack_version,
+            }
+        aspect = size_to_aspect(want_size)
+        try:
+            page.locator('button[aria-label="Aspect ratio: %s"]' % aspect).first.click(timeout=1200, force=True)
+        except Exception:
+            pass
+        if want_quality in ("HIGH", "LOW"):
+            qhit = False
+            for qlab in (want_quality, want_quality.title(), "Quality: " + want_quality.title()):
+                loc = page.get_by_text(qlab, exact=False).first
+                if loc.count() > 0:
+                    try:
+                        loc.click(timeout=800, force=True)
+                        qhit = True
+                        break
+                    except Exception:
+                        pass
+            if not qhit:
+                return {"ok": False, "error": "LEONARDO_DOM_CHANGED: quality control missing", "fault": "provider", "backendMode": "web_account", "availableModels": available}
+        if want_n > 1:
+            n_hit = False
+            for sel in ('[aria-label*="Number of images"]', '[aria-label*="Quantity"]', 'button:has-text("%d")' % want_n):
+                loc = page.locator(sel).first
+                if loc.count() > 0:
+                    try:
+                        loc.click(timeout=800, force=True)
+                        n_hit = True
+                        break
+                    except Exception:
+                        pass
+            if not n_hit:
+                return {"ok": False, "error": "LEONARDO_DOM_CHANGED: quantity control missing for n=%d" % want_n, "fault": "provider", "backendMode": "web_account", "availableModels": available}
+        baseline = snapshot_image_srcs(page)
+        if not fill_composer(page, box, prompt):
+            try:
+                box.fill(prompt, timeout=1000)
+            except Exception:
+                return {"ok": False, "error": "LEONARDO_DOM_CHANGED: cannot fill prompt", "fault": "provider", "backendMode": "web_account"}
+        if images:
+            try:
+                page.locator('button[aria-label="Add image reference"]').first.click(timeout=1500, force=True)
+            except Exception:
+                pass
+            fi = page.locator("input[type=file]").first
+            paths = []
+            for i, u in enumerate(images[:6]):
+                path = os.path.join(tempfile.gettempdir(), "leo-ref-%d.png" % i)
+                if u.startswith("data:"):
+                    raw = u.split(",", 1)[-1]
+                    open(path, "wb").write(base64.b64decode(raw))
+                    paths.append(path)
+            if paths and fi.count() > 0:
+                try:
+                    fi.set_input_files(paths)
+                except Exception:
+                    return {"ok": False, "error": "LEONARDO_DOM_CHANGED: cannot upload references", "fault": "provider", "backendMode": "web_account"}
+            elif paths and fi.count() == 0:
+                return {"ok": False, "error": "LEONARDO_DOM_CHANGED: file input missing", "fault": "provider", "backendMode": "web_account"}
+        try:
+            gen.click(timeout=1500, force=True)
+        except Exception:
+            page.keyboard.press("Enter")
+        page.wait_for_timeout(800)
+        pst2 = detect_page_state(page, "leonardo")
+        if pst2 in ("LOGIN_REQUIRED", "TOKEN_EXHAUSTED", "QUEUE_FULL", "CHALLENGE"):
+            err, fault = page_state_error(pst2, False, "leonardo")
+            return {"ok": False, "error": err, "fault": fault, "pageState": pst2, "backendMode": "web_account", "availableModels": available}
+        deadline = time.time() + int(body.get("timeoutMs") or 120000) / 1000
+        url_out = ""
+        while time.time() < deadline:
+            html2 = ""
+            try:
+                html2 = (page.content() or "")[:8000]
+            except Exception:
+                html2 = ""
+            low = html2.lower()
+            if "out of tokens" in low or "insufficient tokens" in low:
+                return {"ok": False, "error": "LEONARDO_TOKEN_EXHAUSTED", "fault": "account", "pageState": "TOKEN_EXHAUSTED", "backendMode": "web_account", "tokenState": "TOKEN_EXHAUSTED", "availableModels": available}
+            for src in snapshot_image_srcs(page):
+                if src in baseline:
+                    continue
+                if accept_result_image(src, baseline, None):
+                    url_out = src
+                    break
+            if url_out:
+                break
+            time.sleep(0.5)
+        if not url_out:
+            return {"ok": False, "error": "LEONARDO_RESULT_NOT_FOUND", "fault": "provider", "pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
+        data_url, derr = download_result_image(context, url_out)
+        if not data_url:
+            return {"ok": False, "error": derr or "LEONARDO_DOWNLOAD_FAILED", "fault": "provider", "backendMode": "web_account", "availableModels": available}
+        try:
+            state_out = context.storage_state()
+        except Exception:
+            state_out = None
+        return {
+            "ok": True,
+            "url": data_url,
+            "modelActual": picked or model,
+            "backendMode": "web_account",
+            "latencyMs": int((time.time() - t0) * 1000),
+            "pageState": "GENERATION_COMPLETE",
+            "availableModels": available,
+            "selectorPackVersion": pack_version,
+            "sessionState": state_out,
+            "sessionBaseVersion": int(body.get("sessionVersion") or 0),
+            "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
+        }
+
+    if pool_enabled():
+        browser, context, page, ctx_key = get_pooled_context(proxy, state, body.get("accountId"))
+        if page is None:
+            page = context.new_page()
+        try:
+            result = run_on(page, context)
+            with POOL_LOCK:
+                row = CTX_POOL.get(ctx_key)
+                if row:
+                    row["page"] = page
+            return result
+        except Exception as e:
+            return {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker", "backendMode": "web_account"}
+    with sync_playwright() as p:
+        browser = open_browser(p, proxy)
+        context = browser.new_context(
+            storage_state=state if (state and (state.get("cookies") or state.get("origins"))) else None,
+            locale="en-US",
+            viewport={"width": 1440, "height": 900},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        )
+        page = context.new_page()
+        try:
+            return run_on(page, context)
+        finally:
+            browser.close()
+
 def beat_loop():
     import urllib.request
     gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
@@ -1477,6 +1773,12 @@ def poll_gateway():
             if job.get("platform") == "gemini":
                 payload["platform"] = "gemini"
                 payload["model"] = job.get("model") or "gemini-image"
+            elif job.get("platform") == "leonardo":
+                payload["platform"] = "leonardo"
+                payload["model"] = job.get("model") or "leonardo-gemini"
+                payload["n"] = job.get("n") or 1
+                payload["size"] = job.get("size") or "1024x1024"
+                payload["quality"] = job.get("quality") or "MEDIUM"
             else:
                 payload["model"] = job.get("model") or "gpt-5.6"
             try:
@@ -1503,6 +1805,10 @@ def poll_gateway():
                     "pageState": result.get("pageState"),
                     "fingerprint": result.get("fingerprint"),
                     "selectorPackVersion": result.get("selectorPackVersion"),
+                    "availableModels": result.get("availableModels"),
+                    "tokenState": result.get("tokenState"),
+                    "backendMode": result.get("backendMode") or "web_account",
+                    "queueDepth": result.get("queueDepth"),
                 }, ensure_ascii=False).encode("utf-8"),
                 headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
                 method="POST",

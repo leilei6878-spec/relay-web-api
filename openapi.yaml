@@ -57,7 +57,7 @@ paths:
           description: Unauthorized
   /v1/images/generations:
     post:
-      summary: Image generation (Gemini web)
+      summary: Image generation (Gemini or Leonardo web)
       operationId: imageGenerations
       requestBody:
         required: true

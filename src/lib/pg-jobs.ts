@@ -80,7 +80,7 @@ export async function enqueuePg(
   }
 
   const exclude = [...(opts.excludeAccountIds || [])];
-  let account = await pickAccount(platform, exclude);
+  let account = await pickAccount(platform, exclude, { model });
   const until = new Date(Date.now() + timeoutMs).toISOString();
   while (account) {
     const allowed = await canDispatch(platform, isCanaryAccount(account));
@@ -93,7 +93,7 @@ export async function enqueuePg(
     if (redisOk && sqlOk) break;
     if (redisOk) await coordDel(`account-lease:${account.id}`);
     exclude.push(account.id);
-    account = await pickAccount(platform, exclude);
+    account = await pickAccount(platform, exclude, { model });
   }
   if (!account) {
     if (opts.idempotencyKey) await coordDel(`idem:${opts.idempotencyKey}`);
@@ -119,7 +119,7 @@ export async function enqueuePg(
     accountEmail: account.email,
     createdAt: new Date().toISOString(),
     timeoutMs,
-    images: images.slice(0, 4),
+    images: images.slice(0, platform === "leonardo" ? 6 : 4),
     attempts: 0,
     requestId: opts.requestId || uid(),
     traceId: opts.traceId || uid(),
@@ -130,6 +130,10 @@ export async function enqueuePg(
     turns: opts.turns,
     selectorPackVersion: opts.selectorPackVersion,
     requestedModel: model,
+    n: opts.n,
+    size: opts.size,
+    quality: opts.quality,
+    backendMode: platform === "leonardo" ? "web_account" : undefined,
   };
 
   const inserted = await dbInsertJobIdempotent(job as unknown as Record<string, unknown>);
@@ -256,7 +260,7 @@ export async function claimNextPg(
     selectors: (await import("./provider/index")).getAdapter(job.platform).selectorPack(job.selectorPackVersion),
     selectorPackVersion: job.selectorPackVersion,
     turns: job.turns || [],
-    kind: job.kind || (job.platform === "gemini" ? "image" : "chat"),
+    kind: job.kind || (job.platform === "gemini" || job.platform === "leonardo" ? "image" : "chat"),
   };
 }
 
@@ -283,6 +287,10 @@ export async function finishJobPg(
     actualProfile?: string;
     profileVerified?: boolean;
     recoveryLevel?: number;
+    availableModels?: string[];
+    tokenState?: string;
+    backendMode?: "web_account" | "official_api";
+    queueDepth?: number;
   },
 ) {
   const current = asJob(await dbGetJob(id));
@@ -344,7 +352,7 @@ export async function finishJobPg(
   }
 
   let url = result.url;
-  if (current.platform === "gemini" && result.ok) {
+  if ((current.platform === "gemini" || current.platform === "leonardo") && result.ok) {
     const { assertGeneratedImage } = await import("./provider/index");
     const gate = assertGeneratedImage(url, { allowSvg: process.env.RELAY_ALLOW_MOCK === "1" });
     if (!gate.ok) {
@@ -353,7 +361,7 @@ export async function finishJobPg(
       url = gate.url;
     }
   }
-  if (url && result.ok && current.platform === "gemini") {
+  if (url && result.ok && (current.platform === "gemini" || current.platform === "leonardo")) {
     const stored = await persistImageUrl(url);
     if (stored.ok) url = stored.url;
     else result = { ...result, ok: false, error: `IMAGE_NOT_FOUND: media store ${stored.error}` };
@@ -432,6 +440,20 @@ export async function finishJobPg(
     const threshold = plane.settings.failThreshold || 5;
     const cool = (plane.settings.coolDownSeconds || 300) * 1000;
     if (acc) {
+      const capabilityPatch: Record<string, unknown> = {};
+      if (Array.isArray(result.availableModels) && result.availableModels.length) {
+        capabilityPatch.availableModels = result.availableModels;
+      }
+      if (result.tokenState === "TOKEN_EXHAUSTED" || decision.code === "LEONARDO_TOKEN_EXHAUSTED") {
+        capabilityPatch.tokenState = "TOKEN_EXHAUSTED";
+      } else if (result.tokenState === "TOKEN_AVAILABLE" || result.tokenState === "TOKEN_LOW" || result.tokenState === "UNKNOWN") {
+        capabilityPatch.tokenState = result.tokenState;
+      }
+      if (result.pageState) capabilityPatch.lastPageState = result.pageState;
+      if (typeof result.queueDepth === "number") capabilityPatch.queueDepthHint = result.queueDepth;
+      if (Object.keys(capabilityPatch).length) {
+        await patchAccount(acc.id, capabilityPatch as never);
+      }
       if (result.ok && has) {
         if (isCanaryAccount(acc)) await recordCanaryResult(current.platform, true);
         await patchAccount(acc.id, {

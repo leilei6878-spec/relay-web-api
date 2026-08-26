@@ -1,8 +1,9 @@
-export type Platform = "chatgpt" | "gemini";
+export type Platform = "chatgpt" | "gemini" | "leonardo";
 export type AccountStatus = "pending_login" | "healthy" | "cooling" | "probing" | "invalid" | "banned";
 export type ProxyStatus = "active" | "disabled";
 export type ProxyType = "http" | "socks5" | "ss";
 export type LogStatus = "success" | "fail" | "switched";
+export type TokenState = "TOKEN_AVAILABLE" | "TOKEN_LOW" | "TOKEN_EXHAUSTED" | "UNKNOWN";
 
 export type Account = {
   id: string;
@@ -30,6 +31,12 @@ export type Account = {
   activeProbeAt?: string | null;
   pageFingerprint?: string | null;
   selectorPackVersion?: string | null;
+  availableModels?: string[];
+  tokenState?: TokenState;
+  planHint?: string | null;
+  lastPageState?: string | null;
+  generationConcurrency?: number;
+  queueDepthHint?: number | null;
 };
 
 export type Proxy = {

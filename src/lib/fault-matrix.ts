@@ -17,6 +17,20 @@ export const ErrorCode = {
   STALE_LEASE: "STALE_LEASE",
   MODEL_MISMATCH: "MODEL_MISMATCH",
   MODEL_SELECTION_UNCONFIRMED: "MODEL_SELECTION_UNCONFIRMED",
+  LEONARDO_LOGIN_REQUIRED: "LEONARDO_LOGIN_REQUIRED",
+  LEONARDO_SESSION_EXPIRED: "LEONARDO_SESSION_EXPIRED",
+  LEONARDO_CHALLENGE: "LEONARDO_CHALLENGE",
+  LEONARDO_TOKEN_EXHAUSTED: "LEONARDO_TOKEN_EXHAUSTED",
+  LEONARDO_QUEUE_FULL: "LEONARDO_QUEUE_FULL",
+  LEONARDO_RATE_LIMITED: "LEONARDO_RATE_LIMITED",
+  LEONARDO_ACCOUNT_RESTRICTED: "LEONARDO_ACCOUNT_RESTRICTED",
+  LEONARDO_MODEL_UNAVAILABLE: "LEONARDO_MODEL_UNAVAILABLE",
+  LEONARDO_DOM_CHANGED: "LEONARDO_DOM_CHANGED",
+  LEONARDO_GENERATION_FAILED: "LEONARDO_GENERATION_FAILED",
+  LEONARDO_GENERATION_TIMEOUT: "LEONARDO_GENERATION_TIMEOUT",
+  LEONARDO_RESULT_NOT_FOUND: "LEONARDO_RESULT_NOT_FOUND",
+  LEONARDO_DOWNLOAD_FAILED: "LEONARDO_DOWNLOAD_FAILED",
+  LEONARDO_PROXY_UNAVAILABLE: "LEONARDO_PROXY_UNAVAILABLE",
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -34,34 +48,24 @@ export type FaultDecision = {
   account_health_effect: AccountHealthEffect;
 };
 
+const accountSwitch = (
+  code: ErrorCode,
+  health: AccountHealthEffect,
+  domain: FaultClass = "account",
+): FaultDecision => ({
+  code,
+  fault_domain: domain,
+  retry_same_account: false,
+  switch_account: true,
+  switch_proxy: false,
+  provider_circuit_effect: "none",
+  account_health_effect: health,
+});
+
 export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
-  ACCOUNT_SESSION_EXPIRED: {
-    code: "ACCOUNT_SESSION_EXPIRED",
-    fault_domain: "account",
-    retry_same_account: false,
-    switch_account: true,
-    switch_proxy: false,
-    provider_circuit_effect: "none",
-    account_health_effect: "invalid",
-  },
-  ACCOUNT_BANNED: {
-    code: "ACCOUNT_BANNED",
-    fault_domain: "account",
-    retry_same_account: false,
-    switch_account: true,
-    switch_proxy: false,
-    provider_circuit_effect: "none",
-    account_health_effect: "banned",
-  },
-  ACCOUNT_RATE_LIMIT: {
-    code: "ACCOUNT_RATE_LIMIT",
-    fault_domain: "account",
-    retry_same_account: false,
-    switch_account: true,
-    switch_proxy: false,
-    provider_circuit_effect: "none",
-    account_health_effect: "cool",
-  },
+  ACCOUNT_SESSION_EXPIRED: accountSwitch("ACCOUNT_SESSION_EXPIRED", "invalid"),
+  ACCOUNT_BANNED: accountSwitch("ACCOUNT_BANNED", "banned"),
+  ACCOUNT_RATE_LIMIT: accountSwitch("ACCOUNT_RATE_LIMIT", "cool"),
   PROXY_UNAVAILABLE: {
     code: "PROXY_UNAVAILABLE",
     fault_domain: "proxy",
@@ -179,16 +183,98 @@ export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
     provider_circuit_effect: "none",
     account_health_effect: "none",
   },
+  LEONARDO_LOGIN_REQUIRED: accountSwitch("LEONARDO_LOGIN_REQUIRED", "invalid"),
+  LEONARDO_SESSION_EXPIRED: accountSwitch("LEONARDO_SESSION_EXPIRED", "invalid"),
+  LEONARDO_CHALLENGE: {
+    code: "LEONARDO_CHALLENGE",
+    fault_domain: "provider",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
+  LEONARDO_TOKEN_EXHAUSTED: accountSwitch("LEONARDO_TOKEN_EXHAUSTED", "cool"),
+  LEONARDO_QUEUE_FULL: accountSwitch("LEONARDO_QUEUE_FULL", "cool"),
+  LEONARDO_RATE_LIMITED: accountSwitch("LEONARDO_RATE_LIMITED", "cool"),
+  LEONARDO_ACCOUNT_RESTRICTED: accountSwitch("LEONARDO_ACCOUNT_RESTRICTED", "banned"),
+  LEONARDO_MODEL_UNAVAILABLE: accountSwitch("LEONARDO_MODEL_UNAVAILABLE", "cool"),
+  LEONARDO_DOM_CHANGED: {
+    code: "LEONARDO_DOM_CHANGED",
+    fault_domain: "provider",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "trip",
+    account_health_effect: "none",
+  },
+  LEONARDO_GENERATION_FAILED: accountSwitch("LEONARDO_GENERATION_FAILED", "failCount"),
+  LEONARDO_GENERATION_TIMEOUT: {
+    code: "LEONARDO_GENERATION_TIMEOUT",
+    fault_domain: "infra",
+    retry_same_account: true,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
+  LEONARDO_RESULT_NOT_FOUND: {
+    code: "LEONARDO_RESULT_NOT_FOUND",
+    fault_domain: "provider",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
+  LEONARDO_DOWNLOAD_FAILED: {
+    code: "LEONARDO_DOWNLOAD_FAILED",
+    fault_domain: "infra",
+    retry_same_account: true,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
+  LEONARDO_PROXY_UNAVAILABLE: {
+    code: "LEONARDO_PROXY_UNAVAILABLE",
+    fault_domain: "proxy",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: true,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
 };
 
 export function normalizeError(error?: string, faultHint?: string): ErrorCode {
   const t = `${faultHint || ""} ${error || ""}`.toUpperCase();
   if (t.includes("STALE_LEASE")) return "STALE_LEASE";
+  if (t.includes("LEONARDO_LOGIN_REQUIRED")) return "LEONARDO_LOGIN_REQUIRED";
+  if (t.includes("LEONARDO_SESSION_EXPIRED")) return "LEONARDO_SESSION_EXPIRED";
+  if (t.includes("LEONARDO_CHALLENGE")) return "LEONARDO_CHALLENGE";
+  if (t.includes("LEONARDO_TOKEN_EXHAUSTED") || (t.includes("TOKEN_EXHAUSTED") && t.includes("LEONARDO"))) {
+    return "LEONARDO_TOKEN_EXHAUSTED";
+  }
+  if (t.includes("LEONARDO_QUEUE_FULL") || (t.includes("QUEUE_FULL") && t.includes("LEONARDO"))) return "LEONARDO_QUEUE_FULL";
+  if (t.includes("LEONARDO_RATE_LIMITED")) return "LEONARDO_RATE_LIMITED";
+  if (t.includes("LEONARDO_ACCOUNT_RESTRICTED")) return "LEONARDO_ACCOUNT_RESTRICTED";
+  if (t.includes("LEONARDO_MODEL_UNAVAILABLE") || (t.includes("MODEL_UNAVAILABLE") && t.includes("LEONARDO"))) {
+    return "LEONARDO_MODEL_UNAVAILABLE";
+  }
+  if (t.includes("LEONARDO_DOM_CHANGED")) return "LEONARDO_DOM_CHANGED";
+  if (t.includes("LEONARDO_GENERATION_TIMEOUT")) return "LEONARDO_GENERATION_TIMEOUT";
+  if (t.includes("LEONARDO_RESULT_NOT_FOUND")) return "LEONARDO_RESULT_NOT_FOUND";
+  if (t.includes("LEONARDO_DOWNLOAD_FAILED")) return "LEONARDO_DOWNLOAD_FAILED";
+  if (t.includes("LEONARDO_PROXY_UNAVAILABLE")) return "LEONARDO_PROXY_UNAVAILABLE";
+  if (t.includes("LEONARDO_GENERATION_FAILED")) return "LEONARDO_GENERATION_FAILED";
   if (t.includes("MODEL_SELECTION_UNCONFIRMED")) return "MODEL_SELECTION_UNCONFIRMED";
   if (t.includes("MODEL_MISMATCH")) return "MODEL_MISMATCH";
   if (t.includes("CHALLENGE")) return "ACCOUNT_RATE_LIMIT";
   if (t.includes("LOGIN_REQUIRED")) return "ACCOUNT_SESSION_EXPIRED";
-  if (t.includes("DOM_CHANGED") || t.includes("DOM_UNKNOWN") || t.includes("SELECTOR") || t.includes("选择器")) return "PROVIDER_DOM_CHANGED";
+  if (t.includes("DOM_CHANGED") || t.includes("DOM_UNKNOWN") || t.includes("SELECTOR") || t.includes("选择器")) {
+    return "PROVIDER_DOM_CHANGED";
+  }
   if (t.includes("PROVIDER_UNAVAILABLE") || t.includes("PROVIDER_ERROR")) return "PROVIDER_UNAVAILABLE";
   if (t.includes("IMAGE_NOT_FOUND") || t.includes("未返回图片")) return "IMAGE_NOT_FOUND";
   if (t.includes("BANNED") || t.includes("封")) return "ACCOUNT_BANNED";

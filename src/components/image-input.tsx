@@ -5,10 +5,12 @@ export function ImageInput({
   images,
   onChange,
   hint = "可上传最多 4 张，作为对话理解或出图参考",
+  max = 4,
 }: {
   images: string[];
   onChange: (next: string[]) => void;
   hint?: string;
+  max?: number;
 }) {
   const ref = useRef<HTMLInputElement>(null);
 
@@ -17,7 +19,7 @@ export function ImageInput({
     const next = [...images];
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
-      if (next.length >= 4) break;
+      if (next.length >= max) break;
       if (file.size > 4_000_000) continue;
       next.push(await readDataUrl(file));
     }

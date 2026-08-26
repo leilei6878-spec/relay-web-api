@@ -30,9 +30,9 @@ export function inspectSession(json: string, platform: Platform) {
         names.has("__Secure-next-auth.session-token.0");
       if (!has) return { ok: false as const, reason: "缺少 ChatGPT 登录 Cookie" };
     }
-    if (platform === "gemini") {
-      const has = names.has("SID") || names.has("__Secure-1PSID") || names.has("__Secure-1PSIDTS");
-      if (!has && cookies.length < 8) return { ok: false as const, reason: "缺少 Gemini 登录 Cookie" };
+    if (platform === "leonardo") {
+      const hostHit = cookies.some((c) => /leonardo/i.test((c as { domain?: string }).domain || c.name || ""));
+      if (!hostHit && cookies.length < 4) return { ok: false as const, reason: "缺少 Leonardo 登录 Cookie" };
     }
     const sessionCookies = cookies.filter((c) => /session|SID|PSID|auth|oai-did/i.test(c.name || ""));
     const expiries = sessionCookies

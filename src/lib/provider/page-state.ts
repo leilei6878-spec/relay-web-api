@@ -18,17 +18,27 @@ export function detectPageState(signals: PageSignals, _provider?: ProviderId): P
   const html = signals.html || "";
   if (signals.hasCaptcha || CHALLENGE.test(html) || /challenge/i.test(url)) return "CHALLENGE";
   if (signals.hasRestricted || RESTRICTED.test(html)) return "ACCOUNT_RESTRICTED";
+  if (/out of tokens|no tokens remaining|token(?:s)? exhausted|insufficient tokens/i.test(html)) return "TOKEN_EXHAUSTED";
+  if (/queue (is )?full|too many pending generations/i.test(html)) return "QUEUE_FULL";
   if (signals.hasRateLimit || RATE.test(html)) return "RATE_LIMITED";
-  if (signals.hasLoginForm || LOGIN_URL.test(url) || LOGIN_HTML.test(html)) return "LOGIN_REQUIRED";
+  if (
+    signals.hasLoginForm ||
+    LOGIN_URL.test(url) ||
+    LOGIN_HTML.test(html) ||
+    (/sign in|sign up/i.test(html) && /leonardo/i.test(url) && !signals.hasComposer)
+  ) {
+    return "LOGIN_REQUIRED";
+  }
   if (PROVIDER_ERR.test(html) && !signals.hasComposer) return "PROVIDER_ERROR";
   if (signals.hasStop) return "GENERATING";
+  if (_provider === "leonardo" && signals.hasComposer && signals.hasSend) return "IMAGE_GENERATOR_READY";
   if (signals.hasAssistant && !signals.hasStop) return "RESULT_READY";
   if (signals.hasComposer && signals.hasSend) return "COMPOSER_READY";
   if (signals.hasComposer) return "COMPOSER_READY";
   if (signals.hasAssistant || (signals.cookieNames && signals.cookieNames.length >= 2 && !LOGIN_URL.test(url))) {
     return "AUTHENTICATED";
   }
-  if (/chatgpt\.com|gemini\.google/.test(url) && !LOGIN_URL.test(url) && !signals.hasLoginForm) {
+  if (/chatgpt\.com|gemini\.google|leonardo\.ai/.test(url) && !LOGIN_URL.test(url) && !signals.hasLoginForm) {
     return "AUTHENTICATED";
   }
   if (!signals.hasComposer && (html || url) && !signals.hasLoginForm) return "DOM_UNKNOWN";
@@ -51,8 +61,20 @@ export function errorForPageState(state: PageState, selectorFailed?: boolean): {
       return { code: "ACCOUNT_BANNED", message: "ACCOUNT_RESTRICTED: account disabled", polluteAccountPool: true };
     case "PROVIDER_ERROR":
       return { code: "PROVIDER_UNAVAILABLE", message: "PROVIDER_ERROR: provider error page", polluteAccountPool: false };
+    case "TOKEN_EXHAUSTED":
+      return { code: "LEONARDO_TOKEN_EXHAUSTED", message: "TOKEN_EXHAUSTED", polluteAccountPool: true };
+    case "QUEUE_FULL":
+      return { code: "LEONARDO_QUEUE_FULL", message: "QUEUE_FULL", polluteAccountPool: true };
+    case "MODEL_UNAVAILABLE":
+      return { code: "LEONARDO_MODEL_UNAVAILABLE", message: "MODEL_UNAVAILABLE", polluteAccountPool: false };
     case "GENERATING":
       return { code: "GENERATION_TIMEOUT", message: "TIMEOUT: still generating", polluteAccountPool: false };
+    case "IMAGE_GENERATOR_READY":
+    case "MODEL_SELECTOR_READY":
+    case "GENERATION_PENDING":
+    case "GENERATION_RUNNING":
+    case "GENERATION_COMPLETE":
+    case "GENERATION_FAILED":
     case "AUTHENTICATED":
     case "COMPOSER_READY":
     case "RESULT_READY":
