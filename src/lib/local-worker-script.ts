@@ -272,9 +272,220 @@ def wait_composer_files(page, timeout_ms=8000):
         time.sleep(0.12)
     return False
 
+def leonardo_refs_attached(page):
+    try:
+        if page.locator('button[aria-label*="Remove" i], button[aria-label*="remove image" i], button[aria-label*="Delete" i]').count() > 0:
+            return True
+        thumbs = page.evaluate("""() => {
+          const ta = document.querySelector('#home-prompt-textarea, textarea, div[contenteditable="true"]');
+          let root = ta ? ta.parentElement : document.body;
+          for (let i = 0; i < 5 && root && root !== document.body; i++) root = root.parentElement;
+          root = root || document.body;
+          const imgs = [...root.querySelectorAll('img')].filter((im) => (im.naturalWidth || im.width || 0) >= 24);
+          return imgs.length;
+        }""")
+        if int(thumbs or 0) > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+def attach_leonardo_refs(page, images):
+    seen = []
+    for item in images or []:
+        if item and item not in seen:
+            seen.append(item)
+    paths = materialize_images(seen[:6])
+    if not paths:
+        return "LEONARDO_DOM_CHANGED: cannot read reference images"
+    print("leonardo attaching %d refs" % len(paths), flush=True)
+    attached = {"ok": False}
+
+    def mark_ok(how):
+        attached["ok"] = True
+        print("leonardo attach", how, flush=True)
+        return True
+
+    def on_chooser(fc):
+        try:
+            fc.set_files(paths)
+            mark_ok("filechooser")
+        except Exception as e:
+            print("leonardo filechooser fail", str(e)[:100], flush=True)
+
+    try:
+        page.on("filechooser", on_chooser)
+    except Exception:
+        pass
+
+    def try_set_files():
+        if attached["ok"]:
+            return True
+        loc = page.locator("input[type=file]")
+        try:
+            n = loc.count()
+        except Exception:
+            n = 0
+        print("leonardo file inputs", n, flush=True)
+        if n <= 0:
+            return False
+        for idx in range(n - 1, -1, -1):
+            try:
+                loc.nth(idx).set_input_files(paths, timeout=3500)
+                page.wait_for_timeout(500)
+                return mark_ok("set_input_files %d" % idx)
+            except Exception as e:
+                print("leonardo set fail", idx, str(e).splitlines()[0][:120], flush=True)
+        return False
+
+    def js_click(substr):
+        try:
+            hit = page.evaluate(
+                """(s) => {
+                  const want = (s || '').toLowerCase();
+                  const nodes = [...document.querySelectorAll('button, [role=menuitem], [role=option], [data-slot=dropdown-menu-item], [data-radix-collection-item], [role=button]')];
+                  const match = nodes.filter((e) => ((e.innerText || '') + ' ' + (e.getAttribute('aria-label') || '')).toLowerCase().includes(want));
+                  const vis = match.filter((e) => {
+                    const r = e.getBoundingClientRect();
+                    const st = getComputedStyle(e);
+                    return r.width > 2 && r.height > 2 && r.bottom > 0 && r.top < window.innerHeight && st.visibility !== 'hidden' && st.display !== 'none';
+                  });
+                  const n = vis[vis.length - 1] || match[match.length - 1];
+                  if (!n) return '';
+                  n.click();
+                  const r = n.getBoundingClientRect();
+                  return ((n.innerText || '') + '|' + (n.getAttribute('aria-label') || '') + '|vis=' + vis.length + '|box=' + Math.round(r.width) + 'x' + Math.round(r.height)).trim();
+                }""",
+                substr,
+            )
+            print("leonardo js-click", substr, hit, flush=True)
+            return bool(hit)
+        except Exception as e:
+            print("leonardo js-click fail", substr, str(e)[:80], flush=True)
+            return False
+
+    try:
+        if try_set_files() or attached["ok"]:
+            return None
+        opened = page.evaluate("""() => {
+          const ta = document.querySelector('#home-prompt-textarea, textarea[placeholder*="prompt" i], textarea');
+          const isVis = (el) => {
+            const r = el.getBoundingClientRect();
+            const st = getComputedStyle(el);
+            return r.width > 6 && r.height > 6 && r.bottom > 0 && r.top < window.innerHeight && st.visibility !== 'hidden' && st.display !== 'none';
+          };
+          const score = (b) => {
+            const t = ((b.getAttribute('aria-label') || '') + ' ' + (b.innerText || '')).toLowerCase();
+            if (t.includes('add reference to generation')) return 4;
+            if (t.includes('add image reference')) return 3;
+            if (t.includes('image guidance')) return 3;
+            if (t.includes('add reference') || t.includes('add image')) return 2;
+            if (t.includes('upload')) return 1;
+            return 0;
+          };
+          const near = [];
+          if (ta) {
+            let root = ta.parentElement;
+            for (let i = 0; i < 8 && root; i++) {
+              near.push(...root.querySelectorAll('button'));
+              root = root.parentElement;
+            }
+          }
+          const all = [...new Set([...near, ...document.querySelectorAll('button')])];
+          const ranked = all.filter(isVis).map((b) => ({b: b, s: score(b)})).filter((x) => x.s > 0).sort((a, c) => c.s - a.s);
+          const hit = ranked[0];
+          if (!hit) return '';
+          hit.b.click();
+          const r = hit.b.getBoundingClientRect();
+          return ((hit.b.getAttribute('aria-label') || '') + '|' + (hit.b.innerText || '').trim() + '|' + Math.round(r.width) + 'x' + Math.round(r.height));
+        }""")
+        print("leonardo open ref menu", opened, flush=True)
+        page.wait_for_timeout(450)
+        js_click("image reference")
+        page.wait_for_timeout(400)
+        try:
+            page.wait_for_selector("input[type=file]", timeout=2500, state="attached")
+        except Exception:
+            pass
+        if try_set_files() or attached["ok"] or leonardo_refs_attached(page):
+            return None
+        for name in ("Image Guidance", "upload image", "upload", "style reference", "content reference"):
+            js_click(name)
+            page.wait_for_timeout(300)
+            try:
+                page.wait_for_selector("input[type=file]", timeout=1200, state="attached")
+            except Exception:
+                pass
+            if try_set_files() or attached["ok"] or leonardo_refs_attached(page):
+                return None
+        try:
+            dump = page.evaluate("""() => [...document.querySelectorAll('button, [role=button], label, input[type=file]')].slice(0, 120).map((e) => ((e.getAttribute('aria-label') || '') + '|' + ((e.innerText || '').trim().slice(0, 36)) + '|' + (e.getAttribute('type') || '') + '|' + e.tagName)).filter((t) => /image|upload|ref|file|add|guid|attach|photo|drop/i.test(t))""")
+            print("leonardo upload dump", dump, flush=True)
+            page.screenshot(path="/tmp/leo-upload.png", timeout=4000)
+        except Exception:
+            pass
+        return "LEONARDO_DOM_CHANGED: file input missing"
+    finally:
+        try:
+            page.remove_listener("filechooser", on_chooser)
+        except Exception:
+            try:
+                page.off("filechooser", on_chooser)
+            except Exception:
+                pass
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+
+
+def leonardo_js_fill(page, prompt):
+    try:
+        return bool(page.evaluate(
+            """(t) => {
+              const els = [...document.querySelectorAll('#home-prompt-textarea, textarea, [contenteditable="true"]')];
+              const el = els.find((e) => /prompt/i.test(e.getAttribute('placeholder') || '') || e.id === 'home-prompt-textarea') || els[els.length - 1];
+              if (!el) return false;
+              el.focus();
+              if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+                const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+                const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+                if (desc && desc.set) desc.set.call(el, t);
+                else el.value = t;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+              }
+              el.textContent = t;
+              el.dispatchEvent(new InputEvent('input', { bubbles: true, data: t, inputType: 'insertText' }));
+              return true;
+            }""",
+            prompt,
+        ))
+    except Exception as e:
+        print("leonardo fill eval", str(e)[:100], flush=True)
+        return False
+
+
+def leonardo_js_generate(page):
+    try:
+        clicked = page.evaluate("""() => {
+          const b = document.querySelector('button[aria-label="Generate"], button[aria-label*="Generate" i]');
+          if (b && !b.disabled) { b.click(); return 'aria'; }
+          const t = [...document.querySelectorAll('button')].find((e) => /^(generate|create)$/i.test((e.innerText || '').trim()) && !e.disabled);
+          if (t) { t.click(); return 'text'; }
+          return '';
+        }""")
+        print("leonardo generate click", clicked, flush=True)
+        return bool(clicked)
+    except Exception as e:
+        print("leonardo generate fail", str(e)[:100], flush=True)
+        return False
+
+
 # Ignore ChatGPT placeholders such as "Analyzing image" so vision waits for the real answer.
 PLACEHOLDER_TEXT = re.compile(
-    r"^(analyzing( image)?|thinking|working on it|searching|reading|loading|正在(分析|思考|生成|阅读|识别)|分析图片|分析中)[\s.。…]*$",
+    r"^(analyzing( image)?|thinking|working on it|searching|reading|loading|正在(分析|思考|生成|阅读|识别)|分析图片|分析中)[s.。…]*$",
     re.I,
 )
 
@@ -1783,8 +1994,11 @@ def run_leonardo(body):
             return ""
 
     def is_ai_creation(page):
+        u = (page.url or "").lower()
+        if "/generate" in u or "ai-creation" in u:
+            return True
         low = page_text(page, 5000).lower()
-        return any(s in low for s in ("nano banana", "gpt image 2", "number of generations", "image dimensions"))
+        return any(s in low for s in ("nano banana", "gpt image 2", "number of generations", "image dimensions", "ai creation"))
 
     def click_named(page, name, exact=False):
         for getter in (
@@ -1802,14 +2016,16 @@ def run_leonardo(body):
         return False
 
     def goto_ai_creation(page):
+        if is_ai_creation(page):
+            print("leonardo already on generator", page.url, flush=True)
+            return True
         urls = [
+            "https://app.leonardo.ai/generate?model=auto-preset",
+            "https://app.leonardo.ai/generate",
             target,
             "https://app.leonardo.ai/ai-creation",
             "https://app.leonardo.ai/image-generation",
-            "https://app.leonardo.ai/generate?model=auto-preset",
-            "https://app.leonardo.ai/generate",
             "https://app.leonardo.ai/create",
-            home,
         ]
         seen = set()
         for u in urls:
@@ -1821,6 +2037,7 @@ def run_leonardo(body):
             except Exception:
                 pass
             page.wait_for_timeout(900)
+            print("leonardo nav", page.url, "ai=", is_ai_creation(page), flush=True)
             if is_ai_creation(page):
                 return True
             for name, exact in (("AI Creation", False), ("Image generation", False), ("Generate an image", False), ("Image", True)):
@@ -1942,35 +2159,34 @@ def run_leonardo(body):
             except Exception:
                 pass
         baseline = snapshot_image_srcs(page)
-        if not fill_composer(page, box, prompt):
+        if images:
+            print("leonardo filling prompt before refs", flush=True)
+            leonardo_js_fill(page, prompt)
+            up_err = attach_leonardo_refs(page, images)
+            if up_err:
+                return {"ok": False, "error": up_err + " url=" + (page.url or ""), "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
+            print("leonardo refs attached, filling prompt", flush=True)
+            filled = leonardo_js_fill(page, prompt)
+            print("leonardo fill js", filled, flush=True)
+            if not filled:
+                return {"ok": False, "error": "LEONARDO_DOM_CHANGED: cannot fill prompt", "fault": "provider", "backendMode": "web_account"}
+        elif not fill_composer(page, box, prompt):
             try:
                 box.fill(prompt, timeout=1000)
             except Exception:
                 return {"ok": False, "error": "LEONARDO_DOM_CHANGED: cannot fill prompt", "fault": "provider", "backendMode": "web_account"}
-        if images:
-            try:
-                page.locator('button[aria-label="Add image reference"]').first.click(timeout=1500, force=True)
-            except Exception:
-                pass
-            fi = page.locator("input[type=file]").first
-            paths = []
-            for i, u in enumerate(images[:6]):
-                path = os.path.join(tempfile.gettempdir(), "leo-ref-%d.png" % i)
-                if u.startswith("data:"):
-                    raw = u.split(",", 1)[-1]
-                    open(path, "wb").write(base64.b64decode(raw))
-                    paths.append(path)
-            if paths and fi.count() > 0:
+        print("leonardo clicking generate", flush=True)
+        if not leonardo_js_generate(page):
+            if images:
                 try:
-                    fi.set_input_files(paths)
+                    page.keyboard.press("Enter")
                 except Exception:
-                    return {"ok": False, "error": "LEONARDO_DOM_CHANGED: cannot upload references", "fault": "provider", "backendMode": "web_account"}
-            elif paths and fi.count() == 0:
-                return {"ok": False, "error": "LEONARDO_DOM_CHANGED: file input missing", "fault": "provider", "backendMode": "web_account"}
-        try:
-            gen.click(timeout=1500, force=True)
-        except Exception:
-            page.keyboard.press("Enter")
+                    pass
+            else:
+                try:
+                    gen.click(timeout=1500, force=True)
+                except Exception:
+                    page.keyboard.press("Enter")
         page.wait_for_timeout(800)
         pst2 = detect_page_state(page, "leonardo")
         if pst2 in ("LOGIN_REQUIRED", "TOKEN_EXHAUSTED", "QUEUE_FULL", "CHALLENGE"):
