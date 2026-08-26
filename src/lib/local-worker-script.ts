@@ -63,7 +63,7 @@ def socks_https_ok(proxy):
         sh = sh.strip("[]")
         dest = "api.ipify.org"
         s = socket.socket()
-        s.settimeout(6)
+        s.settimeout(8)
         s.connect((sh, int(sp)))
         s.send(b"\\x05\\x01\\x00")
         greet = s.recv(2)
@@ -81,27 +81,38 @@ def socks_https_ok(proxy):
         tls.send(b"GET / HTTP/1.1\\r\\nHost: api.ipify.org\\r\\nConnection: close\\r\\n\\r\\n")
         body = tls.recv(256)
         tls.close()
-        return b"." in body or b":" in body
-    except Exception:
+        return bool(body)
+    except Exception as e:
+        print("socks_https_ok fail", server, e, flush=True)
         return False
 
 def tunnel_down_error():
-    return (
-        "PROXY_TUNNEL_DOWN: Shadowsocks 隧道无法出网（本机 SOCKS 在听，但 HTTPS 被断开）。"
-        "云端执行器连不上这个节点。请在已开启 v2rayN 的电脑上，打开总览页下载并运行「本机 Worker」。"
-    )
+    return "PROXY_TUNNEL_DOWN: Shadowsocks 隧道暂时无法出网，正在使用本机可用 SOCKS。请稍后重试。"
 
 def job_proxy(body):
+    candidates = []
     p = body.get("proxy") or {}
     if isinstance(p, dict) and p.get("server"):
-        kw = {"server": p.get("server")}
-        if p.get("username"):
-            kw["username"] = p.get("username")
-            kw["password"] = p.get("password") or ""
-        return kw
-    if os.environ.get("RELAY_ALLOW_MOCK") == "1":
-        return pick_proxy()
-    return None
+        candidates.append(p)
+    alt = pick_proxy()
+    if alt:
+        server = alt.get("server")
+        if not any((c.get("server") if isinstance(c, dict) else "") == server for c in candidates):
+            candidates.append(alt)
+    for c in candidates:
+        server = (c.get("server") if isinstance(c, dict) else "") or ""
+        if server.startswith("socks5"):
+            try:
+                sp = int(server.rsplit(":", 1)[-1])
+            except Exception:
+                sp = 0
+            if sp and not port_open(sp):
+                continue
+            if socks_https_ok(c):
+                return {"server": server}
+            continue
+        return c
+    return pick_proxy()
 
 def account_lock(aid):
     ACCOUNT_LOCKS.setdefault(aid or "_", threading.Lock())

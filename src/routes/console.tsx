@@ -266,13 +266,7 @@ function Console() {
       </header>
       {workerOnline === false && (
         <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-danger">
-          服务器执行器离线。请到总览页启动，或检查 python3。
-        </p>
-      )}
-      {/PROXY_TUNNEL_DOWN|CHAT_PAGE_TIMEOUT|ERR_CONNECTION_CLOSED/.test(content) && (
-        <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm">
-          这台云端执行器走不通你的 Shadowsocks 节点（TCP 通、HTTPS 隧道被断开）。
-          请到「总览」下载本机 Worker，在已经用 v2rayN 连上同一节点的电脑上运行，再测 API。
+          服务器执行器离线，正在自动拉起。请稍后再发一次。
         </p>
       )}
 
