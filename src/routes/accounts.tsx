@@ -510,7 +510,7 @@ pause
 `;
       const readme =
         account.platform === "leonardo"
-          ? "1. Unzip\n2. Double-click run.bat\n3. Log in at canva.com (international). If it jumps to canva.cn it will be pulled back. Accounts on .cn cannot be used.\n4. After Canva, Leonardo opens — Sign In must disappear. Drag state.json back.\n"
+          ? "1. Unzip\n2. Fully quit Chrome (system tray too)\n3. Double-click run.bat — it opens your real Chrome, not an automation window\n4. Log in at canva.com, then Leonardo. Drag state.json back.\n"
           : "1. Unzip\n2. Double-click run.bat\n3. Login in the window, then press Enter in the terminal\n4. Drag state.json back to Relay\n";
       const files: { name: string; data: Uint8Array }[] = [
         { name: "login.py", data: textFile(py) },
@@ -586,7 +586,7 @@ pause
         <p className="text-sm text-muted">
           平台绑好代理后点「下载一键登录包」。解压双击 run.bat，不用自己对 IP。
           {account.platform === "leonardo"
-            ? " 必须登录 canva.com 国际站，canva.cn 账号不能用。登录包会禁止跳到 .cn。Canva 登录成功且 Leonardo 的 Sign In 消失后，再拖回文件。"
+            ? " 必须登录 canva.com 国际站。请先完全退出本机 Chrome，登录包会打开你平时那个浏览器（不要用自动化弹窗）。Canva 登录成功且 Leonardo 的 Sign In 消失后再拖回文件。"
             : ""}
         </p>
         {error && <p className="mt-2 text-sm text-danger">{error}</p>}

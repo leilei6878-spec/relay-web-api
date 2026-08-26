@@ -124,7 +124,7 @@ export function loginHelperScript(account: Account, proxy: Proxy, password: stri
         : "#prompt-textarea, textarea#prompt-textarea, [data-testid='send-button']";
 
   const waitSave = `
-import re, base64
+import re, base64, json, os, shutil, socket, subprocess, time
 HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
 PLATFORM = ${JSON.stringify(account.platform)}
 READY_SEL = ${JSON.stringify(readySel)}
@@ -178,6 +178,24 @@ def write_idp_pac(server):
     return "data:application/x-ns-proxy-autoconfig;base64," + b64
 
 def save_state(context):
+    try:
+        state = context.storage_state()
+    except Exception as e:
+        print("读取登录态失败", e)
+        return False
+    if PLATFORM == "leonardo":
+        keep = []
+        for c in state.get("cookies") or []:
+            blob = "%s %s" % (c.get("domain") or "", c.get("name") or "")
+            if re.search(r"leonardo|canva|cognito|google|apple|microsoft|amazon", blob, re.I):
+                keep.append(c)
+        if keep:
+            state["cookies"] = keep
+        state["origins"] = [
+            o for o in (state.get("origins") or [])
+            if re.search(r"leonardo|canva", o.get("origin") or "", re.I)
+        ]
+    text = json.dumps(state)
     raw = []
     home = os.path.expanduser("~")
     desktop = os.path.join(os.environ.get("USERPROFILE", home), "Desktop")
@@ -195,7 +213,8 @@ def save_state(context):
         if folder and not os.path.isdir(folder):
             continue
         try:
-            context.storage_state(path=path)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
             raw.append(os.path.abspath(path))
         except Exception as e:
             print("写入失败", path, e)
@@ -299,6 +318,18 @@ def sign_in_visible(page):
                 pass
     return False
 
+def dismiss_canva_cookies(page):
+    for label in ("Accept all cookies", "Accept all", "Allow all"):
+        try:
+            btn = page.get_by_role("button", name=label)
+            if btn.count() > 0 and btn.first.is_visible():
+                btn.first.click(timeout=1500)
+                print("已接受 Cookie")
+                return True
+        except Exception:
+            pass
+    return False
+
 def logged_in(page, context):
     url = page.url or ""
     if PLATFORM == "leonardo":
@@ -332,6 +363,8 @@ def wait_login(page, context):
     redirected = False
     for _ in range(180):
         try:
+            if PLATFORM == "leonardo":
+                dismiss_canva_cookies(page)
             if logged_in(page, context):
                 if PLATFORM == "leonardo":
                     try:
@@ -424,6 +457,119 @@ def open_context(browser):
     if PLATFORM == "leonardo":
         attach_canva_com_guard(context)
     return context
+
+def find_chrome_exe():
+    local = os.environ.get("LOCALAPPDATA") or ""
+    pf = os.environ.get("PROGRAMFILES") or "C:/Program Files"
+    pf86 = os.environ.get("PROGRAMFILES(X86)") or "C:/Program Files (x86)"
+    cands = [
+        os.path.join(pf, "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(pf86, "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(local, "Google", "Chrome", "Application", "chrome.exe"),
+        os.path.join(pf, "Microsoft", "Edge", "Application", "msedge.exe"),
+        os.path.join(local, "Microsoft", "Edge", "Application", "msedge.exe"),
+    ]
+    for path in cands:
+        if os.path.isfile(path):
+            return path
+    return shutil.which("chrome") or shutil.which("msedge") or shutil.which("google-chrome")
+
+def chrome_user_data(exe):
+    local = os.environ.get("LOCALAPPDATA") or ""
+    if exe and "Edge" in exe.replace("\\\\", "/"):
+        path = os.path.join(local, "Microsoft", "Edge", "User Data")
+    else:
+        path = os.path.join(local, "Google", "Chrome", "User Data")
+    return path if path and os.path.isdir(path) else ""
+
+def chrome_running(user_data):
+    if not user_data:
+        return False
+    return os.path.exists(os.path.join(user_data, "lockfile")) or os.path.exists(os.path.join(user_data, "SingletonLock"))
+
+def open_leonardo_chrome(p, proxy):
+    server = (proxy or {}).get("server") if isinstance(proxy, dict) else ""
+    exe = find_chrome_exe()
+    if not exe:
+        print("没有本机 Chrome，回退自动化窗口（Canva 更容易拦验证码）")
+        browser = open_browser(p, proxy)
+        context = open_context(browser)
+        page = context.new_page()
+        return browser, context, page, False
+    user_data = chrome_user_data(exe)
+    print("将打开本机 Chrome，和你平时能登录 Canva 的是同一个浏览器。")
+    if user_data and chrome_running(user_data):
+        print("请完全退出 Chrome（任务栏、右下角托盘都要退），然后按回车。")
+        try:
+            input()
+        except Exception:
+            pass
+    if user_data and chrome_running(user_data):
+        print("Chrome 仍在运行，改用临时配置，验证码仍可能被拦。")
+        user_data = os.path.join(HERE, "chrome-profile")
+        os.makedirs(user_data, exist_ok=True)
+    elif user_data:
+        print("使用本机 Chrome 配置文件")
+    else:
+        user_data = os.path.join(HERE, "chrome-profile")
+        os.makedirs(user_data, exist_ok=True)
+    debug = 0
+    for port in range(9222, 9240):
+        s = socket.socket()
+        try:
+            s.bind(("127.0.0.1", port))
+            debug = port
+            break
+        except OSError:
+            pass
+        finally:
+            s.close()
+    if not debug:
+        debug = 9222
+    args = [
+        exe,
+        "--user-data-dir=" + user_data,
+        "--remote-debugging-port=%d" % debug,
+        "--remote-allow-origins=*",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-quic",
+        CANVA_COM,
+    ]
+    if server:
+        args.insert(-1, "--proxy-server=" + server)
+    print("正在启动本机 Chrome…")
+    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    last_err = ""
+    for _ in range(40):
+        try:
+            browser = p.chromium.connect_over_cdp("http://127.0.0.1:%d" % debug)
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+            attach_canva_com_guard(context)
+            page = context.pages[0] if context.pages else context.new_page()
+            print("已接上本机 Chrome。请在这个窗口登录 canva.com。")
+            return browser, context, page, True
+        except Exception as e:
+            last_err = str(e)[:160]
+            time.sleep(0.4)
+    print("接不上本机 Chrome：", last_err)
+    browser = open_browser(p, proxy)
+    context = open_context(browser)
+    page = context.new_page()
+    return browser, context, page, False
+
+def boot(p, proxy, url):
+    if PLATFORM == "leonardo":
+        return open_leonardo_chrome(p, proxy)
+    browser = open_browser(p, proxy)
+    context = open_context(browser)
+    page = context.new_page()
+    try:
+        page.goto(url, wait_until="domcontentloaded", timeout=45000)
+    except Exception as e:
+        print("打开失败", str(e)[:120])
+    return browser, context, page, False
 `;
 
   if (proxy.type !== "ss") {
@@ -438,14 +584,11 @@ URL = ${JSON.stringify(url)}
 PROXY = ${JSON.stringify(proxyCfg, null, 4)}
 
 with sync_playwright() as p:
-    browser = open_browser(p, PROXY)
-    context = open_context(browser)
-    page = context.new_page()
     print("平台节点:", ${node})
-    page.goto(URL, wait_until="domcontentloaded", timeout=45000)
-    print("若出现「糟糕，出错了」，点重试，或在地址栏打开 https://chatgpt.com/auth/login")
+    browser, context, page, cdp = boot(p, PROXY, URL)
     wait_login(page, context)
-    browser.close()
+    if not cdp:
+        browser.close()
 `;
   }
 
@@ -545,21 +688,13 @@ socks_port, scheme, child = pick_socks()
 
 try:
     with sync_playwright() as p:
-        browser = open_browser(p, {"server": "%s://127.0.0.1:%d" % (scheme, socks_port)})
-        context = open_context(browser)
-        page = context.new_page()
+        proxy = {"server": "%s://127.0.0.1:%d" % (scheme, socks_port)}
         print("平台节点:", ${node})
         print("正在打开登录页…")
-        if not open_page(page, URL, 45000):
-            print("登录页打不开。请确认 v2rayN 已开、选中同一条日本节点。")
-            try:
-                input()
-            except Exception:
-                pass
-            sys.exit(1)
-        print("若出现「糟糕，出错了」，点重试即可。登录成功会自动保存。")
+        browser, context, page, cdp = boot(p, proxy, URL)
         wait_login(page, context)
-        browser.close()
+        if not cdp:
+            browser.close()
 finally:
     if child:
         child.terminate()

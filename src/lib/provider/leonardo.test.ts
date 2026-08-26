@@ -254,6 +254,10 @@ test("leonardo login helper waits for Sign In to disappear, not the public compo
   assert.match(py, /to_canva_com/);
   assert.match(py, /attach_canva_com_guard/);
   assert.match(py, /CANVA_COM/);
+  assert.match(py, /connect_over_cdp/);
+  assert.match(py, /user-data-dir=/);
+  assert.match(py, /Accept all cookies/);
+  assert.match(py, /完全退出 Chrome/);
 });
 
 test("leonardo SS helper pins canva.com through the bound node", () => {
