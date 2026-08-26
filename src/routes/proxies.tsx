@@ -5,7 +5,7 @@ import { AppShell } from "@/components/app-shell";
 import { ProxyStatusBadge } from "@/components/status";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Textarea } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { probeProxy } from "@/lib/gateway";
 import { parseShareLink } from "@/lib/proxy-link";
@@ -406,6 +406,12 @@ function ImportLink() {
   const [open, setOpen] = useState(false);
   const [uri, setUri] = useState("");
 
+  const preview = uri.trim() ? parseShareLink(uri) : null;
+
+  function applyUri(value: string) {
+    setUri(value);
+  }
+
   function submit() {
     const parsed = parseShareLink(uri);
     if (!parsed.ok) {
@@ -417,7 +423,7 @@ function ImportLink() {
       return;
     }
     addProxy(parsed.data);
-    toast.success(`已导入 ${parsed.data.name}`);
+    toast.success(`已导入 ${parsed.data.name}（${parsed.data.host}:${parsed.data.port}）`);
     setUri("");
     setOpen(false);
   }
@@ -428,14 +434,30 @@ function ImportLink() {
         <Button variant="secondary">导入分享链接</Button>
       </DialogTrigger>
       <DialogContent title="导入 ss:// 节点">
-        <p className="text-sm text-muted">导入后可再点修改。Shadowsocks 走本机 SOCKS 做连通性测试。</p>
-        <Input
-          className="mt-3"
+        <p className="text-sm text-muted">
+          请粘贴<strong>整行</strong>，必须带 <code>@主机:端口</code>。从 v2rayN 复制分享链接，不要只复制二维码下面截断的前半段。
+        </p>
+        <Textarea
+          className="mt-3 font-mono text-xs break-all"
           value={uri}
-          onChange={(e) => setUri(e.target.value)}
-          placeholder="ss://..."
+          onChange={(e) => applyUri(e.target.value)}
+          onPaste={(e) => {
+            const text = e.clipboardData.getData("text");
+            if (text) {
+              e.preventDefault();
+              applyUri(text);
+            }
+          }}
+          placeholder={"ss://…@1.2.3.4:8443#名称"}
+          rows={5}
         />
-        <Button className="mt-4 w-full" onClick={submit}>
+        {preview && preview.ok && (
+          <p className="mt-2 text-sm text-ok">
+            将导入 {preview.data.name} · {preview.data.host}:{preview.data.port} · {preview.data.method}
+          </p>
+        )}
+        {preview && !preview.ok && <p className="mt-2 text-sm text-danger">{preview.error}</p>}
+        <Button className="mt-4 w-full" onClick={submit} disabled={!preview || !preview.ok}>
           导入
         </Button>
       </DialogContent>
