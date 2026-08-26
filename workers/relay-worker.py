@@ -391,6 +391,18 @@ def first_visible(page, names):
 
 def fill_composer(page, box, prompt):
     try:
+        if box:
+            box.click(timeout=1000)
+            try:
+                page.keyboard.press("Control+A")
+            except Exception:
+                pass
+            page.keyboard.insert_text(prompt)
+            if composer_text(page):
+                return True
+    except Exception:
+        pass
+    try:
         ok = page.evaluate(
             """(t) => {
               const el = document.querySelector('#prompt-textarea') || document.querySelector('[contenteditable="true"]');
@@ -1134,6 +1146,10 @@ def run_chat(body):
             install_mut_observer(page, page.locator("div[data-message-author-role='assistant']").count())
             acked = submit_prompt(page, prompt, inp, send, stop)
         if not acked and not TEST_URL:
+            try:
+                print("SEND_NOT_ACKED url", page.url, "send_on", send_button_enabled(page), "composer", composer_text(page)[:80], flush=True)
+            except Exception:
+                pass
             return {"ok": False, "error": "SEND_NOT_ACKED: message did not enter conversation", "fault": "provider", "recoveryLevel": recovery_level, "timing": marks}
         mark("T7")
         post_phase("generating")

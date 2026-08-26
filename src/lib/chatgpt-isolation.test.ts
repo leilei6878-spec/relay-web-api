@@ -13,5 +13,5 @@ test("send failure does not wait 30 seconds", () => {
   const s = localWorkerScript();
   assert.match(s, /SEND_NOT_ACKED/);
   assert.match(s, /SEND_ACK_TIMEOUT = 4000/);
-  assert.equal(s.includes("box.click()"), false);
+  assert.match(s, /insert_text/);
 });
