@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { primaryApiKey } from "./api-keys";
 import { assertCustomer } from "./authz";
@@ -12,6 +12,7 @@ import type { Account, GatewaySettings, Proxy } from "./types";
 
 const DIR = resolve("storage");
 const PLANE = resolve(DIR, "control-plane.json");
+const BACKUP_DIR = resolve(DIR, "backups");
 
 export const fallbackSettings: GatewaySettings = {
   maxRetry: 3,
@@ -123,7 +124,18 @@ export async function writeControlPlane(plane: Omit<ControlPlane, "savedAt">) {
     savedAt: new Date().toISOString(),
   };
   if (persistenceMode() === "file" || process.env.RELAY_SKIP_DB === "1") {
-    await writeFile(PLANE, JSON.stringify(body), "utf8");
+    try {
+      await mkdir(BACKUP_DIR, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      await writeFile(PLANE, JSON.stringify(body), "utf8");
+      await copyFile(PLANE, resolve(BACKUP_DIR, `control-plane-${stamp}.json`));
+      const files = (await readdir(BACKUP_DIR)).filter((f) => f.startsWith("control-plane-")).sort();
+      for (const extra of files.slice(0, Math.max(0, files.length - 30))) {
+        await unlink(resolve(BACKUP_DIR, extra)).catch(() => undefined);
+      }
+    } catch {
+      await writeFile(PLANE, JSON.stringify(body), "utf8");
+    }
   }
   await syncDb(body);
   return { ok: true as const };

@@ -65,6 +65,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const planeSnap = useRef("");
   const planeLoaded = useRef(false);
 
+  const [planeError, setPlaneError] = useState("");
+
   useEffect(() => {
     const unsub = useGateway.persist.onFinishHydration(() => setHydrated(true));
     if (useGateway.persist.hasHydrated()) setHydrated(true);
@@ -82,11 +84,26 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    void fetch("/api/admin/session", { credentials: "include" })
-      .then(() => fetch("/api/admin/plane", { credentials: "include" }))
-      .then((r) => r.json())
-      .then((plane: { accounts?: typeof accounts; proxies?: typeof proxies; settings?: typeof settings }) => {
-        if (!plane.accounts) return;
+    let stop = false;
+    async function loadPlane() {
+      try {
+        await fetch("/api/admin/session", { credentials: "include" });
+        const r = await fetch("/api/admin/plane", { credentials: "include" });
+        if (r.status === 401) {
+          if (!stop) setPlaneError("未登录管理台，账号不会显示。请刷新页面。");
+          return;
+        }
+        const plane = (await r.json()) as { accounts?: typeof accounts; proxies?: typeof proxies; settings?: typeof settings; error?: string };
+        if (!plane.accounts) {
+          if (!stop) setPlaneError(plane.error || "服务器没有返回账号数据");
+          return;
+        }
+        if (stop) return;
+        if (planeLoaded.current) {
+          const cur = useGateway.getState();
+          const local = JSON.stringify({ accounts: cur.accounts, proxies: cur.proxies, settings: cur.settings });
+          if (local !== planeSnap.current) return;
+        }
         useGateway.setState({
           accounts: plane.accounts,
           proxies: plane.proxies || [],
@@ -98,8 +115,17 @@ export function AppShell({ children }: { children: ReactNode }) {
           settings: { ...settings, ...(plane.settings || {}) },
         });
         planeLoaded.current = true;
-      })
-      .catch(() => undefined);
+        setPlaneError("");
+      } catch {
+        if (!stop) setPlaneError("无法连接服务器读取账号");
+      }
+    }
+    void loadPlane();
+    const t = setInterval(() => void loadPlane(), 15000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
   }, [hydrated]);
 
   useEffect(() => {
@@ -140,6 +166,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="font-medium tracking-tight">Relay</span>
         </header>
         <main className="px-4 py-6 sm:px-6 lg:px-8">
+          {planeError && (
+            <p className="mb-4 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-danger">{planeError}</p>
+          )}
           {hydrated ? children : <p className="text-sm text-muted">正在载入控制台…</p>}
         </main>
       </div>

@@ -106,6 +106,12 @@ function AccountsView() {
         </div>
       </header>
 
+      {accounts.length === 0 && (
+        <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted">
+          当前页面是空的。账号通常还在服务器上，只是管理登录没带上。请刷新本页；不要重新导入。
+        </p>
+      )}
+
       <ol className="grid gap-3 rounded-xl border border-border bg-surface p-4 text-sm text-muted sm:grid-cols-3">
         <li>
           <p className="font-medium text-fg">1. 添加并绑代理</p>

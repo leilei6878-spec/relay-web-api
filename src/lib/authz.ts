@@ -66,8 +66,15 @@ export function readCookie(request: Request, name: string) {
   return "";
 }
 
-export function adminCookieHeader(token: string) {
-  return `${ADMIN_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`;
+export function adminCookieHeader(token: string, secure = false) {
+  const parts = [
+    `${ADMIN_COOKIE}=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "Max-Age=86400",
+    secure ? "SameSite=None; Secure" : "SameSite=Lax",
+  ];
+  return parts.join("; ");
 }
 
 export async function classify(request: Request): Promise<Principal | null> {

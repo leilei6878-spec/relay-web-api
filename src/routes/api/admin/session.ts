@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { adminCookieHeader, assertAdmin, classify, ensureAdminToken } from "@/lib/authz";
+import { adminCookieHeader, assertAdmin, ensureAdminToken } from "@/lib/authz";
+import { isProduction } from "@/lib/env-mode";
 
 export const Route = createFileRoute("/api/admin/session")({
   server: {
@@ -7,15 +8,14 @@ export const Route = createFileRoute("/api/admin/session")({
       GET: async ({ request }) => {
         const auth = await assertAdmin(request);
         if (auth.ok) return Response.json({ ok: true, role: "admin" });
-        const host = (request.headers.get("host") || "").split(":")[0];
-        const loopback = host === "127.0.0.1" || host === "localhost";
-        const auto = process.env.RELAY_REQUIRE_ADMIN_LOGIN !== "1" && loopback;
+        const auto = process.env.RELAY_REQUIRE_ADMIN_LOGIN !== "1" && !isProduction();
         if (!auto) return Response.json({ ok: false, error: auth.error }, { status: 401 });
         const token = await ensureAdminToken();
+        const https = new URL(request.url).protocol === "https:" || request.headers.get("x-forwarded-proto") === "https";
         return new Response(JSON.stringify({ ok: true, role: "admin", auto: true }), {
           headers: {
             "Content-Type": "application/json",
-            "Set-Cookie": adminCookieHeader(token),
+            "Set-Cookie": adminCookieHeader(token, https),
           },
         });
       },
@@ -25,10 +25,11 @@ export const Route = createFileRoute("/api/admin/session")({
         if (!body.token || body.token !== token) {
           return Response.json({ ok: false, error: "管理员凭证无效" }, { status: 401 });
         }
+        const https = new URL(request.url).protocol === "https:" || request.headers.get("x-forwarded-proto") === "https";
         return new Response(JSON.stringify({ ok: true, role: "admin" }), {
           headers: {
             "Content-Type": "application/json",
-            "Set-Cookie": adminCookieHeader(token),
+            "Set-Cookie": adminCookieHeader(token, https),
           },
         });
       },
