@@ -670,6 +670,62 @@ def chrome_running(user_data):
         return False
     return os.path.exists(os.path.join(user_data, "lockfile")) or os.path.exists(os.path.join(user_data, "SingletonLock"))
 
+def copy_locked(src, dest):
+    try:
+        if os.path.isdir(src):
+            if os.path.isdir(dest):
+                shutil.rmtree(dest, ignore_errors=True)
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+            return True
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy2(src, dest)
+        return True
+    except Exception:
+        pass
+    if os.path.isfile(src):
+        try:
+            with open(src, "rb") as f:
+                data = f.read()
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(data)
+            return True
+        except Exception:
+            return False
+    return False
+
+def clone_chrome_profile(src_user_data, dest):
+    os.makedirs(dest, exist_ok=True)
+    src_default = os.path.join(src_user_data, "Default")
+    dest_default = os.path.join(dest, "Default")
+    os.makedirs(dest_default, exist_ok=True)
+    copied = 0
+    names = [
+        "Cookies", "Cookies-journal", "Login Data", "Login Data-journal",
+        "Web Data", "Web Data-journal", "Preferences", "Secure Preferences",
+        "Local Storage", "Session Storage", "Network", "IndexedDB",
+    ]
+    if os.path.isdir(src_default):
+        for name in names:
+            s = os.path.join(src_default, name)
+            if os.path.exists(s) and copy_locked(s, os.path.join(dest_default, name)):
+                copied += 1
+    ls = os.path.join(src_user_data, "Local State")
+    if os.path.isfile(ls) and copy_locked(ls, os.path.join(dest, "Local State")):
+        copied += 1
+    print("已从本机 Chrome 复制 %d 项登录数据到专用窗口（日常 Chrome 不用关）" % copied)
+    return copied
+
+def kill_helper_chrome(user_data):
+    marker = os.path.basename(user_data or "")
+    if not marker:
+        return
+    ps = "Get-CimInstance Win32_Process -Filter \\"Name='chrome.exe'\\" | Where-Object { $_.CommandLine -like '*" + marker + "*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    try:
+        subprocess.call(["powershell", "-NoProfile", "-Command", ps], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
 def open_leonardo_chrome(p, proxy):
     server = (proxy or {}).get("server") if isinstance(proxy, dict) else ""
     exe = find_chrome_exe()
@@ -679,23 +735,15 @@ def open_leonardo_chrome(p, proxy):
         context = open_context(browser)
         page = context.new_page()
         return browser, context, page, False
-    user_data = chrome_user_data(exe)
-    print("将打开本机 Chrome，和你平时能登录 Canva 的是同一个浏览器。")
-    if user_data and chrome_running(user_data):
-        print("请完全退出 Chrome（任务栏、右下角托盘都要退），然后按回车。")
-        try:
-            input()
-        except Exception:
-            pass
-    if user_data and chrome_running(user_data):
-        print("Chrome 仍在运行，改用临时配置，验证码仍可能被拦。")
-        user_data = os.path.join(HERE, "chrome-profile")
-        os.makedirs(user_data, exist_ok=True)
-    elif user_data:
-        print("使用本机 Chrome 配置文件")
+    live_data = chrome_user_data(exe)
+    dest = os.path.join(HERE, "chrome-login")
+    print("只会打开一个专用 Chrome 窗口。请只在这个窗口登录，不要用日常浏览器。")
+    kill_helper_chrome(dest)
+    time.sleep(0.4)
+    if live_data:
+        clone_chrome_profile(live_data, dest)
     else:
-        user_data = os.path.join(HERE, "chrome-profile")
-        os.makedirs(user_data, exist_ok=True)
+        os.makedirs(dest, exist_ok=True)
     debug = 0
     for port in range(9222, 9240):
         s = socket.socket()
@@ -711,33 +759,39 @@ def open_leonardo_chrome(p, proxy):
         debug = 9222
     args = [
         exe,
-        "--user-data-dir=" + user_data,
+        "--user-data-dir=" + dest,
+        "--profile-directory=Default",
         "--remote-debugging-port=%d" % debug,
         "--remote-allow-origins=*",
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-popup-blocking",
         "--disable-features=ThirdPartyStoragePartitioning",
-        CANVA_COM,
+        "--disable-sync",
+        "--disable-quic",
     ]
     if server:
-        args.insert(-1, "--proxy-server=" + server)
-    print("正在启动本机 Chrome…")
+        pac_url = write_idp_pac(server)
+        args.append("--proxy-pac-url=" + pac_url)
+        args.append("--host-resolver-rules=MAP canva.cn www.canva.com,MAP www.canva.cn www.canva.com,MAP app.canva.cn app.canva.com")
+        print("验证码走本机网络；Canva / Leonardo 走绑定节点")
+    print("正在启动专用 Chrome…")
     subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     last_err = ""
-    for _ in range(40):
+    for _ in range(50):
         try:
             browser = p.chromium.connect_over_cdp("http://127.0.0.1:%d" % debug)
             context = browser.contexts[0] if browser.contexts else browser.new_context()
             attach_canva_com_guard(context)
             page = context.pages[0] if context.pages else context.new_page()
-            print("已接上本机 Chrome。正在打开 Canva 和 Leonardo 两个标签。")
+            print("已接上专用 Chrome。正在打开 Canva 和 Leonardo 两个标签。")
             ensure_canva_and_leonardo_tabs(context, page)
             return browser, context, page, True
         except Exception as e:
             last_err = str(e)[:160]
             time.sleep(0.4)
-    print("接不上本机 Chrome：", last_err)
+    print("接不上专用 Chrome：", last_err)
+    print("请关掉刚才弹出的空白窗口后重试。不会再打开空的自动化浏览器。")
     browser = open_browser(p, proxy)
     context = open_context(browser)
     page = context.new_page()

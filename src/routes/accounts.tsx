@@ -122,7 +122,7 @@ function AccountsView() {
         <li>
           <p className="font-medium text-fg">2. 在你电脑登录</p>
           <p className="mt-1 text-xs leading-relaxed text-subtle">
-            点「登录」下载登录包，双击 run.bat。Leonardo 会同时打开 Canva 和 Leonardo；只登录 Canva 不算。
+            点「登录」下载登录包，双击 run.bat。日常 Chrome 不用关。只会弹出一个专用窗口（带上你已登录的 Canva），只在那个窗口里给 Leonardo 授权。
           </p>
         </li>
         <li>
@@ -510,7 +510,7 @@ pause
 `;
       const readme =
         account.platform === "leonardo"
-          ? "1. Unzip\n2. Fully quit Chrome (system tray too)\n3. Double-click run.bat — it opens your real Chrome, not an automation window\n4. Log in at canva.com, then Leonardo. Drag state.json back.\n"
+          ? "1. Unzip\n2. Keep your daily Chrome open\n3. Double-click run.bat — it copies your Canva login into one dedicated window\n4. Only use that window: Canva should already be signed in, then authorize Leonardo. Drag state.json back.\n"
           : "1. Unzip\n2. Double-click run.bat\n3. Login in the window, then press Enter in the terminal\n4. Drag state.json back to Relay\n";
       const files: { name: string; data: Uint8Array }[] = [
         { name: "login.py", data: textFile(py) },
@@ -586,7 +586,7 @@ pause
         <p className="text-sm text-muted">
           平台绑好代理后点「下载一键登录包」。解压双击 run.bat，不用自己对 IP。
           {account.platform === "leonardo"
-            ? " 会同时弹出 Canva 和 Leonardo 两个标签。请先完全退出 Chrome。先登录 Canva，再在 Leonardo 标签用 Canva 授权，授权弹窗不要关。要等到 Leonardo 的 Sign In 消失、出现 Session Cookie 才保存。"
+            ? " 只会弹出一个专用窗口，日常 Chrome 不用关。窗口里应已带上 Canva 登录。再到 Leonardo 标签用 Canva 授权，授权弹窗不要关。要等到 Leonardo 的 Sign In 消失、出现 Session Cookie 才保存。"
             : ""}
         </p>
         {error && <p className="mt-2 text-sm text-danger">{error}</p>}

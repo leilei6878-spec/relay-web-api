@@ -292,8 +292,12 @@ test("leonardo login helper waits for Sign In to disappear, not the public compo
   assert.match(py, /CANVA_COM/);
   assert.match(py, /connect_over_cdp/);
   assert.match(py, /user-data-dir=/);
-  assert.match(py, /Accept all cookies/);
-  assert.match(py, /完全退出 Chrome/);
+  assert.match(py, /clone_chrome_profile/);
+  assert.match(py, /chrome-login/);
+  assert.match(py, /专用 Chrome/);
+  assert.match(py, /proxy-pac-url=/);
+  assert.equal(py.includes("完全退出 Chrome"), false);
+  assert.equal(/CANVA_COM,\s*\]/.test(py), false);
   assert.match(py, /disable-popup-blocking/);
   assert.match(py, /callbackUrl/);
   assert.match(py, /oauth_busy/);
