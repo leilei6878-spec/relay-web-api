@@ -147,7 +147,8 @@ export const useGateway = create<State & Actions>()(
       captureSession: (id, source = "demo", payload) => {
         let cookieCount = 0;
         if (source === "pasted") {
-          const parsed = parseStorageState(payload ?? "");
+          const account = get().accounts.find((a) => a.id === id);
+          const parsed = parseStorageState(payload ?? "", account?.platform);
           if (!parsed.ok) return parsed;
           cookieCount = parsed.data.cookieCount;
         }

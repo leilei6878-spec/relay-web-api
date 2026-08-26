@@ -4,9 +4,10 @@ import { createConnection } from "node:net";
 import { resolve } from "node:path";
 import { parseStorageState, proxyServer } from "./session-file";
 import type { ChatgptWebInput, ProbeProxyInput } from "./gateway-types";
+import type { Platform } from "./types";
 
-export async function writeSessionFile(accountId: string, json: string) {
-  const parsed = parseStorageState(json);
+export async function writeSessionFile(accountId: string, json: string, platform?: Platform) {
+  const parsed = parseStorageState(json, platform);
   if (!parsed.ok) return parsed;
   const id = accountId.replace(/[^a-zA-Z0-9_-]/g, "");
   if (!id) return { ok: false as const, error: "账号无效" };

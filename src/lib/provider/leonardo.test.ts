@@ -12,6 +12,8 @@ import {
   sizeToAspect,
   validateLeonardoParams,
 } from "./leonardo-models.ts";
+import { inspectSession } from "../session-probe.ts";
+import { loginHelperScript, parseStorageState } from "../session-file.ts";
 import { packFor } from "./selectors.ts";
 import type { Account, GatewaySettings, Proxy } from "../types.ts";
 
@@ -176,4 +178,75 @@ test("historical / ui images are not treated as results", () => {
     url: "https://cdn.leonardo.ai/favicon.ico",
   });
   assert.equal(gate.ok, false);
+});
+
+test("leonardo landing cookies are not a session", () => {
+  const guestJson = JSON.stringify({
+    cookies: [
+      { name: "anonymous-id", domain: "app.leonardo.ai", value: "x", expires: Date.now() / 1000 + 86400 },
+      { name: "_landing_host", domain: ".leonardo.ai", value: "app.leonardo.ai", expires: Date.now() / 1000 + 3600 },
+      { name: "_landing_time", domain: ".leonardo.ai", value: "1", expires: Date.now() / 1000 + 3600 },
+      { name: "__cf_bm", domain: ".paddle.com", value: "cf", expires: Date.now() / 1000 + 3600 },
+    ],
+  });
+  const guest = inspectSession(guestJson, "leonardo");
+  assert.equal(guest.ok, false);
+  assert.match(guest.reason || "", /未完成|游客/);
+  const parsed = parseStorageState(guestJson, "leonardo");
+  assert.equal(parsed.ok, false);
+  if (!parsed.ok) assert.match(parsed.error, /未完成|游客/);
+  const inferred = parseStorageState(guestJson);
+  assert.equal(inferred.ok, false);
+});
+
+test("leonardo cognito cookies count as a session", () => {
+  const json = JSON.stringify({
+    cookies: [
+      { name: "anonymous-id", domain: "app.leonardo.ai", value: "x", expires: Date.now() / 1000 + 86400 * 30 },
+      {
+        name: "CognitoIdentityServiceProvider.abc.user.accessToken",
+        domain: "app.leonardo.ai",
+        value: "eyJ",
+        expires: Date.now() / 1000 + 3600,
+      },
+      {
+        name: "CognitoIdentityServiceProvider.abc.user.idToken",
+        domain: "app.leonardo.ai",
+        value: "eyJ",
+        expires: Date.now() / 1000 + 3600,
+      },
+      { name: "CognitoIdentityServiceProvider.abc.LastAuthUser", domain: "app.leonardo.ai", value: "user" },
+    ],
+  });
+  const ok = inspectSession(json, "leonardo");
+  assert.equal(ok.ok, true);
+  const parsed = parseStorageState(json, "leonardo");
+  assert.equal(parsed.ok, true);
+});
+
+test("leonardo login helper waits for Sign In to disappear, not the public composer", () => {
+  const py = loginHelperScript(
+    acc({ status: "pending_login", sessionPath: null }),
+    {
+      id: "px-1",
+      name: "Japan",
+      type: "http",
+      host: "127.0.0.1",
+      port: 9,
+      username: "",
+      stickySessionId: "s",
+      region: "JP",
+      status: "active",
+      maxAccounts: 8,
+      remark: "",
+      createdAt: new Date().toISOString(),
+    },
+    "",
+  );
+  assert.match(py, /app\.leonardo\.ai\/generate/);
+  assert.match(py, /PLATFORM == "leonardo"/);
+  assert.match(py, /sign_in_visible/);
+  assert.match(py, /leonardo_cookies_ok/);
+  assert.match(py, /没有写入 state\.json/);
+  assert.match(py, /游客首页也有输入框/);
 });

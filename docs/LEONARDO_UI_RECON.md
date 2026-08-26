@@ -1,7 +1,7 @@
 # Leonardo UI Recon
 
-Generated: 2026-08-26T05:37:55.431838+00:00
-Session loaded: False
+Generated: 2026-08-26T06:59:37.971197+00:00
+Session loaded: True
 
 Secrets (cookies, bearer, passwords) were not recorded.
 
@@ -100,7 +100,7 @@ FLUX, Nano Banana
 
 ## Page 2
 
-- requested: `https://app.leonardo.ai/image-generation`
+- requested: `https://app.leonardo.ai/generate`
 - final: `https://app.leonardo.ai/auth/login?callbackUrl=https%3A%2F%2Fapp.leonardo.ai%2Fgenerate`
 - title: Login or Create an Account | Leonardo.Ai
 - state: **CHALLENGE**
@@ -153,6 +153,60 @@ FLUX, Nano Banana
 | Terms of Service |  |  | A |
 
 ## Page 3
+
+- requested: `https://app.leonardo.ai/image-generation`
+- final: `https://app.leonardo.ai/auth/login?callbackUrl=https%3A%2F%2Fapp.leonardo.ai%2Fgenerate`
+- title: Login or Create an Account | Leonardo.Ai
+- state: **CHALLENGE**
+- error: none
+
+### Signals
+
+```json
+{
+  "login": true,
+  "challenge": true,
+  "generate": true,
+  "prompt": true
+}
+```
+
+### Visible model labels
+
+(none)
+
+### Token / plan hints
+
+- (none)
+
+### Selector candidates
+
+```json
+{
+  "prompt": [],
+  "generate": [],
+  "model": [],
+  "upload": [
+    "input[type=file]"
+  ],
+  "quantity": []
+}
+```
+
+### Controls (non-secret)
+
+| text | aria | testid | type |
+|---|---|---|---|
+| Canva |  |  | button |
+| Apple |  |  | button |
+| Google |  |  | button |
+| Microsoft |  |  | button |
+| Continue with Email |  |  | button |
+| Need help? |  |  | A |
+| Privacy Policy |  |  | A |
+| Terms of Service |  |  | A |
+
+## Page 4
 
 - requested: `https://app.leonardo.ai/image-generation/new`
 - final: `https://app.leonardo.ai/auth/login?callbackUrl=https%3A%2F%2Fapp.leonardo.ai%2Fimage-generation%2Fnew`
@@ -207,34 +261,16 @@ FLUX, Nano Banana
 | Terms of Service |  |  | A |
 
 
-## Verified vs unverified (post-pass)
 
-Session loaded: **false**. Logged-in Image Generator was not reachable. `/image-generation` redirected to `/auth/login?callbackUrl=.../generate`.
+---
 
-### VERIFIED on logged-out home (`https://app.leonardo.ai/`)
+## Logged-in recon (2026-08-26, account in pool)
 
-| Slot | Selector / control |
-|---|---|
-| Prompt | `#home-prompt-textarea`, placeholder "Type a prompt..." |
-| Generate | `button[aria-label="Generate"]` |
-| Reference | `button[aria-label="Add image reference"]`, `input[type=file]` |
-| Model trigger | `button[aria-label="Model: Auto"]` (`data-slot=dropdown-menu-trigger`) |
-| Aspect | `Aspect ratio: 1:1`, `2:3`, `16:9`, `4:3`, `4:5`, `9:16` |
-| Style | `Style: Dynamic` (not wired; not a stage-1 API field) |
-| Marketing labels | FLUX, Nano Banana, Seedream 5.0 Pro |
-| Login | `/auth/login`, Sign In / Sign Up, Continue with Email / Google / Apple / Microsoft / Canva |
+Session file was present (`AssanteFerraiolo98@hotmail.com`, 4 cookies: `anonymous-id`, `_landing_host`, `_landing_time`, `__cf_bm` on paddle).
 
-### UNVERIFIED (requires logged-in `/generate`)
+**Verdict: not logged in.** `/generate` redirected to `/auth/login?callbackUrl=.../generate`. Home still shows Sign In / Sign Up.
 
-- GPT Image 2 in the Model menu
-- Gemini family exact menu labels (Nano Banana 2 / gemini-image-2 / Gemini 2.5 Flash Image)
-- Quantity 1–8
-- Quality LOW/MEDIUM/HIGH
-- Token / Fast Token / Token Bank copy
-- Queue depth
-- Generation card ids / result gallery
-- Whether Generate on the public home actually runs or only routes to login
+API `POST /v1/images/generations` `model=leonardo-gemini` returned **LEONARDO_LOGIN_REQUIRED**. No image URL, no SVG placeholder.
 
-Selector pack `leonardo-image-v1` only contains VERIFIED public-home controls plus conservative `img[src]` candidates. Worker fail-closes when a requested control is missing.
+GPT Image 2 / Gemini family labels on `/generate` remain **UNVERIFIED** until a real Cognito/session Cookie is captured.
 
-Secrets were not recorded.

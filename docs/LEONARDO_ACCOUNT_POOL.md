@@ -2,7 +2,9 @@
 
 Platform value: `leonardo`.
 
-Add account → bind sticky proxy → download login helper (`https://app.leonardo.ai/`) → save `storage_state` → probe → HEALTHY.
+Add account → bind sticky proxy → download login helper (`https://app.leonardo.ai/generate`) → **Sign In until Sign In disappears and `/generate` stays** → save `storage_state` (must include Cognito/session cookies; landing-only `anonymous-id` / `_landing_*` is rejected) → probe → HEALTHY.
+
+The public Leonardo home page has a prompt box and Generate button **without login**. The helper must not treat that as a session.
 
 Each account stores (Postgres `extra` JSON / control-plane):
 

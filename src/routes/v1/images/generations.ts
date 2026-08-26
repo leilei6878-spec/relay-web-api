@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertApiKey, pickAccount, readControlPlane } from "@/lib/control-plane";
+import { poolUnavailableMessage } from "@/lib/eligibility";
 import { decide } from "@/lib/fault-matrix";
 import { enqueueImage, getJob, liveWorkerOnline, waitJob } from "@/lib/job-queue";
 import { defaultPrompt, MAX_IMAGES_LEONARDO, parseImageRequest } from "@/lib/media";
@@ -208,7 +209,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
   }
   const exclude: string[] = [];
   const maxRetry = plane.settings.maxRetry || 3;
-  let last = platform === "leonardo" ? "没有可调度的健康 Leonardo 账号（需 Session + sticky）" : "没有可调度的健康 Gemini 账号（需 Session + sticky）";
+  let last = poolUnavailableMessage(platform, plane.accounts, plane.proxies, plane.settings, {}, model);
   for (let i = 0; i <= maxRetry; i++) {
     const account = await pickAccount(platform, exclude, { model });
     if (!account) break;

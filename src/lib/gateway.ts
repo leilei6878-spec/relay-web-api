@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { ChatgptWebInput, ProbeProxyInput } from "./gateway-types";
-import type { Account, GatewaySettings, Proxy } from "./types";
+import type { Account, GatewaySettings, Platform, Proxy } from "./types";
 
 type ChatInput = { prompt: string; modelLabel: string; timeoutMs?: number };
 
@@ -68,7 +68,7 @@ export const runGatewayImage = createServerFn({ method: "POST" })
     return { ok: true as const, url };
   });
 
-type SaveSessionInput = { accountId: string; json: string };
+type SaveSessionInput = { accountId: string; json: string; platform?: Platform };
 
 export const saveSessionFile = createServerFn({ method: "POST" })
   .validator((input: SaveSessionInput) => input)
@@ -77,7 +77,7 @@ export const saveSessionFile = createServerFn({ method: "POST" })
     const auth = await assertAdminFromFn();
     if (!auth.ok) return { ok: false as const, error: auth.error };
     const { writeSessionFile } = await import("./chatgpt-runner");
-    return writeSessionFile(data.accountId, data.json);
+    return writeSessionFile(data.accountId, data.json, data.platform);
   });
 
 export const readSessionFile = createServerFn({ method: "POST" })

@@ -122,13 +122,13 @@ function AccountsView() {
         <li>
           <p className="font-medium text-fg">2. 在你电脑登录</p>
           <p className="mt-1 text-xs leading-relaxed text-subtle">
-            点「登录」下载登录包，双击 run.bat，在弹出的窗口里登对应平台（ChatGPT / Gemini / Leonardo）。
+            点「登录」下载登录包，双击 run.bat，在弹出的窗口里登对应平台。Leonardo 必须点 Sign In，游客首页不算。
           </p>
         </li>
         <li>
           <p className="font-medium text-fg">3. 把登录文件拖回来</p>
           <p className="mt-1 text-xs leading-relaxed text-subtle">
-            窗口登录成功后会生成文件。拖到账号这一行的登录框，状态变成可调用。
+            窗口登录成功后会生成文件。拖到账号这一行的登录框，状态变成可调用。Leonardo 要看到 Sign In 消失并停在 Image Generator。
           </p>
         </li>
       </ol>
@@ -508,10 +508,14 @@ if exist "%~dp0state.json" (
 )
 pause
 `;
+      const readme =
+        account.platform === "leonardo"
+          ? "1. Unzip\n2. Double-click run.bat\n3. Click Sign In and finish login. Sign In must disappear and stay on /generate.\n4. Drag state.json back to Relay. Guest landing cookies will be rejected.\n"
+          : "1. Unzip\n2. Double-click run.bat\n3. Login in the window, then press Enter in the terminal\n4. Drag state.json back to Relay\n";
       const files: { name: string; data: Uint8Array }[] = [
         { name: "login.py", data: textFile(py) },
         { name: "run.bat", data: textFile(bat) },
-        { name: "README.txt", data: textFile("1. Unzip\n2. Double-click run.bat\n3. Login in the window, then press Enter in the terminal\n4. Drag state.json back to Relay\n") },
+        { name: "README.txt", data: textFile(readme) },
       ];
       if (proxy.type === "ss") {
         const res = await fetch("/login-kit/windows/sing-box.exe");
@@ -545,7 +549,7 @@ pause
     reader.onload = async () => {
       const text = String(reader.result ?? "");
       try {
-        const saved = await saveSessionFile({ data: { accountId: account.id, json: text } });
+        const saved = await saveSessionFile({ data: { accountId: account.id, json: text, platform: account.platform } });
         if (!saved.ok) {
           setError(saved.error);
           toast.error(saved.error);
@@ -581,6 +585,9 @@ pause
       <DialogContent title={`登录 ${account.email}`} className="max-w-lg">
         <p className="text-sm text-muted">
           平台绑好代理后点「下载一键登录包」。解压双击 run.bat，不用自己对 IP。
+          {account.platform === "leonardo"
+            ? " Leonardo 未登录首页也有输入框，那不是登录；必须点 Sign In，看到 Sign In 消失并停在 Image Generator 后再拖回文件。"
+            : ""}
         </p>
         {error && <p className="mt-2 text-sm text-danger">{error}</p>}
 

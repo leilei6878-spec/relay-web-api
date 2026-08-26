@@ -676,7 +676,7 @@ export function finishJob(
         { accountId: job.accountId, baseVersion: base, nextVersion: next, stateJson: JSON.stringify(result.sessionState) },
       );
       if (decided.ok) {
-        await writeSessionFile(job.accountId, JSON.stringify(result.sessionState));
+        await writeSessionFile(job.accountId, JSON.stringify(result.sessionState), job.platform);
         await patchAccount(job.accountId, {
           sessionVersion: decided.sessionVersion,
           lastRefreshAt: decided.lastRefreshAt,

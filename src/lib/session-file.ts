@@ -5,7 +5,60 @@ export type ParsedSession = {
   cookieCount: number;
 };
 
-export function parseStorageState(raw: string): { ok: true; data: ParsedSession } | { ok: false; error: string } {
+export function inspectSession(json: string, platform: Platform) {
+  try {
+    const parsed = JSON.parse(json) as { cookies?: { name?: string; expires?: number; value?: string; domain?: string }[] };
+    const cookies = parsed.cookies || [];
+    if (!cookies.length) return { ok: false as const, reason: "Cookie 为空" };
+    const now = Date.now() / 1000;
+    const names = new Set(cookies.map((c) => c.name || ""));
+    const dummy = cookies.length <= 1 && cookies.some((c) => (c.value || "").includes("qa"));
+    if (dummy) return { ok: false as const, reason: "演示登录不能商用" };
+    if (platform === "chatgpt") {
+      const has =
+        names.has("__Secure-next-auth.session-token") ||
+        names.has("oai-did") ||
+        names.has("__Secure-next-auth.session-token.0");
+      if (!has) return { ok: false as const, reason: "缺少 ChatGPT 登录 Cookie" };
+    }
+    if (platform === "leonardo") {
+      const hostHit = cookies.some((c) =>
+        /leonardo|amazoncognito|cognito-idp/i.test(`${c.domain || ""} ${c.name || ""}`),
+      );
+      const authHit = cookies.some((c) =>
+        /session|auth|token|cognito|idToken|accessToken|__Host-|__Secure-|sid/i.test(c.name || ""),
+      );
+      const landingOnly = cookies.every((c) =>
+        /anonymous-id|_landing_|__cf_bm|cf_clearance/i.test(c.name || ""),
+      );
+      if (!hostHit) return { ok: false as const, reason: "缺少 Leonardo 登录 Cookie" };
+      if (landingOnly || (!authHit && cookies.length < 6)) {
+        return { ok: false as const, reason: "Leonardo 登录未完成（仍是游客 Cookie，没有 Session）" };
+      }
+    }
+    const sessionCookies = cookies.filter((c) =>
+      /session|SID|PSID|auth|oai-did|cognito|idToken|accessToken/i.test(c.name || ""),
+    );
+    const expiries = sessionCookies
+      .map((c) => (typeof c.expires === "number" && c.expires > 0 ? c.expires : 0))
+      .filter((n) => n > now);
+    const expiresAt = expiries.length ? Math.min(...expiries) : 0;
+    const stale = sessionCookies.filter(
+      (c) => typeof c.expires === "number" && c.expires > 0 && c.expires < now,
+    );
+    if (stale.length) return { ok: false as const, reason: "登录 Cookie 已过期" };
+    const hoursLeft = expiresAt ? (expiresAt - now) / 3600 : 0;
+    const warning = hoursLeft > 0 && hoursLeft < 48 ? `登录约 ${Math.max(1, Math.round(hoursLeft))} 小时后过期` : undefined;
+    return { ok: true as const, cookieCount: cookies.length, warning, expiresAt: expiresAt || undefined };
+  } catch {
+    return { ok: false as const, reason: "登录文件无法解析" };
+  }
+}
+
+export function parseStorageState(
+  raw: string,
+  platform?: Platform,
+): { ok: true; data: ParsedSession } | { ok: false; error: string } {
   const text = raw.trim();
   if (!text) return { ok: false, error: "文件是空的" };
   try {
@@ -17,6 +70,16 @@ export function parseStorageState(raw: string): { ok: true; data: ParsedSession 
     if (!Array.isArray(cookies) || cookies.length === 0) {
       return { ok: false, error: "缺少 cookies，登录可能还没完成" };
     }
+    const looksLeonardo = cookies.some((c) => {
+      if (!c || typeof c !== "object") return false;
+      const row = c as { name?: string; domain?: string };
+      return /leonardo|amazoncognito|cognito/i.test(`${row.domain || ""} ${row.name || ""}`);
+    });
+    const plat = platform ?? (looksLeonardo ? "leonardo" : undefined);
+    if (plat) {
+      const inspected = inspectSession(text, plat);
+      if (!inspected.ok) return { ok: false, error: inspected.reason };
+    }
     return { ok: true, data: { cookieCount: cookies.length } };
   } catch {
     return { ok: false, error: "JSON 无法解析" };
@@ -25,7 +88,7 @@ export function parseStorageState(raw: string): { ok: true; data: ParsedSession 
 
 export function loginUrl(platform: Platform) {
   if (platform === "gemini") return "https://gemini.google.com/app";
-  if (platform === "leonardo") return "https://app.leonardo.ai/";
+  if (platform === "leonardo") return "https://app.leonardo.ai/generate";
   return "https://chatgpt.com";
 }
 
@@ -48,7 +111,7 @@ export function loginHelperScript(account: Account, proxy: Proxy, password: stri
     account.platform === "gemini"
       ? "https://gemini.google.com/app"
       : account.platform === "leonardo"
-        ? "https://app.leonardo.ai/"
+        ? "https://app.leonardo.ai/generate"
         : "https://chatgpt.com/auth/login";
   const pw = password || proxy.password || "";
   const email = JSON.stringify(account.email);
@@ -61,7 +124,10 @@ export function loginHelperScript(account: Account, proxy: Proxy, password: stri
         : "#prompt-textarea, textarea#prompt-textarea, [data-testid='send-button']";
 
   const waitSave = `
+import re
 HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
+PLATFORM = ${JSON.stringify(account.platform)}
+READY_SEL = ${JSON.stringify(readySel)}
 
 def save_state(context):
     raw = []
@@ -93,14 +159,70 @@ def save_state(context):
     print("state.json 没有写出来，把上面的报错发我")
     return False
 
+def cookie_names(context):
+    try:
+        return [c.get("name") or "" for c in context.cookies()]
+    except Exception:
+        return []
+
+def leonardo_cookies_ok(context):
+    names = cookie_names(context)
+    if not names:
+        return False
+    landing_only = all(re.search(r"anonymous-id|_landing_|__cf_bm|cf_clearance", n, re.I) for n in names)
+    auth = any(re.search(r"session|auth|token|cognito|idToken|accessToken|__Host-|__Secure-|sid", n, re.I) for n in names)
+    if landing_only or (not auth and len(names) < 6):
+        return False
+    return True
+
+def sign_in_visible(page):
+    for label in ("Sign In", "Log in", "Log In", "Sign Up"):
+        for role in ("link", "button"):
+            try:
+                loc = page.get_by_role(role, name=label)
+                if loc.count() > 0 and loc.first.is_visible():
+                    return True
+            except Exception:
+                pass
+    return False
+
+def logged_in(page, context):
+    url = page.url or ""
+    if PLATFORM == "leonardo":
+        if "/auth/login" in url or "/u/login" in url:
+            return False
+        if sign_in_visible(page):
+            return False
+        if not leonardo_cookies_ok(context):
+            return False
+        return "leonardo.ai" in url
+    try:
+        loc = page.locator(READY_SEL)
+        return loc.count() > 0 and loc.first.is_visible()
+    except Exception:
+        return False
+
 def wait_login(page, context):
     print("在弹出窗口登录", ${email})
-    print("看到聊天输入框会自动保存；也可以回到这里按回车。")
+    if PLATFORM == "leonardo":
+        print("Leonardo 游客首页也有输入框，那不是登录。")
+        print("请点 Sign In，登录成功后 Sign In 必须消失，并停留在 /generate。")
+    else:
+        print("看到聊天输入框会自动保存；也可以回到这里按回车。")
     redirected = False
     for _ in range(180):
         try:
-            loc = page.locator(${JSON.stringify(readySel)})
-            if loc.count() > 0 and loc.first.is_visible():
+            if logged_in(page, context):
+                if PLATFORM == "leonardo":
+                    try:
+                        page.goto("https://app.leonardo.ai/generate", wait_until="domcontentloaded", timeout=30000)
+                        time.sleep(2)
+                    except Exception:
+                        pass
+                    if not logged_in(page, context):
+                        print("打开 /generate 后又回到登录页，登录还没完成。")
+                        time.sleep(2)
+                        continue
                 print("检测到已登录，正在保存…")
                 return save_state(context)
             if (not redirected) and (page.get_by_text("糟糕，出错了").count() > 0 or page.get_by_text("Route Error").count() > 0):
@@ -114,11 +236,14 @@ def wait_login(page, context):
         except Exception:
             pass
         time.sleep(2)
-    print("还没检测到输入框。按回车也会保存当前登录态。")
+    print("还没检测到已登录。按回车会再检查一次再保存。")
     try:
         input()
     except Exception:
         pass
+    if PLATFORM == "leonardo" and not logged_in(page, context):
+        print("当前仍是游客（Sign In 还在，或没有 Session Cookie）。没有写入 state.json。")
+        return False
     return save_state(context)
 
 def open_browser(p, proxy):

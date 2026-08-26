@@ -426,7 +426,7 @@ export async function finishJobPg(
       },
     );
     if (decided.ok) {
-      await writeSessionFile(current.accountId, JSON.stringify(result.sessionState));
+      await writeSessionFile(current.accountId, JSON.stringify(result.sessionState), current.platform);
       await patchAccount(current.accountId, {
         sessionVersion: decided.sessionVersion,
         lastRefreshAt: decided.lastRefreshAt,
