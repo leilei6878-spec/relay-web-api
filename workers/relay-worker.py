@@ -989,16 +989,20 @@ def select_model(page, model):
 def run_chat(body):
     from playwright.sync_api import sync_playwright
     prompt, images = extract_prompt_images(body)
-    if body.get("turns"):
-        formatted = format_turns(body.get("turns"))
+    turns = body.get("turns") or []
+    user_turns = [t for t in turns if isinstance(t, dict) and str(t.get("role") or "user").lower() == "user"]
+    if len(turns) <= 1 and user_turns:
+        prompt = (user_turns[0].get("text") or prompt or "").strip()
+    elif turns:
+        formatted = format_turns(turns)
         if formatted:
             prompt = formatted
-        for turn in body.get("turns") or []:
-            if isinstance(turn, dict):
-                for u in turn.get("images") or []:
-                    if u and u not in images:
-                        images.append(u)
-        images = images[:4]
+    for turn in turns:
+        if isinstance(turn, dict):
+            for u in turn.get("images") or []:
+                if u and u not in images:
+                    images.append(u)
+    images = images[:4]
     prompt = (prompt or "").strip()
     if not prompt and images:
         prompt = "请描述这张图片"
