@@ -61,6 +61,28 @@ function later(a?: string | null, b?: string | null) {
   return Date.parse(a) >= Date.parse(b) ? a : b;
 }
 
+function validLock(s?: string | null, now = Date.now()) {
+  if (!s) return null;
+  const t = Date.parse(s);
+  return Number.isFinite(t) && t > now ? s : null;
+}
+
+function laterLock(a?: string | null, b?: string | null) {
+  const x = validLock(a);
+  const y = validLock(b);
+  if (!x) return y ?? null;
+  if (!y) return x;
+  return Date.parse(x) >= Date.parse(y) ? x : y;
+}
+
+function mergeLockedUntil(incoming: Account, old: Account) {
+  const incUsed = Date.parse(incoming.lastUsedAt || "") || 0;
+  const oldUsed = Date.parse(old.lastUsedAt || "") || 0;
+  if (incUsed > oldUsed) return validLock(incoming.lockedUntil);
+  if (oldUsed > incUsed) return validLock(old.lockedUntil);
+  return laterLock(incoming.lockedUntil, old.lockedUntil);
+}
+
 const DEMO_ACCOUNT_IDS = new Set(["ac-1", "ac-2", "ac-3", "ac-4", "ac-5", "ac-6", "ac-7", "ac-8"]);
 
 function isTestFixture(accounts: Account[]) {
@@ -125,7 +147,7 @@ export async function writeControlPlane(plane: Omit<ControlPlane, "savedAt">) {
       ...a,
       failCount: Math.max(a.failCount || 0, old.failCount || 0),
       totalRequests: Math.max(a.totalRequests || 0, old.totalRequests || 0),
-      lockedUntil: later(a.lockedUntil, old.lockedUntil),
+      lockedUntil: mergeLockedUntil(a, old),
       lastUsedAt: later(a.lastUsedAt, old.lastUsedAt),
       lastProbeAt: later(a.lastProbeAt, old.lastProbeAt),
       lastError: sessionChanged ? a.lastError : serverProbeNewer ? old.lastError : a.lastError || old.lastError,
@@ -133,7 +155,9 @@ export async function writeControlPlane(plane: Omit<ControlPlane, "savedAt">) {
         ? a.sessionWarning ?? null
         : serverProbeNewer
           ? old.sessionWarning
-          : a.sessionWarning ?? old.sessionWarning,
+          : a.sessionWarning !== undefined
+            ? a.sessionWarning
+            : old.sessionWarning,
       status: sessionChanged ? a.status : serverProbeNewer ? old.status : a.status,
       sessionVersion: Math.max(a.sessionVersion || 0, old.sessionVersion || 0),
     };

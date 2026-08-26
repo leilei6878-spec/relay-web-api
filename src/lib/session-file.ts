@@ -48,9 +48,11 @@ export function inspectSession(json: string, platform: Platform) {
         };
       }
     }
-    const sessionCookies = cookies.filter((c) =>
-      /session|SID|PSID|auth|oai-did|cognito|idToken|accessToken/i.test(c.name || ""),
-    );
+    const sessionCookies = cookies.filter((c) => {
+      const n = c.name || "";
+      if (platform === "leonardo") return /better-auth\.session_token/i.test(n);
+      return /session|SID|PSID|auth|oai-did|cognito|idToken|accessToken/i.test(n);
+    });
     const expiries = sessionCookies
       .map((c) => (typeof c.expires === "number" && c.expires > 0 ? c.expires : 0))
       .filter((n) => n > now);
@@ -717,6 +719,18 @@ def clone_chrome_profile(src_user_data, dest):
     print("已从本机 Chrome 复制 %d 项登录数据到专用窗口（日常 Chrome 不用关）" % copied)
     return copied
 
+def close_login_browser(browser, cdp):
+    print("state.json 已处理完毕，正在关闭专用登录窗口（日常 Chrome 不会关）")
+    try:
+        browser.close()
+    except Exception:
+        pass
+    if cdp:
+        try:
+            kill_helper_chrome(os.path.join(HERE, "chrome-login"))
+        except Exception:
+            pass
+
 def kill_helper_chrome(user_data):
     marker = os.path.basename(user_data or "")
     if not marker:
@@ -826,8 +840,7 @@ with sync_playwright() as p:
     print("平台节点:", ${node})
     browser, context, page, cdp = boot(p, PROXY, URL)
     wait_login(page, context)
-    if not cdp:
-        browser.close()
+    close_login_browser(browser, cdp)
 `;
   }
 
@@ -965,8 +978,7 @@ try:
         print("正在打开登录页…")
         browser, context, page, cdp = boot(p, proxy, URL)
         wait_login(page, context)
-        if not cdp:
-            browser.close()
+        close_login_browser(browser, cdp)
 finally:
     if child:
         child.terminate()

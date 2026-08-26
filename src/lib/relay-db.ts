@@ -92,11 +92,42 @@ export async function dbLoadPlane(): Promise<PlaneRow | null> {
   try {
     const db = await sql();
     const settingRows = await db.query<{ body: unknown }>("select body from relay_settings where id='default'");
-    const accRows = await db.query<{ extra: unknown }>("select extra from relay_accounts");
+    const accRows = await db.query<{
+      extra: unknown;
+      status: string | null;
+      locked_until: string | null;
+      last_error: string | null;
+      session_warning: string | null;
+      fail_count: number | null;
+      total_requests: number | null;
+      last_used_at: string | null;
+      last_probe_at: string | null;
+      session_version: number | null;
+    }>(
+      `select extra, status, locked_until, last_error, session_warning, fail_count, total_requests, last_used_at, last_probe_at, session_version
+         from relay_accounts`,
+    );
     const pxRows = await db.query<{ extra: unknown }>("select extra from relay_proxies");
     if (!accRows.length && !pxRows.length && !settingRows.length) return null;
     const body = settingRows[0]?.body as { settings?: GatewaySettings; savedAt?: string } | undefined;
-    const accounts = accRows.map((r) => r.extra as Account).filter(Boolean);
+    const accounts = accRows
+      .map((r) => {
+        const extra = (r.extra || {}) as Account;
+        if (!extra || typeof extra !== "object") return null;
+        return {
+          ...extra,
+          status: (r.status || extra.status) as Account["status"],
+          lockedUntil: r.locked_until ?? null,
+          lastError: r.last_error ?? null,
+          sessionWarning: r.session_warning ?? null,
+          failCount: r.fail_count ?? extra.failCount ?? 0,
+          totalRequests: r.total_requests ?? extra.totalRequests ?? 0,
+          lastUsedAt: r.last_used_at ?? extra.lastUsedAt ?? null,
+          lastProbeAt: r.last_probe_at ?? extra.lastProbeAt ?? null,
+          sessionVersion: r.session_version ?? extra.sessionVersion ?? 0,
+        } satisfies Account;
+      })
+      .filter(Boolean) as Account[];
     const proxies = pxRows.map((r) => r.extra as Proxy).filter(Boolean);
     return {
       accounts,
@@ -482,7 +513,13 @@ export async function dbTryLockAccount(accountId: string, untilIso: string) {
 
 export async function dbUnlockAccount(accountId: string) {
   const db = await sql();
-  await db.query("update relay_accounts set locked_until=null where id=$1", [accountId]);
+  await db.query(
+    `update relay_accounts
+        set locked_until=null,
+            extra = jsonb_set(coalesce(extra, '{}'::jsonb), '{lockedUntil}', 'null'::jsonb, true)
+      where id=$1`,
+    [accountId],
+  );
 }
 
 export async function dbUnlockAllAccounts() {

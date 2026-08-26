@@ -34,7 +34,7 @@ const CHAT_MODELS = [
 const IMAGE_MODELS = [
   { id: "gemini-image", label: "Gemini / 出图" },
   { id: "leonardo-gpt-image-2", label: "Leonardo / GPT Image 2" },
-  { id: "leonardo-gemini", label: "Leonardo / Gemini" },
+  { id: "leonardo-gemini", label: "Leonardo / Nano Banana 2" },
 ];
 
 function Playground() {

@@ -320,7 +320,7 @@ export async function finishJobPg(
   if (typeof result.profileVerified === "boolean") current.profileVerified = result.profileVerified;
   if (typeof result.recoveryLevel === "number") current.recoveryLevel = result.recoveryLevel;
 
-  if (typeof result.modelActual === "string") {
+  if (result.ok && typeof result.modelActual === "string") {
     const { getAdapter } = await import("./provider/index");
     const verdict = getAdapter(current.platform).verifyModel(current.model, result.modelActual);
     if (!verdict.ok && !(verdict.code === "MODEL_SELECTION_UNCONFIRMED" && process.env.RELAY_MODEL_UNCONFIRMED === "allow")) {
@@ -345,7 +345,11 @@ export async function finishJobPg(
         markResilience("stale_rejected");
         return { ok: false as const, error: "STALE_LEASE: fencing mismatch" };
       }
-      if (current.accountId) await releaseJobLeases(id, current.accountId, current.workerName || current.workerId);
+      if (current.accountId) {
+        await releaseJobLeases(id, current.accountId, current.workerName || current.workerId);
+        await dbUnlockAccount(current.accountId).catch(() => undefined);
+        await patchAccount(current.accountId, { lockedUntil: null }).catch(() => undefined);
+      }
       await coordDel(`job-claim:${id}`);
       return { ok: false as const, error: extra.error };
     }

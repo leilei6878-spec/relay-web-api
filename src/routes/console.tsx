@@ -22,10 +22,17 @@ const IMAGE_MODELS = [
   { id: "gemini-image", label: "Gemini / 出图" },
 ];
 
-const IMAGE_SIZES = [
-  { id: "1024x1024", label: "1:1 小 1024" },
-  { id: "2048x2048", label: "1:1 中 2048" },
-  { id: "4096x4096", label: "1:1 大 4096" },
+const NANO_SIZES = [
+  { id: "1024x1024", label: "1:1 小 1024×1024" },
+  { id: "2048x2048", label: "1:1 中 2048×2048" },
+  { id: "4096x4096", label: "1:1 大 4096×4096" },
+  { id: "848x1264", label: "2:3 竖图" },
+  { id: "1264x848", label: "16:9 横图" },
+];
+const GPT_SIZES = [
+  { id: "1024x1024", label: "1:1 小 1024×1024" },
+  { id: "2048x2048", label: "1:1 中 2048×2048" },
+  { id: "2880x2880", label: "1:1 大 2880×2880" },
   { id: "848x1264", label: "2:3 竖图" },
   { id: "1264x848", label: "16:9 横图" },
 ];
@@ -62,6 +69,7 @@ function Console() {
   const [imageN, setImageN] = useState(1);
   const [imageSize, setImageSize] = useState("1024x1024");
   const [imageQuality, setImageQuality] = useState("MEDIUM");
+  const imageSizes = imageModel.includes("gpt-image") ? GPT_SIZES : NANO_SIZES;
   const [apiKey, setApiKey] = useState("");
   const [prompt, setPrompt] = useState("你好，你是什么模型？用三句话说明。");
   const [images, setImages] = useState<string[]>([]);
@@ -336,7 +344,12 @@ function Console() {
               <select
                 className="h-11 w-full rounded-sm border border-border bg-elevated px-3 text-sm"
                 value={imageModel}
-                onChange={(e) => setImageModel(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setImageModel(next);
+                  const sizes = next.includes("gpt-image") ? GPT_SIZES : NANO_SIZES;
+                  if (!sizes.some((s) => s.id === imageSize)) setImageSize(sizes[0]?.id || "1024x1024");
+                }}
               >
                 {IMAGE_MODELS.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -355,7 +368,7 @@ function Console() {
                   value={imageSize}
                   onChange={(e) => setImageSize(e.target.value)}
                 >
-                  {IMAGE_SIZES.map((s) => (
+                {imageSizes.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.label}
                     </option>

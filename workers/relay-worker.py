@@ -1688,19 +1688,144 @@ def run_leonardo(body):
     kind = body.get("kind") or "image"
     pack_version = body.get("selectorPackVersion") or "leonardo-image-v1"
 
-    def enum_model_labels(page):
-        found = []
+    SKIP_MODEL = set("auto small medium large dynamic custom low high style model quality enhance private reset defaults prompt 1:1 2:3 16:9 4:3".split())
+
+    def selected_model_label(page):
         try:
-            page.evaluate("() => { var n = document.querySelector('[aria-label^=Model]'); if (n) n.click(); }")
-            page.wait_for_timeout(500)
-            texts = page.evaluate("""() => [...document.querySelectorAll('[role=menuitem], [role=option], button, [data-slot=dropdown-menu-item]')].map(e => (e.innerText||'').trim()).filter(t => t && t.length < 80)""")
+            raw = page.evaluate("""() => {
+              const buttons = [...document.querySelectorAll('button, [role=button]')];
+              const n = buttons.find((e) => {
+                const a = (e.getAttribute('aria-label') || '').trim().toLowerCase();
+                const t = (e.innerText || '').trim().toLowerCase();
+                return a === 'model' || t.indexOf('model') === 0;
+              });
+              return n ? (n.innerText || '') : '';
+            }""") or ""
+        except Exception:
+            raw = ""
+        lines = [ln.strip() for ln in str(raw).replace("\r", "").split("\n") if ln.strip()]
+        for ln in lines:
+            low = ln.lower()
+            if low in SKIP_MODEL or len(ln) < 4:
+                continue
+            return ln
+        return ""
+
+    def open_and_list_models(page):
+        names = []
+        for spec in ('button:has-text("Model")', '[aria-label="Model"]', '[aria-label^=Model]', 'button:has-text("Auto")'):
+            try:
+                loc = page.locator(spec).first
+                if loc.count() == 0:
+                    continue
+                loc.click(timeout=1400, force=True)
+                page.wait_for_timeout(700)
+            except Exception:
+                continue
+            try:
+                texts = page.evaluate("""() => [...document.querySelectorAll('[role=menuitem], [role=option], [data-slot=dropdown-menu-item], [data-radix-collection-item], li, button')].map(e => (e.innerText||'').trim()).filter(t => t && t.length >= 4 && t.length < 80)""")
+            except Exception:
+                texts = []
             if isinstance(texts, list):
                 for t in texts:
-                    if t and t not in found and len(t) >= 4:
-                        found.append(t)
-        except Exception:
-            pass
+                    line = [ln.strip() for ln in str(t).split("\n") if ln.strip()]
+                    label = line[-1] if line else str(t).strip()
+                    if not label or label.lower() in SKIP_MODEL:
+                        continue
+                    if not re.search(r"nano|banana|gemini|gpt image|flux|lucid|phoenix|kino|seedream|imagen|ideogram|preset", label, re.I):
+                        continue
+                    if label not in names:
+                        names.append(label)
+            if names:
+                break
+        return names
+
+    def enum_model_labels(page):
+        found = []
+        current = selected_model_label(page)
+        if current:
+            found.append(current)
+        for n in open_and_list_models(page):
+            if n not in found:
+                found.append(n)
         return found
+
+    def pick_model_label(available, labels):
+        best, score = "", -1
+        labs = [str(x).strip() for x in (labels or []) if x]
+        for item in available or []:
+            il = str(item).strip()
+            if len(il) < 4:
+                continue
+            low = il.lower()
+            if low in SKIP_MODEL:
+                continue
+            sc = 0
+            for lab in labs:
+                ll = lab.lower()
+                if low == ll:
+                    sc = max(sc, 200 + len(ll))
+                elif ll in low and len(ll) >= 8:
+                    sc = max(sc, 120 + len(ll))
+                elif low in ll and len(low) >= 8:
+                    sc = max(sc, 80 + len(low))
+            if sc > score:
+                score, best = sc, il
+        return best if score > 0 else ""
+
+    def page_text(page, n=8000):
+        try:
+            return (page.locator("body").inner_text() or "")[:n]
+        except Exception:
+            return ""
+
+    def is_ai_creation(page):
+        low = page_text(page, 5000).lower()
+        return any(s in low for s in ("nano banana", "gpt image 2", "number of generations", "image dimensions"))
+
+    def click_named(page, name, exact=False):
+        for getter in (
+            lambda: page.get_by_role("link", name=name, exact=exact),
+            lambda: page.get_by_role("button", name=name, exact=exact),
+            lambda: page.get_by_text(name, exact=exact),
+        ):
+            try:
+                loc = getter()
+                if loc.count() > 0:
+                    loc.first.click(timeout=1600)
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def goto_ai_creation(page):
+        urls = [
+            target,
+            "https://app.leonardo.ai/ai-creation",
+            "https://app.leonardo.ai/image-generation",
+            "https://app.leonardo.ai/generate?model=auto-preset",
+            "https://app.leonardo.ai/generate",
+            "https://app.leonardo.ai/create",
+            home,
+        ]
+        seen = set()
+        for u in urls:
+            if u in seen:
+                continue
+            seen.add(u)
+            try:
+                page.goto(u, wait_until="domcontentloaded", timeout=25000)
+            except Exception:
+                pass
+            page.wait_for_timeout(900)
+            if is_ai_creation(page):
+                return True
+            for name, exact in (("AI Creation", False), ("Image generation", False), ("Generate an image", False), ("Image", True)):
+                if click_named(page, name, exact=exact):
+                    page.wait_for_timeout(1100)
+                    if is_ai_creation(page):
+                        return True
+        return is_ai_creation(page)
 
     def run_on(page, context):
         t0 = time.time()
@@ -1709,62 +1834,59 @@ def run_leonardo(body):
             page.set_default_timeout(4000)
         except Exception:
             pass
-        try:
-            page.goto(target, wait_until="domcontentloaded", timeout=25000)
-        except Exception:
-            page.goto(home, wait_until="domcontentloaded", timeout=25000)
-        page.wait_for_timeout(1200)
-        try:
-            if page.locator('a:has-text("AI Creation"), button:has-text("AI Creation")').count() > 0:
-                page.get_by_text("AI Creation", exact=False).first.click(timeout=1500)
-                page.wait_for_timeout(800)
-        except Exception:
-            pass
+        goto_ai_creation(page)
         pst = detect_page_state(page, "leonardo")
         if pst in ("LOGIN_REQUIRED", "CHALLENGE", "TOKEN_EXHAUSTED", "QUEUE_FULL", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
             err, fault = page_state_error(pst, False, "leonardo")
             return {"ok": False, "error": err, "fault": fault, "pageState": pst, "backendMode": "web_account", "selectorPackVersion": pack_version}
+        if not is_ai_creation(page):
+            try:
+                page.screenshot(path="/tmp/leo-page.png", timeout=5000)
+                open("/tmp/leo-dom.txt","w",encoding="utf-8").write(page_text(page))
+            except Exception:
+                pass
+            err, fault = page_state_error(pst or "DOM_UNKNOWN", True, "leonardo")
+            return {"ok": False, "error": err + " url=" + (page.url or "") + " (not AI Creation)", "fault": fault, "pageState": pst, "backendMode": "web_account"}
         box = page.locator(prompt_sel).first
         gen = page.locator(gen_sel).first
-        if box.count() == 0 or gen.count() == 0:
-            for alt in ("https://app.leonardo.ai/generate", "https://app.leonardo.ai/image-generation", "https://app.leonardo.ai/create", home):
-                try:
-                    page.goto(alt, wait_until="domcontentloaded", timeout=20000)
-                    page.wait_for_timeout(900)
-                except Exception:
-                    continue
-                box = page.locator(prompt_sel).first
-                gen = page.locator(gen_sel).first
-                if box.count() > 0 and gen.count() > 0:
-                    break
+        for _ in range(10):
+            box = page.locator(prompt_sel).first
+            gen = page.locator(gen_sel).first
+            if box.count() > 0 and gen.count() > 0:
+                break
+            page.wait_for_timeout(400)
         if box.count() == 0 or gen.count() == 0:
             err, fault = page_state_error(pst or "DOM_UNKNOWN", True, "leonardo")
             return {"ok": False, "error": err + " url=" + (page.url or ""), "fault": fault, "pageState": pst, "backendMode": "web_account"}
         available = enum_model_labels(page)
-        if not available:
-            try:
-                blob = (page.locator("body").inner_text() or "")[:5000]
-            except Exception:
-                blob = ""
-            available = [lab for lab in labels if lab.lower() in blob.lower()]
-        picked = ""
+        try:
+            blob = (page.locator("body").inner_text() or "")[:8000]
+        except Exception:
+            blob = ""
         for lab in labels:
-            for item in available:
-                if len(item) < 4:
-                    continue
-                if lab.lower() in item.lower() or (len(item) >= 8 and item.lower() in lab.lower()):
-                    picked = item
-                    break
-            if picked:
-                break
-        if not available:
-            return {"ok": False, "error": "LEONARDO_DOM_CHANGED: model menu empty", "fault": "provider", "pageState": "MODEL_SELECTOR_READY", "backendMode": "web_account", "availableModels": []}
+            if lab.lower() in blob.lower() and lab not in available:
+                available.append(lab)
+        shown = selected_model_label(page)
+        if shown and shown not in available:
+            available = [shown] + available
+        picked = pick_model_label(available, labels)
+        print("leonardo url=%s pst=%s available=%s shown=%s picked=%s" % (page.url, pst, available, shown, picked), flush=True)
         if not picked:
-            return {"ok": False, "error": "LEONARDO_MODEL_UNAVAILABLE: " + model, "fault": "account", "pageState": "MODEL_UNAVAILABLE", "backendMode": "web_account", "availableModels": available, "modelActual": ""}
+            try:
+                page.screenshot(path="/tmp/leo-page.png", timeout=5000)
+                open("/tmp/leo-dom.txt","w",encoding="utf-8").write(blob)
+            except Exception:
+                pass
+            return {"ok": False, "error": "LEONARDO_MODEL_UNAVAILABLE: " + model + " url=" + (page.url or ""), "fault": "account", "pageState": "MODEL_UNAVAILABLE", "backendMode": "web_account", "availableModels": available, "modelActual": shown or ""}
         try:
             page.get_by_text(picked, exact=False).first.click(timeout=1500, force=True)
         except Exception:
-            page.evaluate("(t) => { const n=[...document.querySelectorAll('[role=menuitem],button,[role=option]')].find(e => (e.innerText||'').includes(t)); if(n) n.click(); }", picked)
+            page.evaluate("(t) => { const n=[...document.querySelectorAll('[role=menuitem],[role=option],[data-slot=dropdown-menu-item],button')].find(e => (e.innerText||'').includes(t) && (e.innerText||'').trim().length >= 8); if(n) n.click(); }", picked)
+        page.wait_for_timeout(400)
+        shown2 = selected_model_label(page)
+        if shown2 and pick_model_label([shown2], labels):
+            picked = shown2
+        print("leonardo picked=%s shown=%s" % (picked, shown2), flush=True)
         if kind == "canary":
             return {
                 "ok": True,

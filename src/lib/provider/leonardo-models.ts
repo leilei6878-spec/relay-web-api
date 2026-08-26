@@ -13,7 +13,16 @@ export const GEMINI_FAMILY_LABELS = [
   "gemini-2.5-flash-image",
 ];
 
-export const LEONARDO_SIZES = ["1024x1024", "848x1264", "1264x848", "1376x768", "768x1376"] as const;
+export const LEONARDO_SIZES = [
+  "1024x1024",
+  "2048x2048",
+  "4096x4096",
+  "2880x2880",
+  "848x1264",
+  "1264x848",
+  "1376x768",
+  "768x1376",
+] as const;
 export const LEONARDO_QUALITY = ["LOW", "MEDIUM", "HIGH"] as const;
 
 /** Aspect buttons verified on logged-out home (2026-08-26 recon). */
