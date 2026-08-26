@@ -1,21 +1,37 @@
-# Relay · 网页转 API
+# Relay
 
-多账号池把 ChatGPT / Gemini 网页能力转成统一 HTTP 网关。
+Web-to-API gateway: ChatGPT (chat + vision) and Gemini (image generation) behind an OpenAI-compatible HTTP API, with an account pool, sticky proxies, leases, and a worker fleet.
 
-- ChatGPT 对话：`POST /v1/chat/completions`
-- Gemini 出图：`POST /v1/images/generations`
-- 账号独立 Session、sticky 代理、失败摘除换号
-- 任务队列 + 本机 Worker 拉任务（绑定登录 IP，避免封号）
+You do **not** need the Grok workspace to deploy this. Start at [docs/QUICK_START.md](docs/QUICK_START.md).
 
-## 本地运行
+## Public API
 
-```bash
-npm install
-npm run dev
-```
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
+- `POST /v1/images/generations`
+- `POST /v1/images/edits`
 
-调度设置里查看 API Key。本机 Worker 从「网关试运行」下载，配合同一条代理节点运行。
+Machine contract: [`openapi.yaml`](openapi.yaml). Admin/Worker APIs are not in that file.
 
-## 安全
+## Ops
 
-不要提交 `storage/` 下的 Session、API Key 和代理密钥。仓库默认已忽略。
+| Doc | Topic |
+|---|---|
+| [docs/QUICK_START.md](docs/QUICK_START.md) | Clone, run, first key |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker / bare metal |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Fail-closed env |
+| [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) | Admin / Customer / Worker |
+| [docs/MONITORING.md](docs/MONITORING.md) | `/healthz` `/readyz` `/metrics` |
+| [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md) | Backup |
+| [docs/UPGRADE.md](docs/UPGRADE.md) / [ROLLBACK.md](docs/ROLLBACK.md) | Releases |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | Incidents |
+| [docs/ACCEPTANCE_REPORT.md](docs/ACCEPTANCE_REPORT.md) | RC evidence |
+
+## Safety
+
+Do not commit `storage/`, `.env`, sessions, API keys, or proxy passwords. Production refuses to start on PGLite, in-memory locks, mock providers, or local ephemeral media.
+
+## Version
+
+See `src/lib/release.ts`. Schema version follows `migrations/`.

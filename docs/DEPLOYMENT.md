@@ -1,18 +1,40 @@
 # Deployment
 
-Production (`NODE_ENV=production`) is fail-closed. Missing any of the following keeps the process from READY (`GET /api/ready` → 503):
+Two supported ways. Neither requires the Grok preview.
 
-- `DATABASE_URL` — Neon/Postgres. **No PGLite fallback in production.**
-- `REDIS_URL` — `redis://host:6379`. **No in-process memory lock in production.**
-- `RELAY_ADMIN_TOKEN` — `ad-relay-…` (file mint forbidden in production)
-- `RELAY_WORKER_TOKEN` — `wk-relay-…`
-- `RELAY_S3_BUCKET` + `RELAY_S3_ACCESS_KEY` + `RELAY_S3_SECRET_KEY` (or AWS_* equivalents)
-- optional `RELAY_S3_ENDPOINT` / `RELAY_S3_REGION` / `RELAY_S3_PUBLIC_BASE` for MinIO/R2/OSS
-- `RELAY_REQUIRE_ADMIN_LOGIN=1` on public hosts (disables loopback auto cookie)
-- `RELAY_PUBLIC_URL` — absolute origin for persisted image URLs
+## A. Docker Compose (recommended)
 
-Do **not** set `RELAY_TEST_URL`, `RELAY_ALLOW_MOCK`, or `RELAY_DEMO_MODE=true` in production.
+Files: `Dockerfile`, `Dockerfile.worker`, `docker-compose.production.yml`.
 
-Development / this preview may omit the above and will report `degraded` on `/api/ready`.
+Services: `postgres`, `redis`, `gateway`, `worker`. Optional profile `minio`.
 
-Start: `sh /workspace/startup.sh` starts the HTTP app and `server-1` worker daemon.
+```
+cp .env.example .env
+# set RELAY_ADMIN_TOKEN, RELAY_WORKER_TOKEN, RELAY_SECRETS_KEY, S3_* 
+docker compose -f docker-compose.production.yml up -d --build
+```
+
+Gateway entrypoint runs `npm run db:migrate` then `vite preview` on `0.0.0.0:8080`.
+Worker entrypoint runs the Playwright Python daemon against `RELAY_GATEWAY`.
+
+**Compose-up in the Grok workspace: NOT_EXECUTED** (no Docker daemon). Verify on the first real host before calling the install production.
+
+## B. Bare metal
+
+Node 22 + Python 3.12 + Playwright Chromium + Postgres 16 + Redis 7.
+
+```
+npm ci
+cp .env.example .env   # fill production values
+npm run build:app
+npm run db:migrate
+npm start              # 0.0.0.0:8080
+# second process:
+RELAY_HEADLESS=1 RELAY_GATEWAY=http://127.0.0.1:8080 \
+  RELAY_TOKEN=$RELAY_WORKER_TOKEN python3 workers/relay-worker.py
+```
+
+Export the worker script with `node --experimental-strip-types scripts/export-worker.mjs`.
+
+Production fail-closed list: [CONFIGURATION.md](./CONFIGURATION.md).
+Do **not** set mock/demo env vars. Do **not** point `RELAY_TEST_URL=self`.

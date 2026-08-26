@@ -2,6 +2,9 @@
 
 Harness: `node scripts/soak.mjs`
 
+**Release Candidate (2026-08-26): 1h / 12h / 24h / 48h are NOT_EXECUTED.**
+The 8s smoke below is the only soak that actually ran. Do not treat RC as 48h-certified.
+
 **Do not read this as a 48h soak.** Longer windows were not run in this session.
 
 | Gate | How | Status | Data |
