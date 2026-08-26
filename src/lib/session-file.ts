@@ -970,3 +970,7 @@ export function loginPackTextFiles(account: Account, proxy: Proxy, password: str
     { name: "README.txt", data: textFile(loginPackReadme(account.platform)) },
   ];
 }
+
+export function safeName(email: string) {
+  return `relay-login-${email.replace(/[^a-zA-Z0-9._-]+/g, "_")}`;
+}
