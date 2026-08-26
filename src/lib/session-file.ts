@@ -856,16 +856,34 @@ def find_singbox():
         p = os.path.join(HERE, n)
         if os.path.isfile(p) and os.path.getsize(p) > 1000000:
             return p
-    w = shutil.which("sing-box") or shutil.which("sing-box.exe")
-    if w:
-        return w
+    return shutil.which("sing-box") or shutil.which("sing-box.exe")
+
+def download_singbox():
     dest = os.path.join(HERE, "sing-box.exe")
+    if find_singbox():
+        return find_singbox()
     url = "https://github.com/SagerNet/sing-box/releases/download/v1.13.19/sing-box-1.13.19-windows-amd64.zip"
-    print("登录包不再内置 33MB 组件。正在从 GitHub 下载 sing-box（只需一次，日本线路通常很快）...")
+    print("本机没有 v2rayN，正在从 GitHub 下载 sing-box（有进度，超时 45 秒）...")
     zip_path = os.path.join(HERE, "sing-box-win.zip")
     try:
         import urllib.request, zipfile
-        urllib.request.urlretrieve(url, zip_path)
+        req = urllib.request.Request(url, headers={"User-Agent": "relay-login"})
+        with urllib.request.urlopen(req, timeout=45) as r, open(zip_path, "wb") as f:
+            total = int(r.headers.get("Content-Length") or 0)
+            n = 0
+            last = 0
+            while True:
+                chunk = r.read(65536)
+                if not chunk:
+                    break
+                f.write(chunk)
+                n += len(chunk)
+                if n - last >= 1048576:
+                    if total:
+                        print("已下载 %d / %d MB" % (n // 1048576, max(1, total // 1048576)))
+                    else:
+                        print("已下载 %d MB" % (n // 1048576))
+                    last = n
         with zipfile.ZipFile(zip_path) as z:
             for n in z.namelist():
                 if n.replace("\\\\", "/").lower().endswith("sing-box.exe"):
@@ -880,8 +898,7 @@ def find_singbox():
             print("sing-box 已就绪")
             return dest
     except Exception as e:
-        print("下载 sing-box 失败", e)
-    print("请把 sing-box.exe 放到本目录后重试：", HERE)
+        print("下载 sing-box 失败", str(e)[:160])
     return None
 
 def port_open(port):
@@ -896,7 +913,7 @@ def port_open(port):
         s.close()
 
 def start_singbox(cfg):
-    bin_path = find_singbox()
+    bin_path = find_singbox() or download_singbox()
     if not bin_path:
         return None
     cfg_path = os.path.join(tempfile.gettempdir(), "relay-ss-local.json")
@@ -925,28 +942,18 @@ def open_page(page, url, timeout=20000):
     return False
 
 def pick_socks():
-    if PLATFORM == "leonardo":
-        print("Leonardo 登录用绑定节点，不优先用 v2rayN（Canva 会把系统 VPN 当成风险）")
-        child = None
-        for cfg in CONFIGS:
-            child = start_singbox(cfg)
-            if child:
-                print("已启动包内 sing-box 18080")
-                return 18080, "socks5", child
-        print("包内节点没起来，再试本机 v2rayN…")
     for port, scheme, label in ((10808, "socks5", "v2rayN SOCKS"), (10809, "http", "v2rayN HTTP")):
         if port_open(port):
-            print("使用本机 %s 127.0.0.1:%d（请确认选中平台同一条节点）" % (label, port))
+            print("使用本机 %s 127.0.0.1:%d（请确认选中平台同一条 Japan 节点）" % (label, port))
             return port, scheme, None
-    if PLATFORM != "leonardo":
-        print("未检测到 v2rayN，尝试启动包内节点…")
-        child = None
-        for cfg in CONFIGS:
-            child = start_singbox(cfg)
-            if child:
-                print("已启动包内 sing-box 18080")
-                return 18080, "socks5", child
-    print("没有可用本地代理。请先打开 v2rayN，选中 Japan 节点，再运行 run.bat。")
+    print("没检测到 v2rayN，才下载包内节点…")
+    child = None
+    for cfg in CONFIGS:
+        child = start_singbox(cfg)
+        if child:
+            print("已启动包内 sing-box 18080")
+            return 18080, "socks5", child
+    print("没有可用本地代理。请先打开 v2rayN，选中 Japan 节点，再运行 run.bat。不必从 GitHub 下 30MB。")
     sys.exit(1)
 
 socks_port, scheme, child = pick_socks()

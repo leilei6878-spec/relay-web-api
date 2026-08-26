@@ -636,7 +636,7 @@ function LoginDialog({ account }: { account: Account }) {
               <p className="text-xs leading-relaxed text-subtle">
                 下载的是压缩包（含 login.py、run.bat
                 {proxy?.type === "ss" ? "。第一次运行会从 GitHub 下载 sing-box" : ""}
-                ）。解压后双击 run.bat，按平台这条节点出网。
+                ）。解压后先打开 v2rayN 选 Japan 节点，再双击 run.bat。
               </p>
               <Button className="w-full" variant="secondary" onClick={() => void downloadHelper()} disabled={packing}>
                 {packing ? "正在下载登录包…" : "下载一键登录包"}
