@@ -51,11 +51,17 @@ def pick_proxy():
             return {"server": "%s://127.0.0.1:%d" % (scheme, port)}
     return None
 
+SOCKS_OK_UNTIL = 0
+SOCKS_OK_SERVER = ""
+
 def socks_https_ok(proxy):
+    global SOCKS_OK_UNTIL, SOCKS_OK_SERVER
     server = ""
     if isinstance(proxy, dict):
         server = proxy.get("server") or ""
     if not server.startswith("socks5"):
+        return True
+    if server == SOCKS_OK_SERVER and time.time() < SOCKS_OK_UNTIL:
         return True
     try:
         hostport = server.split("://", 1)[-1]
@@ -63,7 +69,7 @@ def socks_https_ok(proxy):
         sh = sh.strip("[]")
         dest = "api.ipify.org"
         s = socket.socket()
-        s.settimeout(8)
+        s.settimeout(5)
         s.connect((sh, int(sp)))
         s.send(b"\\x05\\x01\\x00")
         greet = s.recv(2)
@@ -81,7 +87,11 @@ def socks_https_ok(proxy):
         tls.send(b"GET / HTTP/1.1\\r\\nHost: api.ipify.org\\r\\nConnection: close\\r\\n\\r\\n")
         body = tls.recv(256)
         tls.close()
-        return bool(body)
+        ok = bool(body)
+        if ok:
+            SOCKS_OK_SERVER = server
+            SOCKS_OK_UNTIL = time.time() + 45
+        return ok
     except Exception as e:
         print("socks_https_ok fail", server, e, flush=True)
         return False
@@ -412,7 +422,7 @@ def playwright_inst():
 def pool_enabled():
     if os.environ.get("RELAY_TEST_URL"):
         return False
-    return os.environ.get("RELAY_BROWSER_POOL") == "1"
+    return os.environ.get("RELAY_BROWSER_POOL", "1") != "0"
 
 def recycle_idle_contexts():
     now = time.time()
@@ -455,8 +465,13 @@ def get_pooled_context(proxy, storage_state, account_id):
         if row and row.get("ctx") and row.get("n", 0) < CTX_MAX_REQ:
             row["last"] = time.time()
             row["n"] = row.get("n", 0) + 1
-            return browser, row["ctx"], False
+            return browser, row["ctx"], row.get("page"), ctx_key
         if row:
+            try:
+                if row.get("page"):
+                    row["page"].close()
+            except Exception:
+                pass
             try:
                 row["ctx"].close()
             except Exception:
@@ -465,6 +480,11 @@ def get_pooled_context(proxy, storage_state, account_id):
         same = [k for k in CTX_POOL if k.startswith(proxy_key + "|")]
         if len(same) >= MAX_CTX:
             old = same[0]
+            try:
+                if CTX_POOL[old].get("page"):
+                    CTX_POOL[old]["page"].close()
+            except Exception:
+                pass
             try:
                 CTX_POOL[old]["ctx"].close()
             except Exception:
@@ -481,8 +501,8 @@ def get_pooled_context(proxy, storage_state, account_id):
             ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         except Exception:
             pass
-        CTX_POOL[ctx_key] = {"ctx": ctx, "last": time.time(), "n": 1}
-        return browser, ctx, True
+        CTX_POOL[ctx_key] = {"ctx": ctx, "last": time.time(), "n": 1, "page": None}
+        return browser, ctx, None, ctx_key
 
 
 def open_browser(p, proxy):
@@ -500,14 +520,20 @@ def open_browser(p, proxy):
     return p.chromium.launch(**kw)
 
 def select_model(page, model):
+    latest = model in ("gpt-5.6", "latest", "gpt-5")
+    if latest:
+        try:
+            if page.locator("#prompt-textarea, textarea#prompt-textarea").count() > 0:
+                return True, "ChatGPT"
+        except Exception:
+            pass
     labels = {
-        "gpt-5.6": ["GPT-5.6", "5.6", "5.2", "5.4", "5.5", "Instant", "ChatGPT", "Auto", "GPT-5"],
-        "latest": ["GPT-5.6", "GPT-5", "5.2", "Instant", "ChatGPT", "Auto"],
+        "gpt-5.6": ["GPT-5.6", "5.6", "5.2", "Instant", "ChatGPT", "Auto", "GPT-5"],
+        "latest": ["GPT-5.6", "GPT-5", "Instant", "ChatGPT", "Auto"],
         "gpt-5": ["GPT-5 Auto", "Auto", "GPT-5", "ChatGPT", "Instant"],
         "gpt-5-thinking": ["GPT-5 Thinking", "Thinking"],
         "gpt-4o": ["GPT-4o", "4o"],
     }.get(model, [model])
-    latest = model in ("gpt-5.6", "latest", "gpt-5")
     switchers = [
         '[data-testid="model-switcher-dropdown-button"]',
         'button:has-text("ChatGPT 5")',
@@ -619,26 +645,28 @@ def run_chat(body):
     def run_on(page, context, close_browser):
         t0 = time.time()
         post_phase("opening_chatgpt")
+        already = False
         try:
-            page.goto(CHAT_URL if not real else "https://chatgpt.com/", wait_until="domcontentloaded", timeout=25000)
-        except Exception as e:
-            t = str(e)
-            if "ERR_CONNECTION_CLOSED" in t or "ERR_CONNECTION_RESET" in t or "ERR_TUNNEL" in t:
-                return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
-            return {"ok": False, "error": "CHAT_PAGE_TIMEOUT: 打不开 chatgpt.com（%s）" % t[:160], "fault": "proxy"}
-        post_phase("page_ready")
-        try:
-            page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea, [data-testid='send-button']", timeout=18000)
+            already = "chatgpt.com" in (page.url or "") and page.locator("#prompt-textarea, textarea#prompt-textarea").count() > 0
         except Exception:
-            pst = detect_page_state(page, "chatgpt")
-            if pst == "CHALLENGE":
-                err, fault = page_state_error(pst, False)
-                return {"ok": False, "error": err, "fault": fault, "pageState": pst}
+            already = False
+        if not already:
+            try:
+                page.goto(CHAT_URL if not real else "https://chatgpt.com/", wait_until="domcontentloaded", timeout=25000)
+            except Exception as e:
+                t = str(e)
+                if "ERR_CONNECTION_CLOSED" in t or "ERR_CONNECTION_RESET" in t or "ERR_TUNNEL" in t:
+                    return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
+                return {"ok": False, "error": "CHAT_PAGE_TIMEOUT: 打不开 chatgpt.com（%s）" % t[:160], "fault": "proxy"}
+            try:
+                page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea, [data-testid='send-button']", timeout=12000)
+            except Exception:
+                pst = detect_page_state(page, "chatgpt")
+                if pst == "CHALLENGE":
+                    err, fault = page_state_error(pst, False)
+                    return {"ok": False, "error": err, "fault": fault, "pageState": pst}
+        post_phase("page_ready")
         switched, actual = select_model(page, model)
-        if not TEST_URL:
-            ip = exit_ip(context)
-            if not ip:
-                return {"ok": False, "error": "PROXY_UNAVAILABLE: exit IP probe failed", "fault": "proxy"}
         if not switched and not TEST_URL:
             code = "MODEL_SELECTION_UNCONFIRMED" if not actual else "MODEL_MISMATCH"
             return {"ok": False, "error": code + ": failed to select " + model, "fault": "provider", "modelActual": actual or ""}
@@ -673,39 +701,40 @@ def run_chat(body):
             page.keyboard.press("Enter")
         post_phase("generating")
         stop_sel = ",".join(stop)
-        stop_wait = 800 if TEST_URL else 12000
-        stop_seen = False
-        try:
-            page.locator(stop_sel).first.wait_for(state="visible", timeout=stop_wait)
-            stop_seen = True
-        except Exception:
-            pass
-        if stop_seen:
-            try:
-                page.locator(stop_sel).first.wait_for(state="hidden", timeout=3000 if TEST_URL else max(3000, timeout_ms))
-            except Exception:
-                pass
         deadline = time.time() + timeout_ms / 1000
         text = ""
         stable = ""
         same = 0
+        stop_seen = False
         while time.time() < deadline:
+            if not stop_seen:
+                try:
+                    stop_seen = bool(page.locator(stop_sel).first.is_visible())
+                except Exception:
+                    stop_seen = False
+            generating = False
+            if stop_seen:
+                try:
+                    generating = bool(page.locator(stop_sel).first.is_visible())
+                except Exception:
+                    generating = False
             nodes = page.locator(",".join(assistant))
             n = nodes.count()
             cur = ""
             if n > before:
                 cur = (nodes.nth(n - 1).inner_text() or "").strip()
             if cur:
-                if cur == stable:
-                    same += 1
-                    if same >= (1 if stop_seen else 2):
-                        text = cur
-                        break
-                else:
+                if cur != stable:
                     stable = cur
                     same = 0
                     post_chunk(cur)
-            time.sleep(0.2 if stop_seen else 0.28)
+                else:
+                    same += 1
+                    need = 2 if (stop_seen and not generating) else 4
+                    if same >= need and not generating:
+                        text = cur
+                        break
+            time.sleep(0.12)
         if not text:
             text = stable
         if not text:
@@ -729,15 +758,18 @@ def run_chat(body):
         }
 
     if pool_enabled():
-        browser, context, _fresh = get_pooled_context(proxy, state, body.get("accountId"))
-        page = context.new_page()
+        browser, context, page, ctx_key = get_pooled_context(proxy, state, body.get("accountId"))
+        if page is None:
+            page = context.new_page()
         try:
-            return run_on(page, context, False)
-        finally:
-            try:
-                page.close()
-            except Exception:
-                pass
+            result = run_on(page, context, False)
+            with POOL_LOCK:
+                row = CTX_POOL.get(ctx_key)
+                if row:
+                    row["page"] = page
+            return result
+        except Exception as e:
+            return {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"}
     with sync_playwright() as p:
         browser = open_browser(p, proxy)
         context = browser.new_context(
@@ -757,7 +789,10 @@ def run_chat(body):
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
-        sys.stdout.write("[%s] %s\\n" % (self.log_date_time_string(), fmt % args))
+        msg = fmt % args
+        if "GET / HTTP" in msg or "GET /health" in msg:
+            return
+        sys.stdout.write("[%s] %s\\n" % (self.log_date_time_string(), msg))
 
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -950,15 +985,18 @@ def run_image(body):
         }
 
     if pool_enabled():
-        browser, context, _fresh = get_pooled_context(proxy, state, body.get("accountId"))
-        page = context.new_page()
+        browser, context, page, ctx_key = get_pooled_context(proxy, state, body.get("accountId"))
+        if page is None:
+            page = context.new_page()
         try:
-            return run_image_on(page, context)
-        finally:
-            try:
-                page.close()
-            except Exception:
-                pass
+            result = run_image_on(page, context)
+            with POOL_LOCK:
+                row = CTX_POOL.get(ctx_key)
+                if row:
+                    row["page"] = page
+            return result
+        except Exception as e:
+            return {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"}
     with sync_playwright() as p:
         browser = open_browser(p, proxy)
         context = browser.new_context(
@@ -1144,12 +1182,17 @@ if __name__ == "__main__":
         threading.Thread(target=mock.serve_forever, daemon=True).start()
         CHAT_URL = "http://127.0.0.1:%d/" % mock_port
         print("测试页", CHAT_URL, flush=True)
-    print("Relay 本机 Worker  http://127.0.0.1:%d" % PORT)
-    print("请保持 v2rayN 开启，并选中平台同一条节点。不要关这个窗口。")
+    print("Relay Worker  http://127.0.0.1:%d" % PORT)
     if pick_proxy():
         print("已检测到本机代理")
-    else:
-        print("还没检测到 10808/10809，先开 v2rayN 再在平台点发送")
+    def warmup():
+        try:
+            proxy = pick_proxy() or {"server": "socks5://127.0.0.1:18080"}
+            get_pooled_context(proxy, None, "_warm")
+            print("browser warm", flush=True)
+        except Exception as e:
+            print("warmup fail", e, flush=True)
+    threading.Thread(target=warmup, daemon=True).start()
     threading.Thread(target=beat_loop, daemon=True).start()
     threading.Thread(target=poll_gateway, daemon=True).start()
     Server(("127.0.0.1", PORT), H).serve_forever()
