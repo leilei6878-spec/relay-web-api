@@ -10,9 +10,17 @@ import { persistenceMode, pgSotActive } from "./persist-mode";
 import { getSecret, proxySecretKey, putSecret } from "./secrets";
 import type { Account, GatewaySettings, Proxy } from "./types";
 
-const DIR = resolve("storage");
-const PLANE = resolve(DIR, "control-plane.json");
-const BACKUP_DIR = resolve(DIR, "backups");
+export function storageDir() {
+  return resolve(process.env.RELAY_STORAGE_DIR || "storage");
+}
+
+function planePath() {
+  return resolve(storageDir(), "control-plane.json");
+}
+
+function backupDir() {
+  return resolve(storageDir(), "backups");
+}
 
 export const fallbackSettings: GatewaySettings = {
   maxRetry: 3,
@@ -55,11 +63,15 @@ function later(a?: string | null, b?: string | null) {
 
 const DEMO_ACCOUNT_IDS = new Set(["ac-1", "ac-2", "ac-3", "ac-4", "ac-5", "ac-6", "ac-7", "ac-8"]);
 
-function isBuiltinDemo(accounts: Account[]) {
-  if (accounts.length < 3) return false;
+function isTestFixture(accounts: Account[]) {
+  if (!accounts.length) return true;
   return accounts.every(
     (a) => DEMO_ACCOUNT_IDS.has(a.id) || /@(mail\.test|test\.local)$/.test(a.email),
   );
+}
+
+function isBuiltinDemo(accounts: Account[]) {
+  return isTestFixture(accounts);
 }
 
 function hasRealAccounts(accounts: Account[]) {
@@ -77,19 +89,26 @@ function stripProxySecrets(proxies: Proxy[]): Proxy[] {
 }
 
 export async function writeControlPlane(plane: Omit<ControlPlane, "savedAt">) {
-  await mkdir(DIR, { recursive: true });
+  await mkdir(storageDir(), { recursive: true });
   let prev: ControlPlane | null = null;
   if (persistenceMode() === "postgres" && process.env.RELAY_SKIP_DB !== "1") {
     prev = (await loadDb()) as ControlPlane | null;
   }
   if (!prev) {
     try {
-      prev = JSON.parse(await readFile(PLANE, "utf8")) as ControlPlane;
+      prev = JSON.parse(await readFile(planePath(), "utf8")) as ControlPlane;
     } catch {
       prev = null;
     }
   }
   const oldById = new Map((prev?.accounts || []).map((a) => [a.id, a]));
+  if (
+    hasRealAccounts(prev?.accounts || []) &&
+    !hasRealAccounts(plane.accounts) &&
+    process.env.RELAY_ALLOW_CLOBBER !== "1"
+  ) {
+    return { ok: true as const, skipped: "real-accounts-protected" };
+  }
   if ((plane.accounts.length === 0 || isBuiltinDemo(plane.accounts)) && hasRealAccounts(prev?.accounts || [])) {
     return { ok: true as const, skipped: "demo-or-empty-blocked" };
   }
@@ -125,16 +144,21 @@ export async function writeControlPlane(plane: Omit<ControlPlane, "savedAt">) {
   };
   if (persistenceMode() === "file" || process.env.RELAY_SKIP_DB === "1") {
     try {
-      await mkdir(BACKUP_DIR, { recursive: true });
+      await mkdir(backupDir(), { recursive: true });
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      await writeFile(PLANE, JSON.stringify(body), "utf8");
-      await copyFile(PLANE, resolve(BACKUP_DIR, `control-plane-${stamp}.json`));
-      const files = (await readdir(BACKUP_DIR)).filter((f) => f.startsWith("control-plane-")).sort();
+      await writeFile(planePath(), JSON.stringify(body), "utf8");
+      await copyFile(planePath(), resolve(backupDir(), `control-plane-${stamp}.json`));
+      if (hasRealAccounts(body.accounts)) {
+        await writeFile(resolve(backupDir(), "control-plane-live.json"), JSON.stringify(body), "utf8");
+      }
+      const files = (await readdir(backupDir()))
+        .filter((f) => f.startsWith("control-plane-") && !f.includes("live") && !f.includes("manual"))
+        .sort();
       for (const extra of files.slice(0, Math.max(0, files.length - 30))) {
-        await unlink(resolve(BACKUP_DIR, extra)).catch(() => undefined);
+        await unlink(resolve(backupDir(), extra)).catch(() => undefined);
       }
     } catch {
-      await writeFile(PLANE, JSON.stringify(body), "utf8");
+      await writeFile(planePath(), JSON.stringify(body), "utf8");
     }
   }
   await syncDb(body);
@@ -166,7 +190,7 @@ async function recoverCooling(plane: ControlPlane) {
   if (!changed) return plane;
   const next = { ...plane, accounts, savedAt: new Date().toISOString() };
   if (persistenceMode() === "file" || process.env.RELAY_SKIP_DB === "1") {
-    await writeFile(PLANE, JSON.stringify(next), "utf8");
+    await writeFile(planePath(), JSON.stringify(next), "utf8");
   }
   await syncDb(next);
   return next;
@@ -183,7 +207,7 @@ export async function readControlPlane(): Promise<ControlPlane> {
     }
   }
   try {
-    const raw = JSON.parse(await readFile(PLANE, "utf8")) as ControlPlane;
+    const raw = JSON.parse(await readFile(planePath(), "utf8")) as ControlPlane;
     const plane = { ...raw, settings: { ...fallbackSettings, ...raw.settings } };
     return recoverCooling(plane);
   } catch {
@@ -206,10 +230,10 @@ export async function patchAccount(id: string, patch: Partial<Account>) {
   }
   const plane = await readControlPlane();
   const accounts = plane.accounts.map((a) => (a.id === id ? { ...a, ...patch } : a));
-  await mkdir(DIR, { recursive: true });
+  await mkdir(storageDir(), { recursive: true });
   const next = { ...plane, accounts, savedAt: new Date().toISOString() };
   if (persistenceMode() === "file" || process.env.RELAY_SKIP_DB === "1") {
-    await writeFile(PLANE, JSON.stringify(next), "utf8");
+    await writeFile(planePath(), JSON.stringify(next), "utf8");
   }
   await syncDb(next);
 }

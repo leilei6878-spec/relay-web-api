@@ -11,17 +11,18 @@ process.env.RELAY_SKIP_DB = "1";
 
 async function seed() {
   resetCoordForTests();
-  await mkdir(resolve("storage/sessions"), { recursive: true });
-  await writeFile(resolve("storage/jobs.json"), JSON.stringify({ jobs: [], workers: [] }), "utf8");
+  const root = resolve(process.env.RELAY_STORAGE_DIR || "/tmp/relay-qa-storage");
+  await mkdir(resolve(root, "sessions"), { recursive: true });
+  await writeFile(resolve(root, "jobs.json"), JSON.stringify({ jobs: [], workers: [] }), "utf8");
   const a = `ac-${crypto.randomUUID().slice(0, 8)}`;
   const b = `ac-${crypto.randomUUID().slice(0, 8)}`;
   await writeFile(
-    resolve("storage/sessions", `${a}.json`),
+    resolve(root, "sessions", `${a}.json`),
     JSON.stringify({ cookies: [{ name: "session-token", value: "t", domain: ".chatgpt.com", path: "/" }], origins: [] }),
     "utf8",
   );
   await writeFile(
-    resolve("storage/sessions", `${b}.json`),
+    resolve(root, "sessions", `${b}.json`),
     JSON.stringify({ cookies: [{ name: "session-token", value: "t", domain: ".chatgpt.com", path: "/" }], origins: [] }),
     "utf8",
   );
@@ -34,7 +35,7 @@ async function seed() {
         remark: "qa",
         status: "healthy",
         proxyId: "px-1",
-        sessionPath: `storage/sessions/${a}.json`,
+        sessionPath: resolve(root, "sessions", `${a}.json`),
         failCount: 0,
         totalRequests: 0,
         lastUsedAt: null,
@@ -48,7 +49,7 @@ async function seed() {
         remark: "qa",
         status: "healthy",
         proxyId: "px-1",
-        sessionPath: `storage/sessions/${b}.json`,
+        sessionPath: resolve(root, "sessions", `${b}.json`),
         failCount: 0,
         totalRequests: 0,
         lastUsedAt: null,

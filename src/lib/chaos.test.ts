@@ -182,7 +182,7 @@ test("chaos 3: file persistence keeps queued jobs across load (gateway restart s
   const queued = await enqueueChat("persist", "gpt-5.6", 8000, []);
   assert.equal(queued.ok, true);
   if (!queued.ok) return;
-  const raw = JSON.parse(await readFile(resolve("storage/jobs.json"), "utf8")) as { jobs: { id: string }[] };
+  const raw = JSON.parse(await readFile(resolve(process.env.RELAY_STORAGE_DIR || "storage", "jobs.json"), "utf8")) as { jobs: { id: string }[] };
   assert.ok(raw.jobs.some((j) => j.id === queued.job.id));
 });
 

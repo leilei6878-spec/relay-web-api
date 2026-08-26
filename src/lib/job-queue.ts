@@ -92,7 +92,10 @@ export type WorkerRow = {
 
 type Store = { jobs: Job[]; workers: WorkerRow[] };
 
-const FILE = resolve("storage", "jobs.json");
+function jobsFile() {
+  return resolve(process.env.RELAY_STORAGE_DIR || "storage", "jobs.json");
+}
+
 let chain: Promise<unknown> = Promise.resolve();
 let memStore: Store = { jobs: [], workers: [] };
 let fileWrites = 0;
@@ -150,9 +153,9 @@ async function persist(store: Store) {
     );
     return;
   }
-  await mkdir(resolve("storage"), { recursive: true });
+  await mkdir(resolve(process.env.RELAY_STORAGE_DIR || "storage"), { recursive: true });
   fileWrites += 1;
-  await writeFile(FILE, JSON.stringify(store), "utf8");
+  await writeFile(jobsFile(), JSON.stringify(store), "utf8");
   if (process.env.RELAY_SKIP_DB === "1") return;
   const { dbUpsertJob, safeDb } = await import("./relay-db");
   await Promise.all(store.jobs.slice(0, 80).map((j) => safeDb(() => dbUpsertJob(j as unknown as Record<string, unknown>))));
@@ -222,7 +225,7 @@ async function load(): Promise<Store> {
   }
   let store: Store;
   try {
-    store = JSON.parse(await readFile(FILE, "utf8")) as Store;
+    store = JSON.parse(await readFile(jobsFile(), "utf8")) as Store;
   } catch {
     const fromDb = process.env.RELAY_SKIP_DB === "1" ? null : await (await import("./relay-db")).safeDb(() =>
       import("./relay-db").then((m) => m.dbLoadJobs()),
