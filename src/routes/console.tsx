@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { ImageInput } from "@/components/image-input";
-import { getApiKey } from "@/lib/gateway";
 
 export const Route = createFileRoute("/console")({ component: Page });
 
@@ -64,7 +63,6 @@ function Console() {
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    void getApiKey().then((r) => setApiKey(r.apiKey));
     const ping = () =>
       fetch("/api/runtime")
         .then((r) => r.json() as Promise<{ workerOnline?: boolean }>)
@@ -125,6 +123,7 @@ function Console() {
         ? await fetch(endpoint, {
             method: "POST",
             signal: ac.signal,
+            credentials: "omit",
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${apiKey.trim()}`,
@@ -285,13 +284,16 @@ function Console() {
           </div>
           <p className="font-mono text-[11px] text-subtle">POST {endpoint}</p>
           <label className="block text-sm">
-            <span className="mb-1 block text-xs text-muted">API Key</span>
+            <span className="mb-1 block text-xs text-muted">API Key（可留空）</span>
             <Input
               className="font-mono text-xs"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-relay-..."
+              placeholder="留空=用当前管理员登录测试正式接口"
             />
+            <span className="mt-1 block text-[11px] text-subtle">
+              后台已登录时不必填 Key。若填写客户 Key，将按开放 API 的鉴权发送。
+            </span>
           </label>
           {kind === "chat" && (
             <label className="block text-sm">

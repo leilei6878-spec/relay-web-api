@@ -75,13 +75,18 @@ export async function classify(request: Request): Promise<Principal | null> {
   const cookie = readCookie(request, ADMIN_COOKIE);
   const admin = await ensureAdminToken();
   const worker = await ensureWorkerToken();
-  if (bearer && bearer === admin) return { kind: "admin", token: bearer };
-  if (cookie && cookie === admin) return { kind: "admin", token: cookie };
-  if (bearer && bearer === worker) return { kind: "worker", token: bearer };
+  // Authorization header always wins. Same-origin admin cookie must not
+  // shadow a customer API key (the in-app API tester used to 401 this way).
   if (bearer) {
+    if (bearer === admin) return { kind: "admin", token: bearer };
+    if (bearer === worker) return { kind: "worker", token: bearer };
     const rec = await findApiKey(bearer);
-    if (rec?.enabled && rec.key.startsWith("sk-relay-")) return { kind: "customer", token: bearer, record: rec };
+    if (rec?.enabled && rec.key.startsWith("sk-relay-")) {
+      return { kind: "customer", token: bearer, record: rec };
+    }
+    return null;
   }
+  if (cookie && cookie === admin) return { kind: "admin", token: cookie };
   return null;
 }
 
