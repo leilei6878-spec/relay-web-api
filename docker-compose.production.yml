@@ -12,6 +12,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -20,9 +21,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
 
   minio:
-    profiles: ["minio"]
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
@@ -30,9 +31,27 @@ services:
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-relayrelay1}
     volumes:
       - relay_minio:/data
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-relay}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-relayrelay1}
+      S3_BUCKET: ${S3_BUCKET:-relay}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        i=0
+        until mc alias set local http://minio:9000 "$$S3_ACCESS_KEY" "$$S3_SECRET_KEY"; do
+          i=$$((i+1))
+          if [ $$i -gt 40 ]; then echo "minio not ready"; exit 1; fi
+          sleep 1
+        done
+        mc mb -p "local/$$S3_BUCKET" || true
+        echo "minio bucket ready"
 
   gateway:
     build:
@@ -43,6 +62,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       DATABASE_URL: postgres://relay:${POSTGRES_PASSWORD:-relay}@postgres:5432/relay
@@ -51,14 +72,20 @@ services:
       RELAY_WORKER_TOKEN: ${RELAY_WORKER_TOKEN}
       RELAY_SECRETS_KEY: ${RELAY_SECRETS_KEY}
       RELAY_PUBLIC_URL: ${RELAY_PUBLIC_URL:-http://localhost:8080}
-      RELAY_S3_ENDPOINT: ${S3_ENDPOINT:-}
-      RELAY_S3_BUCKET: ${S3_BUCKET:-}
-      RELAY_S3_REGION: ${S3_REGION:-auto}
-      RELAY_S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      RELAY_S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      RELAY_S3_BUCKET: ${S3_BUCKET:-relay}
+      RELAY_S3_REGION: ${S3_REGION:-us-east-1}
+      RELAY_S3_ACCESS_KEY: ${S3_ACCESS_KEY:-relay}
       RELAY_S3_SECRET_KEY: ${S3_SECRET_KEY:-}
       RELAY_REQUIRE_ADMIN_LOGIN: "1"
+    volumes:
+      - ${RELAY_STORAGE_HOST:-relay_storage}:/app/storage
+      - ${RELAY_XRAY_BIN:-./bin/xray}:/app/bin/xray:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
-      - "8080:8080"
+      - "${RELAY_BIND:-127.0.0.1:8088}:8080"
+    restart: unless-stopped
 
   worker:
     build:
@@ -69,12 +96,16 @@ services:
     environment:
       NODE_ENV: production
       RELAY_HEADLESS: "1"
-      RELAY_GATEWAY: http://gateway:8080
+      RELAY_GATEWAY: ${RELAY_GATEWAY:-http://gateway:8080}
       RELAY_WORKER_TOKEN: ${RELAY_WORKER_TOKEN}
       RELAY_TOKEN: ${RELAY_WORKER_TOKEN}
       RELAY_WORKER_NAME: worker-1
       RELAY_CAPACITY: ${MAX_WORKER_CONCURRENCY:-3}
+    shm_size: "2gb"
+    init: true
+    restart: unless-stopped
 
 volumes:
   relay_pg:
   relay_minio:
+  relay_storage:

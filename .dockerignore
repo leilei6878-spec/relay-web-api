@@ -12,3 +12,7 @@ public/__grok
 coverage
 dist
 .output
+.env
+.env.*
+data
+xray-client.json

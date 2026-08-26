@@ -1,0 +1,13 @@
+# Host-specific overlay for the Japan VPS. Used together with
+# docker-compose.production.yml. Does not publish object storage.
+services:
+  worker:
+    network_mode: host
+    environment:
+      NODE_ENV: production
+      RELAY_HEADLESS: "1"
+      RELAY_GATEWAY: http://127.0.0.1:8088
+      RELAY_WORKER_TOKEN: ${RELAY_WORKER_TOKEN}
+      RELAY_TOKEN: ${RELAY_WORKER_TOKEN}
+      RELAY_WORKER_NAME: worker-1
+      RELAY_CAPACITY: ${MAX_WORKER_CONCURRENCY:-2}
