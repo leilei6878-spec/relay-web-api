@@ -68,29 +68,36 @@ def account_lock(aid):
     ACCOUNT_LOCKS.setdefault(aid or "_", threading.Lock())
     return ACCOUNT_LOCKS[aid or "_"]
 
-def post_chunk(text):
+def post_chunk(text, phase=""):
     gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
     token = os.environ.get("RELAY_TOKEN") or ""
     jid = os.environ.get("RELAY_JOB_ID") or ""
-    if not (gw and token and jid and text):
+    if not (gw and token and jid and (text or phase)):
         return
     try:
         import urllib.request
+        payload = {
+            "id": jid,
+            "leaseId": os.environ.get("RELAY_LEASE_ID") or "",
+            "fencingToken": int(os.environ.get("RELAY_FENCE") or "0") or None,
+            "attemptId": os.environ.get("RELAY_ATTEMPT_ID") or "",
+        }
+        if text:
+            payload["text"] = text
+        if phase:
+            payload["phase"] = phase
         req = urllib.request.Request(
             gw + "/api/worker/chunk",
-            data=json.dumps({
-                "id": jid,
-                "text": text,
-                "leaseId": os.environ.get("RELAY_LEASE_ID") or "",
-                "fencingToken": int(os.environ.get("RELAY_FENCE") or "0") or None,
-                "attemptId": os.environ.get("RELAY_ATTEMPT_ID") or "",
-            }).encode("utf-8"),
+            data=json.dumps(payload).encode("utf-8"),
             headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
             method="POST",
         )
         urllib.request.urlopen(req, timeout=8).read()
     except Exception:
         pass
+
+def post_phase(phase):
+    post_chunk("", phase)
 
 def exit_ip(context):
     try:
@@ -542,8 +549,12 @@ def run_chat(body):
 
     def run_on(page, context, close_browser):
         t0 = time.time()
-        page.goto(CHAT_URL if not real else "https://chatgpt.com/", wait_until="domcontentloaded", timeout=45000)
-        time.sleep(0.3 if (TEST_URL and not real) else 0.6)
+        post_phase("opening_chatgpt")
+        try:
+            page.goto(CHAT_URL if not real else "https://chatgpt.com/", wait_until="domcontentloaded", timeout=25000)
+        except Exception as e:
+            return {"ok": False, "error": "CHAT_PAGE_TIMEOUT: 打不开 chatgpt.com（%s）" % str(e)[:160], "fault": "proxy"}
+        post_phase("page_ready")
         switched, actual = select_model(page, model)
         if not TEST_URL:
             ip = exit_ip(context)
@@ -558,6 +569,7 @@ def run_chat(body):
             pst = detect_page_state(page, "chatgpt")
             err, fault = page_state_error(pst, True)
             return {"ok": False, "error": err, "fault": fault, "pageState": pst, "selectorPackVersion": pack_version, "fingerprint": page_fingerprint(page, sel)}
+        post_phase("composer_ready")
         if body.get("kind") == "canary":
             fp = page_fingerprint(page, sel)
             pst = detect_page_state(page, "chatgpt")
@@ -580,6 +592,7 @@ def run_chat(body):
             btn.click()
         else:
             page.keyboard.press("Enter")
+        post_phase("generating")
         stop_sel = ",".join(stop)
         stop_wait = 800 if TEST_URL else 12000
         stop_seen = False
@@ -658,6 +671,8 @@ def run_chat(body):
         page = context.new_page()
         try:
             return run_on(page, context, True)
+        except Exception as e:
+            return {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"}
         finally:
             browser.close()
 
@@ -735,6 +750,8 @@ def exec_job(body):
         if body.get("platform") in ("gemini", "image") or body.get("kind") == "image":
             return run_image(body)
         return run_chat(body)
+    except Exception as e:
+        return {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"}
     finally:
         ACTIVE -= 1
         account_lock(aid).release()
@@ -941,7 +958,10 @@ def poll_gateway():
                 payload["model"] = job.get("model") or "gemini-image"
             else:
                 payload["model"] = job.get("model") or "gpt-5.6"
-            result = exec_job(payload)
+            try:
+                result = exec_job(payload)
+            except Exception as e:
+                result = {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"}
             req2 = urllib.request.Request(
                 gw + "/api/worker/result",
                 data=json.dumps({

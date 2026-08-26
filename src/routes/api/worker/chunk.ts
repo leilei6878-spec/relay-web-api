@@ -13,16 +13,18 @@ export const Route = createFileRoute("/api/worker/chunk")({
         const body = (await request.json().catch(() => ({}))) as {
           id?: string;
           text?: string;
+          phase?: string;
           leaseId?: string;
           fencingToken?: number;
           attemptId?: string;
         };
-        if (!body.id || !body.text) return Response.json({ error: "缺少 id/text" }, { status: 400 });
+        if (!body.id || (!body.text && !body.phase)) return Response.json({ error: "缺少 id/text" }, { status: 400 });
         const job = await getJob(body.id);
         if (!job) return Response.json({ error: "任务不存在" }, { status: 404 });
         const proof = assertLease(job.lease, body);
         if (!proof.ok) return Response.json({ error: proof.error }, { status: 409 });
-        publishJobEvent(body.id, { type: "delta", text: body.text });
+        if (body.phase) publishJobEvent(body.id, { type: "phase", phase: body.phase });
+        if (body.text) publishJobEvent(body.id, { type: "delta", text: body.text });
         return Response.json({ ok: true });
       },
     },

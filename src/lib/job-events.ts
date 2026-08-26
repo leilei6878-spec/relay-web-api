@@ -1,5 +1,6 @@
 type JobEvent =
   | { type: "delta"; text: string }
+  | { type: "phase"; phase: string }
   | { type: "done"; text?: string; url?: string }
   | { type: "error"; error: string };
 

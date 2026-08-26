@@ -205,7 +205,7 @@ export async function runChat(
       last = { ok: false, status: 503, error: poolUnavailableMessage("chatgpt", plane.accounts, plane.proxies, plane.settings) };
       break;
     }
-    const queued = await enqueueChat(prompt, model, 90_000, images, {
+    const queued = await enqueueChat(prompt, model, 180_000, images, {
       idempotencyKey,
       requestId: reqId,
       traceId,
@@ -275,9 +275,11 @@ export function streamChat(
       let jobId: string | undefined;
       const life = attachSseLifecycle({
         signal: abortSignal,
-        timeoutMs: 90_000,
+        timeoutMs: 210_000,
         onAbort: (reason) => {
-          if (jobId) void cancelJob(jobId, reason === "disconnect" ? "REQUEST_CANCELLED: disconnect" : `REQUEST_CANCELLED: ${reason}`);
+          if (reason === "disconnect" && jobId) {
+            void cancelJob(jobId, "REQUEST_CANCELLED: disconnect");
+          }
         },
       });
       try {
@@ -353,7 +355,7 @@ export function streamChat(
             return;
           }
         }
-        const queued = await enqueueChat(prompt, model, 90_000, images, {
+        const queued = await enqueueChat(prompt, model, 180_000, images, {
           idempotencyKey: idem,
           requestId,
           turns,
@@ -374,8 +376,26 @@ export function streamChat(
           relay: { phase: "waiting_worker", accountEmail: queued.job.accountEmail, jobId: queued.job.id, requestId },
         });
         let assembled = "";
+        const ping = setInterval(() => {
+          void send({
+            id: `chatcmpl-${queued.job.id}`,
+            object: "chat.completion.chunk",
+            model,
+            choices: [{ index: 0, delta: {} }],
+            relay: { phase: "waiting_worker", jobId: queued.job.id, accountEmail: queued.job.accountEmail },
+          });
+        }, 8000);
         await new Promise<void>((resolve) => {
           const unsub = subscribeJob(queued.job.id, (ev) => {
+            if (ev.type === "phase") {
+              void send({
+                id: `chatcmpl-${queued.job.id}`,
+                object: "chat.completion.chunk",
+                model,
+                choices: [{ index: 0, delta: {} }],
+                relay: { phase: ev.phase, jobId: queued.job.id, requestId },
+              });
+            }
             if (ev.type === "delta" && ev.text) {
               const chunk = ev.text.startsWith(assembled) ? ev.text.slice(assembled.length) : ev.text;
               if (chunk) {
@@ -399,9 +419,14 @@ export function streamChat(
             resolve();
           });
         });
+        clearInterval(ping);
         if (life.aborted()) {
-          await send({ error: { message: `REQUEST_CANCELLED: ${life.reason()}` }, relay: { phase: "error" } });
-          await logUsage(key, model, { images }, prompt, started, { ok: false, status: 499, error: `REQUEST_CANCELLED: ${life.reason()}` });
+          const why =
+            life.reason() === "timeout"
+              ? "网页执行超时。ChatGPT 页面加载或模型思考超过等待时间。请确认代理能打开 chatgpt.com，或改用 GPT-4o 再试。"
+              : `REQUEST_CANCELLED: ${life.reason()}`;
+          await send({ error: { message: why }, relay: { phase: "error" } });
+          await logUsage(key, model, { images }, prompt, started, { ok: false, status: 499, error: why });
           await finish();
           return;
         }

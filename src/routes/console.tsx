@@ -54,6 +54,7 @@ function Console() {
   const [imageUrl, setImageUrl] = useState("");
   const [account, setAccount] = useState("");
   const [mode, setMode] = useState("");
+  const [step, setStep] = useState("");
   const [rawReq, setRawReq] = useState("");
   const [rawRes, setRawRes] = useState("");
   const [tab, setTab] = useState<"result" | "request" | "response">("result");
@@ -114,6 +115,7 @@ function Console() {
     setImageUrl("");
     setAccount("");
     setMode("");
+    setStep("");
     setTab("result");
     const reqText = JSON.stringify(body, null, 2);
     setRawReq(reqText);
@@ -145,6 +147,7 @@ function Console() {
           if (delta) setContent((c) => c + delta);
           if (meta.accountEmail) setAccount(meta.accountEmail);
           if (meta.mode) setMode(meta.mode);
+          if (meta.phase) setStep(meta.phase);
         });
         const latencyMs = Date.now() - started.current;
         setElapsed(latencyMs);
@@ -344,6 +347,7 @@ function Console() {
             {status != null && <Badge>HTTP {status}</Badge>}
             <span className="font-mono text-xs tabular-nums text-muted">{(elapsed / 1000).toFixed(2)}s</span>
             {account && <span className="font-mono text-[11px] text-subtle">{account}</span>}
+            {step && <span className="text-[11px] text-muted">{stepLabel(step)}</span>}
             {mode && (
               <Badge tone={mode === "live" ? "ok" : "warn"}>{mode === "live" ? "真网页 Worker" : "预览回写"}</Badge>
             )}
@@ -445,7 +449,7 @@ function Console() {
 
 async function readSse(
   res: Response,
-  onDelta: (delta: string, meta: { accountEmail?: string; mode?: string }) => void,
+  onDelta: (delta: string, meta: { accountEmail?: string; mode?: string; phase?: string }) => void,
 ) {
   const reader = res.body?.getReader();
   if (!reader) return { error: { message: "无法读取流" } } as { error?: { message?: string }; text?: string; id?: string; mode?: string; accountEmail?: string };
@@ -472,7 +476,7 @@ async function readSse(
           id?: string;
           error?: { message?: string };
           choices?: { delta?: { content?: string } }[];
-          relay?: { accountEmail?: string; mode?: string };
+          relay?: { accountEmail?: string; mode?: string; phase?: string };
         };
         if (json.id) id = json.id;
         if (json.relay?.accountEmail) accountEmail = json.relay.accountEmail;
@@ -481,9 +485,9 @@ async function readSse(
         const piece = json.choices?.[0]?.delta?.content || "";
         if (piece) {
           text += piece;
-          onDelta(piece, { accountEmail, mode });
+          onDelta(piece, { accountEmail, mode, phase: json.relay?.phase });
         } else {
-          onDelta("", { accountEmail, mode });
+          onDelta("", { accountEmail, mode, phase: json.relay?.phase });
         }
       } catch {
         /* skip malformed chunk */
@@ -491,4 +495,17 @@ async function readSse(
     }
   }
   return { id, text, mode, accountEmail, error };
+}
+
+function stepLabel(step: string) {
+  return (
+    {
+      waiting_worker: "执行器处理中",
+      opening_chatgpt: "正在打开 ChatGPT",
+      page_ready: "页面已打开",
+      composer_ready: "输入框就绪",
+      generating: "等待模型回答",
+      streaming: "正在输出",
+    }[step] || step
+  );
 }
