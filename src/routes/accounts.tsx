@@ -586,7 +586,7 @@ pause
         <p className="text-sm text-muted">
           平台绑好代理后点「下载一键登录包」。解压双击 run.bat，不用自己对 IP。
           {account.platform === "leonardo"
-            ? " 必须登录 canva.com 国际站。请先完全退出本机 Chrome，登录包会打开你平时那个浏览器（不要用自动化弹窗）。Canva 登录成功且 Leonardo 的 Sign In 消失后再拖回文件。"
+            ? " 必须登录 canva.com。请先完全退出 Chrome。用 Canva 授权 Leonardo 时不要关弹窗；登录包不会反复刷新把授权打断。Sign In 消失后再拖回文件。"
             : ""}
         </p>
         {error && <p className="mt-2 text-sm text-danger">{error}</p>}

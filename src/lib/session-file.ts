@@ -346,14 +346,65 @@ def logged_in(page, context):
     except Exception:
         return False
 
+def all_pages(context):
+    out = []
+    ctxs = [context]
+    try:
+        browser = context.browser
+        if browser and browser.contexts:
+            ctxs = list(browser.contexts)
+    except Exception:
+        pass
+    for ctx in ctxs:
+        try:
+            out.extend(ctx.pages)
+        except Exception:
+            pass
+    return out
+
+def oauth_busy(pages):
+    for p in pages:
+        u = (p.url or "").lower()
+        if any(k in u for k in ("/oauth", "oauth2", "/callback", "authorize", "cognito-idp", "amazoncognito", "client_id=")):
+            return True
+        try:
+            if p.get_by_text("Finish logging in").count() > 0:
+                return True
+        except Exception:
+            pass
+    return False
+
+def click_canva_sso(page):
+    labels = ("Canva", "Continue with Canva", "Log in with Canva", "Sign in with Canva")
+    for label in labels:
+        for role in ("button", "link"):
+            try:
+                loc = page.get_by_role(role, name=label)
+                if loc.count() > 0 and loc.first.is_visible():
+                    loc.first.click(timeout=2500)
+                    print("已点击 Canva 授权，请在弹出窗口完成，不要关掉弹窗")
+                    return True
+            except Exception:
+                pass
+    return False
+
+def leonardo_ready(context):
+    pages = all_pages(context)
+    for pg in pages:
+        try:
+            if logged_in(pg, pg.context):
+                return pg
+        except Exception:
+            if logged_in(pg, context):
+                return pg
+    return None
+
 def wait_login(page, context):
     print("在弹出窗口登录", ${email})
     if PLATFORM == "leonardo":
         print("Leonardo 游客首页也有输入框，那不是登录。")
-        print("先在 canva.com 国际站登录（不能用 canva.cn，账号不通用）。")
-        print("若跳到 .cn，会自动拉回 canva.com/?disable-cn-redirect=true。")
-        print("Canva 走绑定节点才能停在 .com；本机中国 IP 会跳到 .cn。")
-        print("Canva 登录成功后，会自动打开 Leonardo，再点 Canva 授权。")
+        print("先登录 canva.com。授权 Leonardo 时不要关 Canva 弹窗。")
+        print("登录包不会反复刷新，以免把授权打断。")
         try:
             page.goto(CANVA_COM, wait_until="domcontentloaded", timeout=45000)
         except Exception as e:
@@ -361,48 +412,84 @@ def wait_login(page, context):
     else:
         print("看到聊天输入框会自动保存；也可以回到这里按回车。")
     redirected = False
+    opened_leo = False
+    clicked_sso = False
+    reloaded_once = False
     for _ in range(180):
         try:
-            if PLATFORM == "leonardo":
-                dismiss_canva_cookies(page)
-            if logged_in(page, context):
-                if PLATFORM == "leonardo":
-                    try:
-                        page.goto("https://app.leonardo.ai/generate", wait_until="domcontentloaded", timeout=30000)
-                        time.sleep(2)
-                    except Exception:
-                        pass
-                    if not logged_in(page, context):
-                        print("打开 /generate 后又回到登录页，登录还没完成。")
-                        time.sleep(2)
-                        continue
-                print("检测到已登录，正在保存…")
-                return save_state(context)
-            if PLATFORM == "leonardo":
-                u = page.url or ""
-                if "canva.cn" in u:
-                    try:
-                        page.goto(to_canva_com(u), wait_until="domcontentloaded", timeout=30000)
-                    except Exception:
-                        pass
-                    time.sleep(1)
-                    continue
-                if canva_logged_in(page) and "leonardo.ai" not in u:
-                    print("Canva 国际站已登录，正在打开 Leonardo…")
-                    try:
-                        page.goto("https://app.leonardo.ai/generate", wait_until="domcontentloaded", timeout=45000)
-                    except Exception:
-                        pass
-                    time.sleep(2)
-                    continue
-            if (not redirected) and (page.get_by_text("糟糕，出错了").count() > 0 or page.get_by_text("Route Error").count() > 0):
-                redirected = True
-                print("ChatGPT 返回了错误页，自动改打开登录地址…")
+            pages = all_pages(context)
+            for pg in pages:
                 try:
-                    page.goto("https://chatgpt.com/auth/login", wait_until="domcontentloaded", timeout=30000)
+                    dismiss_canva_cookies(pg)
                 except Exception:
                     pass
-                time.sleep(3)
+            ready = leonardo_ready(context)
+            if ready:
+                print("检测到 Leonardo 已登录，正在保存…")
+                return save_state(ready.context)
+            if PLATFORM != "leonardo":
+                if logged_in(page, context):
+                    print("检测到已登录，正在保存…")
+                    return save_state(context)
+                if (not redirected) and (page.get_by_text("糟糕，出错了").count() > 0 or page.get_by_text("Route Error").count() > 0):
+                    redirected = True
+                    print("ChatGPT 返回了错误页，自动改打开登录地址…")
+                    try:
+                        page.goto("https://chatgpt.com/auth/login", wait_until="domcontentloaded", timeout=30000)
+                    except Exception:
+                        pass
+                    time.sleep(3)
+                time.sleep(2)
+                continue
+            if oauth_busy(pages):
+                print("正在等待 Canva / 登录授权完成…")
+                time.sleep(2)
+                continue
+            for pg in pages:
+                u = pg.url or ""
+                if "canva.cn" in u:
+                    try:
+                        pg.goto(to_canva_com(u), wait_until="domcontentloaded", timeout=30000)
+                    except Exception:
+                        pass
+            pages = all_pages(context)
+            has_leo = any("leonardo.ai" in (pg.url or "") for pg in pages)
+            canva_ok = any(canva_logged_in(pg) for pg in pages)
+            if canva_ok and not has_leo and not opened_leo:
+                print("Canva 已登录，新开标签打开 Leonardo（不打断 Canva）")
+                try:
+                    leo_page = context.new_page()
+                    leo_page.goto(
+                        "https://app.leonardo.ai/auth/login?callbackUrl=%2Fgenerate",
+                        wait_until="domcontentloaded",
+                        timeout=45000,
+                    )
+                    opened_leo = True
+                except Exception as e:
+                    print("打开 Leonardo 失败", str(e)[:120])
+                time.sleep(2)
+                continue
+            if has_leo and leonardo_cookies_ok(context) and not reloaded_once:
+                for pg in pages:
+                    if "leonardo.ai" in (pg.url or ""):
+                        print("已有 Leonardo Session，正在进入 Image Generator…")
+                        try:
+                            pg.goto("https://app.leonardo.ai/generate", wait_until="domcontentloaded", timeout=30000)
+                        except Exception:
+                            pass
+                        reloaded_once = True
+                        break
+                time.sleep(2)
+                continue
+            if has_leo and not clicked_sso:
+                for pg in pages:
+                    u = pg.url or ""
+                    if "leonardo.ai" not in u:
+                        continue
+                    if "/auth/login" in u or sign_in_visible(pg):
+                        if click_canva_sso(pg):
+                            clicked_sso = True
+                        break
         except Exception:
             pass
         time.sleep(2)
@@ -411,13 +498,20 @@ def wait_login(page, context):
         input()
     except Exception:
         pass
-    if PLATFORM == "leonardo" and not logged_in(page, context):
+    ready = leonardo_ready(context) if PLATFORM == "leonardo" else None
+    if PLATFORM == "leonardo":
+        if ready:
+            return save_state(ready.context)
         print("当前仍是游客（Sign In 还在，或没有 Session Cookie）。没有写入 state.json。")
         return False
+    if logged_in(page, context):
+        return save_state(context)
     return save_state(context)
 
 def open_browser(p, proxy):
     args = ["--disable-blink-features=AutomationControlled"]
+    if PLATFORM == "leonardo":
+        args.extend(["--disable-popup-blocking", "--disable-features=ThirdPartyStoragePartitioning"])
     ignore = ["--enable-automation"]
     kw = {"headless": False, "args": args, "ignore_default_args": ignore}
     if proxy and PLATFORM == "leonardo":
@@ -533,8 +627,8 @@ def open_leonardo_chrome(p, proxy):
         "--remote-allow-origins=*",
         "--no-first-run",
         "--no-default-browser-check",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-quic",
+        "--disable-popup-blocking",
+        "--disable-features=ThirdPartyStoragePartitioning",
         CANVA_COM,
     ]
     if server:

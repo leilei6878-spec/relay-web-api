@@ -11,7 +11,7 @@ Canva China (`canva.cn`) and Canva global (`canva.com`) accounts are not interch
 - opens `https://www.canva.com/?disable-cn-redirect=true`
 - routes Canva through the bound (non-CN) node so the site stays on `.com`
 - intercepts `canva.cn` navigations and rewrites them to `canva.com`
-The helper launches the user's real Chrome (same profile they already use with a proxy) over CDP, because Canva RRS blocks Playwright's isolated window even when the same proxy works in a normal browser. Chrome must be fully quit first so the profile is not locked.
+After Canva is logged in, Leonardo is opened in a **new tab** (the Canva tab is not reused). The helper clicks Canva SSO once, waits for the OAuth popup, and does **not** reload `/generate` in a loop — that previously dropped the callback and left the login page.
 
 Each account stores (Postgres `extra` JSON / control-plane):
 
