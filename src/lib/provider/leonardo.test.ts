@@ -249,13 +249,14 @@ test("leonardo login helper waits for Sign In to disappear, not the public compo
   assert.match(py, /leonardo_cookies_ok/);
   assert.match(py, /没有写入 state\.json/);
   assert.match(py, /游客首页也有输入框/);
-  assert.match(py, /canva\.com/);
-  assert.match(py, /proxy-pac-url/);
-  assert.match(py, /write_idp_pac/);
-  assert.match(py, /v2rayN\/TUN/);
+  assert.match(py, /disable-cn-redirect/);
+  assert.match(py, /canva\.cn/);
+  assert.match(py, /to_canva_com/);
+  assert.match(py, /attach_canva_com_guard/);
+  assert.match(py, /CANVA_COM/);
 });
 
-test("leonardo SS helper uses bound node and Canva goes DIRECT", () => {
+test("leonardo SS helper pins canva.com through the bound node", () => {
   const py = loginHelperScript(
     acc({ status: "pending_login", sessionPath: null }),
     {
@@ -276,7 +277,11 @@ test("leonardo SS helper uses bound node and Canva goes DIRECT", () => {
     "secret",
   );
   assert.match(py, /Leonardo 登录用绑定节点/);
-  assert.match(py, /canva\.com/);
+  assert.match(py, /disable-cn-redirect/);
   assert.match(py, /proxy-pac-url/);
   assert.match(py, /SOCKS5 /);
+  assert.match(py, /拦截 canva\.cn/);
+  const hosts = py.match(/IDP_HOSTS = \[[\s\S]*?\]/);
+  assert.ok(hosts);
+  assert.doesNotMatch(hosts[0], /canva\.com/);
 });

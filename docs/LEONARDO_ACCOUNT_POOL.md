@@ -6,7 +6,12 @@ Add account → bind sticky proxy → download login helper (`https://app.leonar
 
 The public Leonardo home page has a prompt box and Generate button **without login**. The helper must not treat that as a session.
 
-Canva / Google / Microsoft SSO verification is sent **direct** (home network), not through the sticky node. Canva treats datacenter/VPN IPs as `RRS` and refuses to send the email code. Leonardo (`app.leonardo.ai`) still uses the bound node. System TUN/v2rayN must be off during Canva 2FA or Canva still sees a VPN.
+Canva China (`canva.cn`) and Canva global (`canva.com`) accounts are not interchangeable. A mainland-China IP sends visitors to `.cn`. The Leonardo helper:
+
+- opens `https://www.canva.com/?disable-cn-redirect=true`
+- routes Canva through the bound (non-CN) node so the site stays on `.com`
+- intercepts `canva.cn` navigations and rewrites them to `canva.com`
+- only then continues to Leonardo SSO
 
 Each account stores (Postgres `extra` JSON / control-plane):
 

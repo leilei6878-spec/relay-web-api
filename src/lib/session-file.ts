@@ -88,7 +88,7 @@ export function parseStorageState(
 
 export function loginUrl(platform: Platform) {
   if (platform === "gemini") return "https://gemini.google.com/app";
-  if (platform === "leonardo") return "https://app.leonardo.ai/generate";
+  if (platform === "leonardo") return "https://www.canva.com/?disable-cn-redirect=true";
   return "https://chatgpt.com";
 }
 
@@ -111,7 +111,7 @@ export function loginHelperScript(account: Account, proxy: Proxy, password: stri
     account.platform === "gemini"
       ? "https://gemini.google.com/app"
       : account.platform === "leonardo"
-        ? "https://app.leonardo.ai/generate"
+        ? "https://www.canva.com/?disable-cn-redirect=true"
         : "https://chatgpt.com/auth/login";
   const pw = password || proxy.password || "";
   const email = JSON.stringify(account.email);
@@ -129,12 +129,12 @@ HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() els
 PLATFORM = ${JSON.stringify(account.platform)}
 READY_SEL = ${JSON.stringify(readySel)}
 IDP_HOSTS = [
-    "canva.com", "canva.net",
     "google.com", "googleapis.com", "gstatic.com", "googleusercontent.com",
     "apple.com", "icloud.com",
     "microsoft.com", "microsoftonline.com", "live.com", "office.com",
     "msn.com", "hotmail.com", "outlook.com",
 ]
+CANVA_COM = "https://www.canva.com/?disable-cn-redirect=true"
 
 def pac_proxy_line(server):
     s = (server or "").strip()
@@ -223,6 +223,71 @@ def leonardo_cookies_ok(context):
         return False
     return True
 
+def to_canva_com(url):
+    u = url or ""
+    if "canva.cn" in u:
+        u = u.replace("canva.cn", "canva.com")
+    if "canva.com" in u and "disable-cn-redirect=" not in u:
+        u += ("&" if "?" in u else "?") + "disable-cn-redirect=true"
+    return u
+
+def canva_logged_in(page):
+    u = (page.url or "").lower()
+    if "canva.cn" in u or "canva.com" not in u:
+        return False
+    if "/login" in u or "/signup" in u:
+        return False
+    try:
+        if page.get_by_text("Finish logging in").count() > 0:
+            return False
+        if page.get_by_text("We can't send a verification code").count() > 0:
+            return False
+    except Exception:
+        pass
+    if sign_in_visible(page):
+        return False
+    return True
+
+def attach_canva_com_guard(context):
+    def handle_route(route):
+        url = route.request.url or ""
+        if "canva.cn" not in url:
+            route.continue_()
+            return
+        dest = to_canva_com(url)
+        print("拦截 canva.cn，拉回 canva.com")
+        try:
+            route.fulfill(status=302, headers={"Location": dest, "content-type": "text/plain"}, body="")
+        except Exception:
+            try:
+                route.continue_(url=dest)
+            except Exception:
+                route.abort()
+
+    try:
+        context.route("**://canva.cn/**", handle_route)
+        context.route("**://*.canva.cn/**", handle_route)
+    except Exception:
+        pass
+
+    def on_page(page):
+        last = [0]
+        def pin():
+            try:
+                now = time.time()
+                if now - last[0] < 1.5:
+                    return
+                u = page.url or ""
+                if "canva.cn" in u:
+                    last[0] = now
+                    print("地址栏跳到了 canva.cn，正在打开 canva.com")
+                    page.goto(to_canva_com(u), wait_until="domcontentloaded", timeout=30000)
+            except Exception:
+                pass
+        page.on("framenavigated", lambda f: pin() if f == page.main_frame else None)
+        page.on("load", lambda: pin())
+    context.on("page", on_page)
+
 def sign_in_visible(page):
     for label in ("Sign In", "Log in", "Log In", "Sign Up"):
         for role in ("link", "button"):
@@ -254,9 +319,14 @@ def wait_login(page, context):
     print("在弹出窗口登录", ${email})
     if PLATFORM == "leonardo":
         print("Leonardo 游客首页也有输入框，那不是登录。")
-        print("请点 Sign In，可用 Canva / Google / Microsoft / Email。")
-        print("Canva 验证码走你本机网络；Leonardo 仍走绑定节点。")
-        print("若 Canva 提示关掉 VPN：先关系统 v2rayN/TUN，再点 Resend。")
+        print("先在 canva.com 国际站登录（不能用 canva.cn，账号不通用）。")
+        print("若跳到 .cn，会自动拉回 canva.com/?disable-cn-redirect=true。")
+        print("Canva 走绑定节点才能停在 .com；本机中国 IP 会跳到 .cn。")
+        print("Canva 登录成功后，会自动打开 Leonardo，再点 Canva 授权。")
+        try:
+            page.goto(CANVA_COM, wait_until="domcontentloaded", timeout=45000)
+        except Exception as e:
+            print("打开 canva.com 失败", str(e)[:120])
     else:
         print("看到聊天输入框会自动保存；也可以回到这里按回车。")
     redirected = False
@@ -275,6 +345,23 @@ def wait_login(page, context):
                         continue
                 print("检测到已登录，正在保存…")
                 return save_state(context)
+            if PLATFORM == "leonardo":
+                u = page.url or ""
+                if "canva.cn" in u:
+                    try:
+                        page.goto(to_canva_com(u), wait_until="domcontentloaded", timeout=30000)
+                    except Exception:
+                        pass
+                    time.sleep(1)
+                    continue
+                if canva_logged_in(page) and "leonardo.ai" not in u:
+                    print("Canva 国际站已登录，正在打开 Leonardo…")
+                    try:
+                        page.goto("https://app.leonardo.ai/generate", wait_until="domcontentloaded", timeout=45000)
+                    except Exception:
+                        pass
+                    time.sleep(2)
+                    continue
             if (not redirected) and (page.get_by_text("糟糕，出错了").count() > 0 or page.get_by_text("Route Error").count() > 0):
                 redirected = True
                 print("ChatGPT 返回了错误页，自动改打开登录地址…")
@@ -306,7 +393,8 @@ def open_browser(p, proxy):
             pac_url = write_idp_pac(server)
             args.append("--disable-quic")
             args.append("--proxy-pac-url=" + pac_url)
-            print("Canva / Google / Microsoft 验证码走本机，Leonardo 走绑定节点")
+            args.append("--host-resolver-rules=MAP canva.cn www.canva.com,MAP www.canva.cn www.canva.com,MAP app.canva.cn app.canva.com")
+            print("Google / Microsoft 验证码走本机；Canva 走绑定节点，避免跳到 canva.cn")
             proxy = None
     if proxy:
         kw["proxy"] = proxy
@@ -321,12 +409,20 @@ def open_browser(p, proxy):
     return p.chromium.launch(**kw)
 
 def open_context(browser):
-    context = browser.new_context(
-        locale="en-US",
-        viewport={"width": 1365, "height": 900},
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    )
+    kw = {
+        "locale": "en-US",
+        "viewport": {"width": 1365, "height": 900},
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    }
+    if PLATFORM == "leonardo":
+        kw["timezone_id"] = "Asia/Tokyo"
+        kw["geolocation"] = {"longitude": 139.6917, "latitude": 35.6895}
+        kw["permissions"] = ["geolocation"]
+        kw["extra_http_headers"] = {"Accept-Language": "en-US,en;q=0.9"}
+    context = browser.new_context(**kw)
     context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    if PLATFORM == "leonardo":
+        attach_canva_com_guard(context)
     return context
 `;
 

@@ -510,7 +510,7 @@ pause
 `;
       const readme =
         account.platform === "leonardo"
-          ? "1. Unzip\n2. Turn off system v2rayN/TUN if Canva blocks the code\n3. Double-click run.bat\n4. Click Sign In (Canva/Google/Microsoft/Email). Canva codes use your home network; Leonardo stays on the bound node.\n5. Sign In must disappear and stay on /generate. Drag state.json back.\n"
+          ? "1. Unzip\n2. Double-click run.bat\n3. Log in at canva.com (international). If it jumps to canva.cn it will be pulled back. Accounts on .cn cannot be used.\n4. After Canva, Leonardo opens — Sign In must disappear. Drag state.json back.\n"
           : "1. Unzip\n2. Double-click run.bat\n3. Login in the window, then press Enter in the terminal\n4. Drag state.json back to Relay\n";
       const files: { name: string; data: Uint8Array }[] = [
         { name: "login.py", data: textFile(py) },
@@ -586,7 +586,7 @@ pause
         <p className="text-sm text-muted">
           平台绑好代理后点「下载一键登录包」。解压双击 run.bat，不用自己对 IP。
           {account.platform === "leonardo"
-            ? " Leonardo 未登录首页也有输入框，那不是登录。用 Canva 登录时验证码走你本机网络；若仍提示关掉 VPN，先关系统 v2rayN/TUN 再点 Resend。必须看到 Sign In 消失并停在 Image Generator 后再拖回文件。"
+            ? " 必须登录 canva.com 国际站，canva.cn 账号不能用。登录包会禁止跳到 .cn。Canva 登录成功且 Leonardo 的 Sign In 消失后，再拖回文件。"
             : ""}
         </p>
         {error && <p className="mt-2 text-sm text-danger">{error}</p>}
