@@ -23,7 +23,7 @@ export const SELECTOR_PACKS: Record<string, VersionedSelectorPack> = {
   "leonardo-image-v1": {
     version: "leonardo-image-v1",
     input: ["#home-prompt-textarea", "textarea[placeholder*='prompt' i]", "textarea[placeholder*='Prompt']"],
-    send: ['button[aria-label="Generate"]', 'button:has-text("Generate")'],
+    send: ['button[aria-label="Generate"]', 'button:has-text("Generate")', 'button:has-text("Create")'],
     assistant: [],
     streamingStop: [],
     modelSwitcher: ['button[aria-label^="Model:"]', '[data-slot="dropdown-menu-trigger"][aria-label^="Model"]'],

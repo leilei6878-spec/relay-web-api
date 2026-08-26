@@ -163,6 +163,7 @@ export const useGateway = create<State & Actions>()(
                   sessionCookieCount: source === "pasted" ? cookieCount : a.sessionCookieCount ?? 0,
                   sessionSavedAt: nowIso(),
                   lastError: null,
+                  sessionWarning: null,
                 }
               : a,
           ),

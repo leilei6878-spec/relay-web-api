@@ -17,9 +17,17 @@ const CHAT_MODELS = [
 ];
 
 const IMAGE_MODELS = [
-  { id: "gemini-image", label: "Gemini / 出图" },
+  { id: "leonardo-gemini", label: "Leonardo / Nano Banana 2" },
   { id: "leonardo-gpt-image-2", label: "Leonardo / GPT Image 2" },
-  { id: "leonardo-gemini", label: "Leonardo / Gemini" },
+  { id: "gemini-image", label: "Gemini / 出图" },
+];
+
+const IMAGE_SIZES = [
+  { id: "1024x1024", label: "1:1 小 1024" },
+  { id: "2048x2048", label: "1:1 中 2048" },
+  { id: "4096x4096", label: "1:1 大 4096" },
+  { id: "848x1264", label: "2:3 竖图" },
+  { id: "1264x848", label: "16:9 横图" },
 ];
 
 type Phase = "idle" | "sending" | "streaming" | "done" | "error";
@@ -50,7 +58,10 @@ function Page() {
 function Console() {
   const [kind, setKind] = useState<Kind>("chat");
   const [model, setModel] = useState("gpt-5.6");
-  const [imageModel, setImageModel] = useState("gemini-image");
+  const [imageModel, setImageModel] = useState("leonardo-gemini");
+  const [imageN, setImageN] = useState(1);
+  const [imageSize, setImageSize] = useState("1024x1024");
+  const [imageQuality, setImageQuality] = useState("MEDIUM");
   const [apiKey, setApiKey] = useState("");
   const [prompt, setPrompt] = useState("你好，你是什么模型？用三句话说明。");
   const [images, setImages] = useState<string[]>([]);
@@ -93,6 +104,9 @@ function Console() {
       return {
         prompt,
         model: imageModel,
+        n: imageN,
+        size: imageSize,
+        ...(imageModel.includes("gpt-image") ? { quality: imageQuality } : {}),
         ...(images[0] ? { image: images[0], images } : {}),
       };
     }
@@ -104,7 +118,7 @@ function Console() {
             ...images.map((url) => ({ type: "image_url", image_url: { url } })),
           ];
     return { model, stream: true, messages: [{ role: "user", content }] };
-  }, [kind, model, imageModel, prompt, images]);
+  }, [kind, model, imageModel, imageN, imageSize, imageQuality, prompt, images]);
 
   async function run() {
     if (!prompt.trim() && images.length === 0) {
@@ -331,6 +345,52 @@ function Console() {
                 ))}
               </select>
             </label>
+          )}
+          {kind === "image" && imageModel.startsWith("leonardo-") && (
+            <>
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs text-muted">尺寸</span>
+                <select
+                  className="h-11 w-full rounded-sm border border-border bg-elevated px-3 text-sm"
+                  value={imageSize}
+                  onChange={(e) => setImageSize(e.target.value)}
+                >
+                  {IMAGE_SIZES.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-xs text-muted">张数</span>
+                <select
+                  className="h-11 w-full rounded-sm border border-border bg-elevated px-3 text-sm"
+                  value={imageN}
+                  onChange={(e) => setImageN(Number(e.target.value))}
+                >
+                  {[1, 2, 3, 4].map((n) => (
+                    <option key={n} value={n}>
+                      {n} 张
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {imageModel.includes("gpt-image") && (
+                <label className="block text-sm">
+                  <span className="mb-1 block text-xs text-muted">画质</span>
+                  <select
+                    className="h-11 w-full rounded-sm border border-border bg-elevated px-3 text-sm"
+                    value={imageQuality}
+                    onChange={(e) => setImageQuality(e.target.value)}
+                  >
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                  </select>
+                </label>
+              )}
+            </>
           )}
           <label className="block text-sm">
             <span className="mb-1 block text-xs text-muted">内容</span>

@@ -213,7 +213,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
   for (let i = 0; i <= maxRetry; i++) {
     const account = await pickAccount(platform, exclude, { model });
     if (!account) break;
-    const queued = await enqueueImage(prompt, model, 90_000, parsed.images, {
+    const queued = await enqueueImage(prompt, model, platform === "leonardo" ? 180_000 : 90_000, parsed.images, {
       idempotencyKey: idem,
       requestId: reqId,
       excludeAccountIds: exclude,

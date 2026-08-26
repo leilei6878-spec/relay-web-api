@@ -15,6 +15,12 @@ export async function writeSessionFile(accountId: string, json: string, platform
   await mkdir(dir, { recursive: true });
   const path = resolve(dir, `${id}.json`);
   await writeFile(path, json, { encoding: "utf8", mode: 0o600 });
+  try {
+    const { patchAccount } = await import("./control-plane");
+    await patchAccount(id, { lastError: null, sessionWarning: null, status: "healthy", sessionPath: `storage/sessions/${id}.json` });
+  } catch {
+    /* plane update is best-effort */
+  }
   return { ok: true as const, cookieCount: parsed.data.cookieCount, path };
 }
 

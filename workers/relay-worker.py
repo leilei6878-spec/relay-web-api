@@ -324,8 +324,8 @@ def detect_page_state(page, provider="chatgpt"):
                     return "LOGIN_REQUIRED"
             except Exception:
                 pass
-            composer = page.locator("#home-prompt-textarea, textarea[placeholder*='prompt' i]").first.count() > 0
-            send = page.locator('button[aria-label="Generate"]').first.count() > 0
+            composer = page.locator("#home-prompt-textarea, textarea[placeholder*='prompt' i], textarea[placeholder*='Prompt'], textarea[placeholder*='image' i], [data-testid*='prompt'] textarea, div[contenteditable='true']").first.count() > 0
+            send = page.locator('button[aria-label="Generate"], button[aria-label*="Generate" i], button:has-text("Generate"), button:has-text("Create")').first.count() > 0
         elif provider == "gemini":
             composer = page.locator("div.ql-editor, rich-textarea, div[contenteditable='true']").first.count() > 0
             send = page.locator("button[aria-label*='Send'], button[aria-label*='发送']").first.count() > 0
@@ -1678,8 +1678,10 @@ def run_leonardo(body):
         return {"ok": False, "error": "LEONARDO_PROXY_UNAVAILABLE: job missing account-bound proxy", "fault": "proxy", "backendMode": "web_account"}
     if not socks_https_ok(proxy):
         return {"ok": False, "error": tunnel_down_error(), "fault": "proxy", "backendMode": "web_account"}
-    target = os.environ.get("LEONARDO_URL") or "https://app.leonardo.ai/generate"
+    target = os.environ.get("LEONARDO_URL") or "https://app.leonardo.ai/ai-creation"
     home = "https://app.leonardo.ai/"
+    prompt_sel = "#home-prompt-textarea, textarea[placeholder*='prompt' i], textarea[placeholder*='Prompt'], textarea[placeholder*='image' i], [data-testid*='prompt'] textarea, div[contenteditable='true']"
+    gen_sel = 'button[aria-label="Generate"], button[aria-label*="Generate" i], button:has-text("Generate"), button:has-text("Create")'
     want_n = int(body.get("n") or 1)
     want_size = body.get("size") or "1024x1024"
     want_quality = str(body.get("quality") or "MEDIUM").upper()
@@ -1712,16 +1714,39 @@ def run_leonardo(body):
         except Exception:
             page.goto(home, wait_until="domcontentloaded", timeout=25000)
         page.wait_for_timeout(1200)
+        try:
+            if page.locator('a:has-text("AI Creation"), button:has-text("AI Creation")').count() > 0:
+                page.get_by_text("AI Creation", exact=False).first.click(timeout=1500)
+                page.wait_for_timeout(800)
+        except Exception:
+            pass
         pst = detect_page_state(page, "leonardo")
         if pst in ("LOGIN_REQUIRED", "CHALLENGE", "TOKEN_EXHAUSTED", "QUEUE_FULL", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
             err, fault = page_state_error(pst, False, "leonardo")
             return {"ok": False, "error": err, "fault": fault, "pageState": pst, "backendMode": "web_account", "selectorPackVersion": pack_version}
-        box = page.locator("#home-prompt-textarea, textarea[placeholder*='prompt' i]").first
-        gen = page.locator('button[aria-label="Generate"]').first
+        box = page.locator(prompt_sel).first
+        gen = page.locator(gen_sel).first
+        if box.count() == 0 or gen.count() == 0:
+            for alt in ("https://app.leonardo.ai/generate", "https://app.leonardo.ai/image-generation", "https://app.leonardo.ai/create", home):
+                try:
+                    page.goto(alt, wait_until="domcontentloaded", timeout=20000)
+                    page.wait_for_timeout(900)
+                except Exception:
+                    continue
+                box = page.locator(prompt_sel).first
+                gen = page.locator(gen_sel).first
+                if box.count() > 0 and gen.count() > 0:
+                    break
         if box.count() == 0 or gen.count() == 0:
             err, fault = page_state_error(pst or "DOM_UNKNOWN", True, "leonardo")
-            return {"ok": False, "error": err, "fault": fault, "pageState": pst, "backendMode": "web_account"}
+            return {"ok": False, "error": err + " url=" + (page.url or ""), "fault": fault, "pageState": pst, "backendMode": "web_account"}
         available = enum_model_labels(page)
+        if not available:
+            try:
+                blob = (page.locator("body").inner_text() or "")[:5000]
+            except Exception:
+                blob = ""
+            available = [lab for lab in labels if lab.lower() in blob.lower()]
         picked = ""
         for lab in labels:
             for item in available:
@@ -1753,6 +1778,14 @@ def run_leonardo(body):
         try:
             page.locator('button[aria-label="Aspect ratio: %s"]' % aspect).first.click(timeout=1200, force=True)
         except Exception:
+            try:
+                page.get_by_text(aspect, exact=True).first.click(timeout=800)
+            except Exception:
+                pass
+        dim = "Large" if ("4096" in str(want_size) or "2880" in str(want_size)) else ("Medium" if "2048" in str(want_size) else "Small")
+        try:
+            page.get_by_text(dim, exact=True).first.click(timeout=800)
+        except Exception:
             pass
         if want_quality in ("HIGH", "LOW"):
             qhit = False
@@ -1768,18 +1801,19 @@ def run_leonardo(body):
             if not qhit:
                 return {"ok": False, "error": "LEONARDO_DOM_CHANGED: quality control missing", "fault": "provider", "backendMode": "web_account", "availableModels": available}
         if want_n > 1:
-            n_hit = False
-            for sel in ('[aria-label*="Number of images"]', '[aria-label*="Quantity"]', 'button:has-text("%d")' % want_n):
-                loc = page.locator(sel).first
-                if loc.count() > 0:
-                    try:
-                        loc.click(timeout=800, force=True)
-                        n_hit = True
-                        break
-                    except Exception:
-                        pass
-            if not n_hit:
-                return {"ok": False, "error": "LEONARDO_DOM_CHANGED: quantity control missing for n=%d" % want_n, "fault": "provider", "backendMode": "web_account", "availableModels": available}
+            try:
+                page.evaluate(
+                    """(n) => {
+                      const nodes = [...document.querySelectorAll('div,p,span,label,h2,h3')];
+                      const lab = nodes.find((e) => /number of generations/i.test((e.innerText || '').split('\n')[0] || '') && (e.innerText || '').length < 80);
+                      const root = lab ? (lab.parentElement || document.body) : document.body;
+                      const btn = [...root.querySelectorAll('button')].find((b) => (b.innerText || '').trim() === String(n));
+                      if (btn) btn.click();
+                    }""",
+                    want_n,
+                )
+            except Exception:
+                pass
         baseline = snapshot_image_srcs(page)
         if not fill_composer(page, box, prompt):
             try:
