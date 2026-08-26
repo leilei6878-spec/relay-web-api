@@ -182,6 +182,10 @@ test("selector packs are versioned and bounded", () => {
 test("model verify accepts UI labels and fails unconfirmed", () => {
   const ok = chatgptAdapter.verifyModel("gpt-5.6", "GPT-5.6");
   assert.equal(ok.ok, true);
+  const def = chatgptAdapter.verifyModel("gpt-5.6", "ChatGPT");
+  assert.equal(def.ok, true);
+  const v52 = chatgptAdapter.verifyModel("gpt-5.6", "ChatGPT 5.2 Instant");
+  assert.equal(v52.ok, true);
   const miss = chatgptAdapter.verifyModel("gpt-5.6", "GPT-4o");
   assert.equal(miss.ok, false);
   const unconfirmed = chatgptAdapter.verifyModel("gpt-5.6", "");

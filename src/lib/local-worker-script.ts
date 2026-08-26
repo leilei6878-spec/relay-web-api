@@ -260,7 +260,7 @@ def detect_page_state(page, provider="chatgpt"):
         html = (page.content() or "")[:12000].lower()
     except Exception:
         html = ""
-    if "captcha" in html or "cf-challenge" in html or "verify you are" in html or "turnstile" in html or "unusual traffic" in html:
+    if "captcha" in html or "cf-challenge" in html or "verify you are" in html or "turnstile" in html or "unusual traffic" in html or "just a moment" in html:
         return "CHALLENGE"
     if "deactivated" in html or "suspended" in html or "account has been disabled" in html or "restricted" in html:
         return "ACCOUNT_RESTRICTED"
@@ -486,34 +486,35 @@ def get_pooled_context(proxy, storage_state, account_id):
 
 
 def open_browser(p, proxy):
-    args = ["--disable-blink-features=AutomationControlled"]
+    args = ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
     ignore = ["--enable-automation"]
     kw = {"headless": HEADLESS, "args": args, "ignore_default_args": ignore}
-    if HEADLESS:
-        kw["args"] = args + ["--no-sandbox", "--disable-dev-shm-usage"]
     if proxy:
         kw["proxy"] = proxy
-    if HEADLESS:
-        return p.chromium.launch(**kw)
-    for channel in ("chrome", "msedge"):
-        try:
-            return p.chromium.launch(channel=channel, **kw)
-        except Exception:
-            pass
+    if not HEADLESS:
+        for channel in ("chrome", "msedge"):
+            try:
+                return p.chromium.launch(channel=channel, **kw)
+            except Exception:
+                pass
     return p.chromium.launch(**kw)
 
 def select_model(page, model):
     labels = {
-        "gpt-5.6": ["GPT-5.6", "5.6"],
-        "latest": ["GPT-5.6", "GPT-5"],
-        "gpt-5": ["GPT-5 Auto", "Auto", "GPT-5"],
+        "gpt-5.6": ["GPT-5.6", "5.6", "5.2", "5.4", "5.5", "Instant", "ChatGPT", "Auto", "GPT-5"],
+        "latest": ["GPT-5.6", "GPT-5", "5.2", "Instant", "ChatGPT", "Auto"],
+        "gpt-5": ["GPT-5 Auto", "Auto", "GPT-5", "ChatGPT", "Instant"],
         "gpt-5-thinking": ["GPT-5 Thinking", "Thinking"],
         "gpt-4o": ["GPT-4o", "4o"],
     }.get(model, [model])
+    latest = model in ("gpt-5.6", "latest", "gpt-5")
     switchers = [
         '[data-testid="model-switcher-dropdown-button"]',
-        'button[aria-haspopup="menu"]',
-        'button:has-text("GPT")',
+        'button:has-text("ChatGPT 5")',
+        'button:has-text("GPT-5")',
+        'button:has-text("Instant")',
+        '[aria-label*="Model"]',
+        '[aria-label*="model"]',
     ]
     switcher = None
     for sw in switchers:
@@ -526,15 +527,16 @@ def select_model(page, model):
                 break
         except Exception:
             continue
-    for lab in labels:
-        try:
-            opt = page.get_by_text(lab, exact=False).first
-            if opt.count() > 0:
-                opt.click(timeout=2500)
-                time.sleep(0.2)
-                break
-        except Exception:
-            continue
+    if switcher:
+        for lab in labels:
+            try:
+                opt = page.get_by_text(lab, exact=False).first
+                if opt.count() > 0:
+                    opt.click(timeout=2500)
+                    time.sleep(0.2)
+                    break
+            except Exception:
+                continue
     actual = ""
     if switcher:
         try:
@@ -546,6 +548,19 @@ def select_model(page, model):
             actual = (page.locator(switchers[0]).first.inner_text() or "").strip()
         except Exception:
             actual = ""
+    if not actual:
+        try:
+            t = (page.locator("header, nav").first.inner_text() or "")
+            for lab in ("ChatGPT 5.2", "ChatGPT 5.4", "ChatGPT 5.6", "GPT-5", "Instant", "ChatGPT"):
+                if lab.lower() in t.lower():
+                    actual = lab
+                    break
+        except Exception:
+            actual = actual or ""
+    if latest and page.locator("#prompt-textarea, textarea#prompt-textarea").count() > 0:
+        if not actual:
+            actual = "ChatGPT"
+        return True, actual
     ok = any(lab.lower() in actual.lower() for lab in labels) if actual else False
     return ok, actual
 
@@ -612,6 +627,13 @@ def run_chat(body):
                 return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
             return {"ok": False, "error": "CHAT_PAGE_TIMEOUT: 打不开 chatgpt.com（%s）" % t[:160], "fault": "proxy"}
         post_phase("page_ready")
+        try:
+            page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea, [data-testid='send-button']", timeout=18000)
+        except Exception:
+            pst = detect_page_state(page, "chatgpt")
+            if pst == "CHALLENGE":
+                err, fault = page_state_error(pst, False)
+                return {"ok": False, "error": err, "fault": fault, "pageState": pst}
         switched, actual = select_model(page, model)
         if not TEST_URL:
             ip = exit_ip(context)

@@ -28,9 +28,10 @@ WORKER_TOKEN=$(tr -d '\n' < /workspace/storage/worker-token.txt)
 fuser -k 18765/tcp >/dev/null 2>&1 || true
 fuser -k 18766/tcp >/dev/null 2>&1 || true
 # Official daemon: worker credential only, never the customer API key.
-RELAY_HEADLESS=1 RELAY_WORKER_PORT=18766 RELAY_CAPACITY=3 \
+# Headed Chromium under Xvfb so ChatGPT Cloudflare Turnstile can pass.
+RELAY_HEADLESS=0 RELAY_WORKER_PORT=18766 RELAY_CAPACITY=3 \
   RELAY_GATEWAY=http://127.0.0.1:8080 RELAY_TOKEN="$WORKER_TOKEN" RELAY_WORKER_NAME=server-1 \
-  python3 /workspace/storage/worker.py >>/tmp/relay-server-worker.log 2>&1 &
+  xvfb-run -a python3 /workspace/storage/worker.py >>/tmp/relay-server-worker.log 2>&1 &
 echo $! > /workspace/storage/server-worker.pid
 echo 1 > /workspace/storage/server-worker.enabled
 if [ "${RELAY_DEMO_MODE:-}" = "true" ]; then

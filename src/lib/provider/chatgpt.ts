@@ -16,9 +16,9 @@ import type {
 } from "./types";
 
 const LABELS: Record<string, string[]> = {
-  "gpt-5.6": ["gpt-5.6", "5.6"],
-  latest: ["gpt-5.6", "gpt-5", "5.6"],
-  "gpt-5": ["gpt-5 auto", "auto", "gpt-5"],
+  "gpt-5.6": ["gpt-5.6", "5.6", "5.2", "5.4", "5.5", "chatgpt", "instant", "auto", "gpt-5"],
+  latest: ["gpt-5.6", "gpt-5", "5.6", "5.2", "chatgpt", "instant", "auto"],
+  "gpt-5": ["gpt-5 auto", "auto", "gpt-5", "chatgpt", "instant"],
   "gpt-5-thinking": ["gpt-5 thinking", "thinking"],
   "gpt-4o": ["gpt-4o", "4o"],
 };

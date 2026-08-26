@@ -47,7 +47,11 @@ export async function startServerWorker(gateway = "http://127.0.0.1:8080") {
   if (cur.running) return { ok: true as const, ...cur };
   const token = await ensureWorkerToken();
   await writeFile(SCRIPT, localWorkerScript(), "utf8");
-  const child = spawn("python3", [SCRIPT], {
+  const useXvfb = existsSync("/usr/bin/xvfb-run");
+  const child = spawn(
+    useXvfb ? "xvfb-run" : "python3",
+    useXvfb ? ["-a", "python3", SCRIPT] : [SCRIPT],
+    {
     cwd: DIR,
     detached: true,
     stdio: ["ignore", "pipe", "pipe"],
@@ -56,10 +60,11 @@ export async function startServerWorker(gateway = "http://127.0.0.1:8080") {
       RELAY_GATEWAY: gateway.replace(/\/$/, ""),
       RELAY_TOKEN: token,
       RELAY_WORKER_NAME: NAME,
-      RELAY_HEADLESS: "1",
+      RELAY_HEADLESS: useXvfb ? "0" : "1",
       RELAY_WORKER_PORT: "18766",
     },
-  });
+  },
+  );
   if (!child.pid) return { ok: false as const, error: "无法启动 python 执行器" };
   const log = (buf: Buffer) => {
     void writeFile(LOG, buf, { flag: "a" }).catch(() => undefined);
