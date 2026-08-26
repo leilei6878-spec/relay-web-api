@@ -122,13 +122,13 @@ function AccountsView() {
         <li>
           <p className="font-medium text-fg">2. 在你电脑登录</p>
           <p className="mt-1 text-xs leading-relaxed text-subtle">
-            点「登录」下载登录包，双击 run.bat，在弹出的窗口里登对应平台。Leonardo 必须点 Sign In，游客首页不算。
+            点「登录」下载登录包，双击 run.bat。Leonardo 会同时打开 Canva 和 Leonardo；只登录 Canva 不算。
           </p>
         </li>
         <li>
           <p className="font-medium text-fg">3. 把登录文件拖回来</p>
           <p className="mt-1 text-xs leading-relaxed text-subtle">
-            窗口登录成功后会生成文件。拖到账号这一行的登录框，状态变成可调用。Leonardo 要看到 Sign In 消失并停在 Image Generator。
+            窗口登录成功后会生成文件。拖到账号这一行的登录框，状态变成可调用。Leonardo 必须出现 Session Cookie，停在 Image Generator。
           </p>
         </li>
       </ol>
@@ -586,7 +586,7 @@ pause
         <p className="text-sm text-muted">
           平台绑好代理后点「下载一键登录包」。解压双击 run.bat，不用自己对 IP。
           {account.platform === "leonardo"
-            ? " 必须登录 canva.com。请先完全退出 Chrome。用 Canva 授权 Leonardo 时不要关弹窗；登录包不会反复刷新把授权打断。Sign In 消失后再拖回文件。"
+            ? " 会同时弹出 Canva 和 Leonardo 两个标签。请先完全退出 Chrome。先登录 Canva，再在 Leonardo 标签用 Canva 授权，授权弹窗不要关。要等到 Leonardo 的 Sign In 消失、出现 Session Cookie 才保存。"
             : ""}
         </p>
         {error && <p className="mt-2 text-sm text-danger">{error}</p>}

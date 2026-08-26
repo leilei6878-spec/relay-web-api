@@ -224,6 +224,42 @@ test("leonardo cognito cookies count as a session", () => {
   assert.equal(parsed.ok, true);
 });
 
+test("leonardo canva + analytics cookies are not a session", () => {
+  const json = JSON.stringify({
+    cookies: [
+      { name: "CDI", domain: "www.canva.com", value: "x", expires: Date.now() / 1000 + 86400 },
+      { name: "ASI", domain: "www.canva.com", value: "x", expires: Date.now() / 1000 + 3600 },
+      { name: "anonymous-id", domain: "app.leonardo.ai", value: "x", expires: Date.now() / 1000 + 86400 },
+      { name: "_landing_host", domain: ".leonardo.ai", value: "app.leonardo.ai", expires: Date.now() / 1000 + 3600 },
+      { name: "__Secure-better-auth.oauth_state", domain: "app.leonardo.ai", value: "abc", expires: Date.now() / 1000 + 600 },
+      { name: "XSRF-TOKEN", domain: "auth.leonardo.ai", value: "t", expires: -1 },
+      { name: "__stripe_sid", domain: ".app.leonardo.ai", value: "s", expires: Date.now() / 1000 + 1800 },
+      { name: "intercom-session-xc8vmlt4", domain: ".leonardo.ai", value: "", expires: Date.now() / 1000 + 86400 },
+    ],
+  });
+  const guest = inspectSession(json, "leonardo");
+  assert.equal(guest.ok, false);
+  assert.match(guest.reason || "", /未完成|Session Cookie|Canva/);
+  const parsed = parseStorageState(json, "leonardo");
+  assert.equal(parsed.ok, false);
+});
+
+test("leonardo better-auth session cookie counts as a session", () => {
+  const json = JSON.stringify({
+    cookies: [
+      { name: "anonymous-id", domain: "app.leonardo.ai", value: "x", expires: Date.now() / 1000 + 86400 * 30 },
+      {
+        name: "__Secure-better-auth.session_token",
+        domain: "app.leonardo.ai",
+        value: "tok",
+        expires: Date.now() / 1000 + 86400,
+      },
+    ],
+  });
+  const ok = inspectSession(json, "leonardo");
+  assert.equal(ok.ok, true);
+});
+
 test("leonardo login helper waits for Sign In to disappear, not the public composer", () => {
   const py = loginHelperScript(
     acc({ status: "pending_login", sessionPath: null }),
@@ -248,7 +284,7 @@ test("leonardo login helper waits for Sign In to disappear, not the public compo
   assert.match(py, /sign_in_visible/);
   assert.match(py, /leonardo_cookies_ok/);
   assert.match(py, /没有写入 state\.json/);
-  assert.match(py, /游客首页也有输入框/);
+  assert.match(py, /同时打开 Canva 和 Leonardo/);
   assert.match(py, /disable-cn-redirect/);
   assert.match(py, /canva\.cn/);
   assert.match(py, /to_canva_com/);
@@ -262,7 +298,10 @@ test("leonardo login helper waits for Sign In to disappear, not the public compo
   assert.match(py, /callbackUrl/);
   assert.match(py, /oauth_busy/);
   assert.match(py, /click_canva_sso/);
-  assert.match(py, /新开标签打开 Leonardo/);
+  assert.match(py, /ensure_canva_and_leonardo_tabs/);
+  assert.match(py, /已打开 Leonardo 标签/);
+  assert.match(py, /session_token/);
+  assert.match(py, /拒绝保存/);
 });
 
 test("leonardo SS helper pins canva.com through the bound node", () => {

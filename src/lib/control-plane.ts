@@ -115,7 +115,10 @@ export async function writeControlPlane(plane: Omit<ControlPlane, "savedAt">) {
   const accounts = plane.accounts.map((a) => {
     const old = oldById.get(a.id);
     if (!old) return a;
-    const sessionChanged = a.sessionPath !== old.sessionPath;
+    const sessionChanged =
+      a.sessionPath !== old.sessionPath ||
+      a.sessionSavedAt !== old.sessionSavedAt ||
+      a.sessionCookieCount !== old.sessionCookieCount;
     const serverProbeNewer =
       Boolean(old.lastProbeAt) && Date.parse(old.lastProbeAt || "") >= Date.parse(a.lastProbeAt || "");
     return {
@@ -125,8 +128,12 @@ export async function writeControlPlane(plane: Omit<ControlPlane, "savedAt">) {
       lockedUntil: later(a.lockedUntil, old.lockedUntil),
       lastUsedAt: later(a.lastUsedAt, old.lastUsedAt),
       lastProbeAt: later(a.lastProbeAt, old.lastProbeAt),
-      lastError: serverProbeNewer ? old.lastError : a.lastError || old.lastError,
-      sessionWarning: serverProbeNewer ? old.sessionWarning : a.sessionWarning ?? old.sessionWarning,
+      lastError: sessionChanged ? a.lastError : serverProbeNewer ? old.lastError : a.lastError || old.lastError,
+      sessionWarning: sessionChanged
+        ? a.sessionWarning ?? null
+        : serverProbeNewer
+          ? old.sessionWarning
+          : a.sessionWarning ?? old.sessionWarning,
       status: sessionChanged ? a.status : serverProbeNewer ? old.status : a.status,
       sessionVersion: Math.max(a.sessionVersion || 0, old.sessionVersion || 0),
     };
