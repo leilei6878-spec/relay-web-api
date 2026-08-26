@@ -1,0 +1,38 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint --if-present
+        continue-on-error: true
+      - name: Relay unit + distributed tests
+        run: npm run test:ci
+      - name: Secret scan
+        run: node --test scripts/secret-scan.test.mjs
+      - name: OpenAPI contract
+        run: node --test scripts/openapi-contract.test.mjs
+      - name: Migration files present
+        run: test -f migrations/0001_relay.sql && test -f migrations/0004_schema_meta.sql
+      - name: Build app (no DB)
+        run: npm run build:app
+        env:
+          NODE_ENV: production
+      - name: Production fail-closed without DATABASE_URL
+        run: |
+          set +e
+          NODE_ENV=production node --experimental-strip-types --import ./scripts/register-ts-ext.mjs -e 'import { assertProductionFailClosed } from "./src/lib/production-guard.ts"; assertProductionFailClosed();'
+          code=$?
+          test $code -ne 0

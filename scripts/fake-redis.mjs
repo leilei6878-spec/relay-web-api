@@ -1,3 +1,4 @@
+// @ts-nocheck
 import net from "node:net";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";

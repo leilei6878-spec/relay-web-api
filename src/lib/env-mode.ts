@@ -21,7 +21,25 @@ export function mockModeEnabled(env: NodeJS.ProcessEnv = process.env) {
   );
 }
 
+/** Canonical names plus the production-config-contract aliases from .env.example. */
+const ALIASES: Record<string, string[]> = {
+  RELAY_ADMIN_TOKEN: ["ADMIN_SECRET"],
+  RELAY_WORKER_TOKEN: ["WORKER_SIGNING_KEY"],
+  RELAY_SECRETS_KEY: ["SESSION_ENCRYPTION_KEY"],
+  RELAY_PUBLIC_URL: ["PUBLIC_BASE_URL"],
+  RELAY_S3_BUCKET: ["S3_BUCKET"],
+  RELAY_S3_ENDPOINT: ["S3_ENDPOINT"],
+  RELAY_S3_REGION: ["S3_REGION"],
+  RELAY_S3_ACCESS_KEY: ["S3_ACCESS_KEY", "AWS_ACCESS_KEY_ID"],
+  RELAY_S3_SECRET_KEY: ["S3_SECRET_KEY", "AWS_SECRET_ACCESS_KEY"],
+  RELAY_S3_PUBLIC_BASE: ["S3_PUBLIC_BASE"],
+};
+
 export function readEnv(name: string, env: NodeJS.ProcessEnv = process.env) {
-  const v = env[name];
-  return v && v.trim() ? v.trim() : "";
+  const keys = [name, ...(ALIASES[name] || [])];
+  for (const k of keys) {
+    const v = env[k];
+    if (v && v.trim()) return v.trim();
+  }
+  return "";
 }

@@ -28,3 +28,26 @@ export function metricsSnapshot(windowMs = 3_600_000) {
     p99: percentile(lat, 99),
   };
 }
+
+export function prometheusText(extra: Record<string, number | string> = {}) {
+  const slo = metricsSnapshot();
+  const lines: string[] = [
+    "# HELP relay_requests_total Requests observed in-process",
+    "# TYPE relay_requests_total counter",
+    `relay_requests_total ${slo.count}`,
+    "# HELP relay_requests_success Successful requests in window",
+    "# TYPE relay_requests_success counter",
+    `relay_requests_success ${Math.round(slo.successRate * slo.count)}`,
+    "# HELP relay_request_latency_ms Request latency",
+    "# TYPE relay_request_latency_ms summary",
+    `relay_request_latency_ms{quantile="0.5"} ${slo.p50}`,
+    `relay_request_latency_ms{quantile="0.95"} ${slo.p95}`,
+    `relay_request_latency_ms{quantile="0.99"} ${slo.p99}`,
+  ];
+  for (const [k, v] of Object.entries(extra)) {
+    const metric = k.startsWith("relay_") ? k : `relay_${k}`;
+    lines.push(`# TYPE ${metric} gauge`);
+    lines.push(`${metric} ${v}`);
+  }
+  return lines.join("\n") + "\n";
+}

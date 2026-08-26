@@ -12,9 +12,12 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as ConsoleRouteImport } from './routes/console'
+import { Route as HealthzRouteImport } from './routes/healthz'
 import { Route as LogsRouteImport } from './routes/logs'
+import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as PlaygroundRouteImport } from './routes/playground'
 import { Route as ProxiesRouteImport } from './routes/proxies'
+import { Route as ReadyzRouteImport } from './routes/readyz'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ApiJobsRouteImport } from './routes/api/jobs'
 import { Route as ApiKeysRouteImport } from './routes/api/keys'
@@ -54,9 +57,19 @@ const ConsoleRoute = ConsoleRouteImport.update({
   path: '/console',
   getParentRoute: () => rootRouteImport,
 } as any)
+const HealthzRoute = HealthzRouteImport.update({
+  id: '/healthz',
+  path: '/healthz',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LogsRoute = LogsRouteImport.update({
   id: '/logs',
   path: '/logs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MetricsRoute = MetricsRouteImport.update({
+  id: '/metrics',
+  path: '/metrics',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlaygroundRoute = PlaygroundRouteImport.update({
@@ -67,6 +80,11 @@ const PlaygroundRoute = PlaygroundRouteImport.update({
 const ProxiesRoute = ProxiesRouteImport.update({
   id: '/proxies',
   path: '/proxies',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReadyzRoute = ReadyzRouteImport.update({
+  id: '/readyz',
+  path: '/readyz',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -189,9 +207,12 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/console': typeof ConsoleRoute
+  '/healthz': typeof HealthzRoute
   '/logs': typeof LogsRoute
+  '/metrics': typeof MetricsRoute
   '/playground': typeof PlaygroundRoute
   '/proxies': typeof ProxiesRoute
+  '/readyz': typeof ReadyzRoute
   '/settings': typeof SettingsRoute
   '/api/jobs': typeof ApiJobsRoute
   '/api/keys': typeof ApiKeysRoute
@@ -220,9 +241,12 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/console': typeof ConsoleRoute
+  '/healthz': typeof HealthzRoute
   '/logs': typeof LogsRoute
+  '/metrics': typeof MetricsRoute
   '/playground': typeof PlaygroundRoute
   '/proxies': typeof ProxiesRoute
+  '/readyz': typeof ReadyzRoute
   '/settings': typeof SettingsRoute
   '/api/jobs': typeof ApiJobsRoute
   '/api/keys': typeof ApiKeysRoute
@@ -252,9 +276,12 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/console': typeof ConsoleRoute
+  '/healthz': typeof HealthzRoute
   '/logs': typeof LogsRoute
+  '/metrics': typeof MetricsRoute
   '/playground': typeof PlaygroundRoute
   '/proxies': typeof ProxiesRoute
+  '/readyz': typeof ReadyzRoute
   '/settings': typeof SettingsRoute
   '/api/jobs': typeof ApiJobsRoute
   '/api/keys': typeof ApiKeysRoute
@@ -285,9 +312,12 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/console'
+    | '/healthz'
     | '/logs'
+    | '/metrics'
     | '/playground'
     | '/proxies'
+    | '/readyz'
     | '/settings'
     | '/api/jobs'
     | '/api/keys'
@@ -316,9 +346,12 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/console'
+    | '/healthz'
     | '/logs'
+    | '/metrics'
     | '/playground'
     | '/proxies'
+    | '/readyz'
     | '/settings'
     | '/api/jobs'
     | '/api/keys'
@@ -347,9 +380,12 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/console'
+    | '/healthz'
     | '/logs'
+    | '/metrics'
     | '/playground'
     | '/proxies'
+    | '/readyz'
     | '/settings'
     | '/api/jobs'
     | '/api/keys'
@@ -379,9 +415,12 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountsRoute: typeof AccountsRoute
   ConsoleRoute: typeof ConsoleRoute
+  HealthzRoute: typeof HealthzRoute
   LogsRoute: typeof LogsRoute
+  MetricsRoute: typeof MetricsRoute
   PlaygroundRoute: typeof PlaygroundRoute
   ProxiesRoute: typeof ProxiesRoute
+  ReadyzRoute: typeof ReadyzRoute
   SettingsRoute: typeof SettingsRoute
   ApiJobsRoute: typeof ApiJobsRoute
   ApiKeysRoute: typeof ApiKeysRoute
@@ -430,11 +469,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ConsoleRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/healthz': {
+      id: '/healthz'
+      path: '/healthz'
+      fullPath: '/healthz'
+      preLoaderRoute: typeof HealthzRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/logs': {
       id: '/logs'
       path: '/logs'
       fullPath: '/logs'
       preLoaderRoute: typeof LogsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/metrics': {
+      id: '/metrics'
+      path: '/metrics'
+      fullPath: '/metrics'
+      preLoaderRoute: typeof MetricsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/playground': {
@@ -449,6 +502,13 @@ declare module '@tanstack/react-router' {
       path: '/proxies'
       fullPath: '/proxies'
       preLoaderRoute: typeof ProxiesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/readyz': {
+      id: '/readyz'
+      path: '/readyz'
+      fullPath: '/readyz'
+      preLoaderRoute: typeof ReadyzRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -619,9 +679,12 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountsRoute: AccountsRoute,
   ConsoleRoute: ConsoleRoute,
+  HealthzRoute: HealthzRoute,
   LogsRoute: LogsRoute,
+  MetricsRoute: MetricsRoute,
   PlaygroundRoute: PlaygroundRoute,
   ProxiesRoute: ProxiesRoute,
+  ReadyzRoute: ReadyzRoute,
   SettingsRoute: SettingsRoute,
   ApiJobsRoute: ApiJobsRoute,
   ApiKeysRoute: ApiKeysRoute,

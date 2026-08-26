@@ -20,6 +20,10 @@ import { pendingMigrations } from "./migration-plan.mjs";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
+  if ((process.env.NODE_ENV || "").trim() === "production") {
+    console.error("[migrate] PRODUCTION_FAIL_CLOSED: DATABASE_URL required");
+    process.exit(1);
+  }
   console.log(
     "[migrate] DATABASE_URL not set — skipping (the PGLite fallback migrates itself).",
   );
@@ -45,6 +49,7 @@ async function main() {
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
   const client = await pool.connect();
   try {
+    await client.query("SELECT pg_advisory_lock(87263401)");
     await client.query(
       "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())",
     );
@@ -75,6 +80,11 @@ async function main() {
     }
     console.log(count ? `[migrate] done — ${count} migration(s) applied.` : "[migrate] up to date.");
   } finally {
+    try {
+      await client.query("SELECT pg_advisory_unlock(87263401)");
+    } catch {
+      /* ignore unlock errors */
+    }
     client.release();
     await pool.end();
   }

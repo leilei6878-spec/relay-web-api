@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: relay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-relay}
+      POSTGRES_DB: relay
+    volumes:
+      - relay_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U relay"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    profiles: ["minio"]
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-relay}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-relayrelay1}
+    volumes:
+      - relay_minio:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://relay:${POSTGRES_PASSWORD:-relay}@postgres:5432/relay
+      REDIS_URL: redis://redis:6379
+      RELAY_ADMIN_TOKEN: ${RELAY_ADMIN_TOKEN}
+      RELAY_WORKER_TOKEN: ${RELAY_WORKER_TOKEN}
+      RELAY_SECRETS_KEY: ${RELAY_SECRETS_KEY}
+      RELAY_PUBLIC_URL: ${RELAY_PUBLIC_URL:-http://localhost:8080}
+      RELAY_S3_ENDPOINT: ${S3_ENDPOINT:-}
+      RELAY_S3_BUCKET: ${S3_BUCKET:-}
+      RELAY_S3_REGION: ${S3_REGION:-auto}
+      RELAY_S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      RELAY_S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      RELAY_REQUIRE_ADMIN_LOGIN: "1"
+    ports:
+      - "8080:8080"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    depends_on:
+      - gateway
+    environment:
+      NODE_ENV: production
+      RELAY_HEADLESS: "1"
+      RELAY_GATEWAY: http://gateway:8080
+      RELAY_WORKER_TOKEN: ${RELAY_WORKER_TOKEN}
+      RELAY_TOKEN: ${RELAY_WORKER_TOKEN}
+      RELAY_WORKER_NAME: worker-1
+      RELAY_CAPACITY: ${MAX_WORKER_CONCURRENCY:-3}
+
+volumes:
+  relay_pg:
+  relay_minio:
