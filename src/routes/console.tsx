@@ -10,7 +10,7 @@ import { ImageInput } from "@/components/image-input";
 export const Route = createFileRoute("/console")({ component: Page });
 
 const CHAT_MODELS = [
-  { id: "gpt-5.6", label: "GPT-5.6 最新" },
+  { id: "gpt-5.6", label: "GPT-5.6 Instant（快）" },
   { id: "gpt-5", label: "GPT-5 Auto" },
   { id: "gpt-5-thinking", label: "GPT-5 Thinking" },
   { id: "gpt-4o", label: "GPT-4o" },

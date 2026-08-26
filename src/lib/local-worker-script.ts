@@ -929,19 +929,65 @@ def open_browser(p, proxy):
                 pass
     return p.chromium.launch(**kw)
 
+def click_named(page, names, timeout=900):
+    for name in names:
+        try:
+            loc = page.get_by_role("button", name=name, exact=False)
+            if loc.count() > 0 and loc.first.is_visible():
+                loc.first.click(timeout=timeout)
+                return True
+        except Exception:
+            pass
+        try:
+            loc = page.get_by_text(name, exact=True)
+            if loc.count() > 0 and loc.first.is_visible():
+                loc.first.click(timeout=timeout)
+                return True
+        except Exception:
+            pass
+    return False
+
 def select_model(page, model):
-    latest = model in ("gpt-5.6", "latest", "gpt-5")
-    if latest:
+    want_think = "thinking" in (model or "").lower() or model in ("o1", "o3")
+    if not want_think:
+        if click_named(page, ["Instant", "Fast", "快速响应", "快速"]):
+            time.sleep(0.12)
+            return True, "Instant"
+        switchers = [
+            '[data-testid="model-switcher-dropdown-button"]',
+            'button:has-text("ChatGPT 5")',
+            'button:has-text("GPT-5")',
+            'button:has-text("Thinking")',
+            'button:has-text("Sol")',
+            '[aria-label*="Model"]',
+        ]
+        for sw in switchers:
+            loc = page.locator(sw).first
+            try:
+                if loc.count() > 0 and loc.is_visible():
+                    loc.click(timeout=1200)
+                    time.sleep(0.2)
+                    if click_named(page, ["Instant", "Fast", "Auto", "GPT-5.6", "快速响应"]):
+                        time.sleep(0.12)
+                        return True, "Instant"
+                    try:
+                        page.keyboard.press("Escape")
+                    except Exception:
+                        pass
+                    break
+            except Exception:
+                continue
         try:
             if page.locator("#prompt-textarea, textarea#prompt-textarea").count() > 0:
                 return True, "ChatGPT"
         except Exception:
             pass
+        return True, "ChatGPT"
     labels = {
-        "gpt-5.6": ["GPT-5.6", "5.6", "5.2", "Instant", "ChatGPT", "Auto", "GPT-5"],
+        "gpt-5.6": ["GPT-5.6", "5.6", "Instant", "ChatGPT", "Auto", "GPT-5"],
         "latest": ["GPT-5.6", "GPT-5", "Instant", "ChatGPT", "Auto"],
         "gpt-5": ["GPT-5 Auto", "Auto", "GPT-5", "ChatGPT", "Instant"],
-        "gpt-5-thinking": ["GPT-5 Thinking", "Thinking"],
+        "gpt-5-thinking": ["GPT-5 Thinking", "Thinking", "Sol"],
         "gpt-4o": ["GPT-4o", "4o"],
     }.get(model, [model])
     switchers = [
@@ -993,7 +1039,7 @@ def select_model(page, model):
                     break
         except Exception:
             actual = actual or ""
-    if latest and page.locator("#prompt-textarea, textarea#prompt-textarea").count() > 0:
+    if page.locator("#prompt-textarea, textarea#prompt-textarea").count() > 0:
         if not actual:
             actual = "ChatGPT"
         return True, actual
@@ -1089,7 +1135,8 @@ def run_chat(body):
         except Exception:
             already = False
         if already:
-            js_new_chat(page)
+            if not composer_ready(page, 800):
+                js_new_chat(page)
             if not composer_ready(page, COMPOSER_READY_TIMEOUT):
                 page, recovery_level = recover_page(page, context, 2, real)
                 if not composer_ready(page, PAGE_READY_TIMEOUT):
@@ -1172,7 +1219,10 @@ def run_chat(body):
         mark("T7")
         post_phase("generating")
         stop_sel = ",".join(stop)
-        deadline = time.time() + timeout_ms / 1000
+        want_fast = "thinking" not in (model or "").lower()
+        first_wait = 18 if want_fast else min(120, timeout_ms / 1000.0)
+        deadline = time.time() + (45 if want_fast else timeout_ms / 1000.0)
+        token_deadline = time.time() + first_wait
         text = ""
         last_change = time.time()
         stop_seen = False
@@ -1198,11 +1248,13 @@ def run_chat(body):
                     last_change = time.time()
                 text = full
             idle = time.time() - last_change
-            if text and not generating and idle >= 0.45:
+            if text and not generating and idle >= 0.35:
                 break
-            if text and idle >= 1.8:
+            if text and idle >= 1.2:
                 break
-            time.sleep(0.08)
+            if not first_delta and time.time() > token_deadline:
+                break
+            time.sleep(0.06)
         mark("T9")
         if not text:
             pst = detect_page_state(page, "chatgpt")

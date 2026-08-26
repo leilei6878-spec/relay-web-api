@@ -13,6 +13,8 @@ test("worker uses staged timeouts instead of 30s clicks", () => {
   assert.match(s, /install_mut_observer/);
   assert.match(s, /btn.click\(timeout=1500/);
   assert.match(s, /insert_text/);
+  assert.match(s, /Instant/);
+  assert.match(s, /first_wait = 18/);
 });
 
 test("worker streams deltas and records T0-T10", () => {
