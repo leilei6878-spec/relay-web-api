@@ -22,9 +22,8 @@ export const Route = createFileRoute("/api/worker/next")({
           const jobId = request.headers.get("x-job-id") || "";
           const accountId = request.headers.get("x-account-id") || "";
           if (jobId) {
-            const { coordSet } = await import("@/lib/coord");
-            await coordSet(`job-claim:${jobId}`, name, 120_000);
-            if (accountId) await coordSet(`account-lease:${accountId}`, name, 120_000);
+            const { renewJobLeases } = await import("@/lib/coord");
+            await renewJobLeases(jobId, accountId);
           }
           return Response.json({ ok: true, beat: true, name });
         }

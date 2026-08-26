@@ -233,6 +233,31 @@ export async function coordCompareExpire(key: string, expected: string, ttlMs: n
   return false;
 }
 
+function looksLikeJobId(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+/** Heartbeat must extend TTL without changing the owner token. */
+export async function renewJobLeases(jobId: string, accountId?: string, ttlMs = 120_000) {
+  if (!jobId) return;
+  await coordCompareExpire(`job-claim:${jobId}`, jobId, ttlMs);
+  if (accountId) await coordCompareExpire(`account-lease:${accountId}`, jobId, ttlMs);
+}
+
+/** Drop this job's account lock. Never steal a newer job's uuid lease. */
+export async function releaseJobLeases(jobId: string, accountId?: string, workerName?: string) {
+  if (accountId) {
+    const key = `account-lease:${accountId}`;
+    if (!(await coordCompareDel(key, jobId))) {
+      const v = (await coordGet(key)) || "";
+      if (!v || v === workerName || v === "pending" || !looksLikeJobId(v)) {
+        await coordDel(key);
+      }
+    }
+  }
+  await coordDel(`job-claim:${jobId}`);
+}
+
 export async function coordEval(script: string, keys: string[], args: string[]) {
   const r = await getRedis();
   if (r) {

@@ -21,3 +21,22 @@ test("compare-and-renew is atomic owner-safe against RESP server", async () => {
     await redis.close();
   }
 });
+
+test("worker heartbeat must not steal a finished job's account lease", async () => {
+  const { resetCoordForTests, coordSet, coordGet, renewJobLeases, releaseJobLeases } = await import("./coord.ts");
+  resetCoordForTests();
+  const jobId = "11111111-1111-4111-8111-111111111111";
+  const nextJob = "22222222-2222-4222-8222-222222222222";
+  await coordSet("account-lease:acc1", jobId, 2000);
+  await coordSet(`job-claim:${jobId}`, jobId, 2000);
+  await renewJobLeases(jobId, "acc1", 2000);
+  assert.equal(await coordGet("account-lease:acc1"), jobId);
+  await releaseJobLeases(jobId, "acc1", "worker-1");
+  assert.equal(await coordGet("account-lease:acc1"), null);
+  await coordSet("account-lease:acc1", "worker-1", 2000);
+  await releaseJobLeases(jobId, "acc1", "worker-1");
+  assert.equal(await coordGet("account-lease:acc1"), null);
+  await coordSet("account-lease:acc1", nextJob, 2000);
+  await releaseJobLeases(jobId, "acc1", "worker-1");
+  assert.equal(await coordGet("account-lease:acc1"), nextJob);
+});

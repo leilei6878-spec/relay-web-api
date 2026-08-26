@@ -3,7 +3,7 @@ import { isCanaryAccount } from "./canary";
 import { canDispatch, recordCanaryResult, recordProviderFault } from "./circuit";
 import { readSessionJson, writeSessionFile } from "./chatgpt-runner";
 import { patchAccount, pickAccount, readControlPlane } from "./control-plane";
-import { coordCompareDel, coordDel, coordGet, coordSet, coordSetNx } from "./coord";
+import { coordDel, coordGet, coordSet, coordSetNx, releaseJobLeases } from "./coord";
 import { classifyError, decisionFor, normalizeError } from "./faults";
 import { clearJobEvents, publishJobEvent } from "./job-events";
 import { assertLease, issueLease, type Lease } from "./leases";
@@ -345,7 +345,7 @@ export async function finishJobPg(
         markResilience("stale_rejected");
         return { ok: false as const, error: "STALE_LEASE: fencing mismatch" };
       }
-      if (current.accountId) await coordCompareDel(`account-lease:${current.accountId}`, current.id);
+      if (current.accountId) await releaseJobLeases(id, current.accountId, current.workerName || current.workerId);
       await coordDel(`job-claim:${id}`);
       return { ok: false as const, error: extra.error };
     }
@@ -395,7 +395,7 @@ export async function finishJobPg(
   }
 
   if (current.accountId) {
-    await coordCompareDel(`account-lease:${current.accountId}`, current.id).catch(() => coordDel(`account-lease:${current.accountId}`));
+    await releaseJobLeases(id, current.accountId, current.workerName || current.workerId);
     await dbUnlockAccount(current.accountId).catch(() => undefined);
   }
   await coordDel(`job-claim:${id}`);

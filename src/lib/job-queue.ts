@@ -5,7 +5,7 @@ import { isCanaryAccount } from "./canary";
 import { canDispatch, recordCanaryResult, recordProviderFault } from "./circuit";
 import { readSessionJson, writeSessionFile } from "./chatgpt-runner";
 import { patchAccount, pickAccount, readControlPlane } from "./control-plane";
-import { coordCompareDel, coordDel, coordGet, coordIncr, coordSet, coordSetNx } from "./coord";
+import { coordDel, coordGet, coordIncr, coordSet, coordSetNx, releaseJobLeases } from "./coord";
 import { poolUnavailableMessage } from "./eligibility";
 import { classifyError, decisionFor, normalizeError, type FaultClass } from "./faults";
 import { clearJobEvents, publishJobEvent } from "./job-events";
@@ -654,7 +654,7 @@ export function finishJob(
     job.selectorPackVersion = result.selectorPackVersion || job.selectorPackVersion;
     job.lease = undefined;
     await save(store);
-    if (job.accountId) await coordCompareDel(`account-lease:${job.accountId}`, job.id).catch(() => coordDel(`account-lease:${job.accountId}`));
+    if (job.accountId) await releaseJobLeases(job.id, job.accountId, job.workerName || job.workerId);
     await coordDel(`job-claim:${job.id}`);
     if (job.attemptId) {
       await finishAttempt(job.attemptId, {

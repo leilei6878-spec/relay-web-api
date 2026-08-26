@@ -1381,6 +1381,10 @@ def exec_job_run(body):
         ACTIVE -= 1
         account_lock(aid).release()
         SEM.release()
+        os.environ["RELAY_JOB_ID"] = ""
+        os.environ["RELAY_ACCOUNT_ID"] = ""
+        os.environ["RELAY_LEASE_ID"] = ""
+        os.environ["RELAY_ATTEMPT_ID"] = ""
 
 def run_image(body):
     prompt, images = extract_prompt_images(body)
