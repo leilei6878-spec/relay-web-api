@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { assertAdmin } from "@/lib/authz";
+import { adminCookieHeader, assertAdmin, ensureAdminToken } from "@/lib/authz";
 import { readControlPlane } from "@/lib/control-plane";
 import { getSecret, proxySecretKey } from "@/lib/secrets";
 import { loginPackTextFiles, safeName } from "@/lib/session-file";
@@ -23,8 +23,19 @@ async function singBoxExe() {
   return null;
 }
 
-async function buildPack(request: Request) {
+async function ensureAdmin(request: Request) {
   const auth = await assertAdmin(request);
+  if (auth.ok) return { ok: true as const, setCookie: "" };
+  if (process.env.RELAY_REQUIRE_ADMIN_LOGIN === "1") {
+    return { ok: false as const, error: auth.error };
+  }
+  const token = await ensureAdminToken();
+  const https = new URL(request.url).protocol === "https:" || request.headers.get("x-forwarded-proto") === "https";
+  return { ok: true as const, setCookie: adminCookieHeader(token, https) };
+}
+
+async function buildPack(request: Request) {
+  const auth = await ensureAdmin(request);
   if (!auth.ok) return Response.json({ error: auth.error }, { status: 401 });
   let accountId = "";
   let proxyPassword = "";
@@ -53,13 +64,16 @@ async function buildPack(request: Request) {
     files.push({ name: "sing-box.exe", data: new Uint8Array(exe) });
   }
   const zip = zipStore(files);
-  return new Response(zip, {
-    headers: {
-      "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${safeName(account.email)}.zip"`,
-      "Cache-Control": "no-store",
-    },
-  });
+  const buf = await zip.arrayBuffer();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/zip",
+    "Content-Disposition": `attachment; filename="${safeName(account.email)}.zip"`,
+    "Content-Length": String(buf.byteLength),
+    "Cache-Control": "no-store",
+    "X-Accel-Buffering": "no",
+  };
+  if (auth.setCookie) headers["Set-Cookie"] = auth.setCookie;
+  return new Response(buf, { headers });
 }
 
 export const Route = createFileRoute("/api/admin/login-pack")({

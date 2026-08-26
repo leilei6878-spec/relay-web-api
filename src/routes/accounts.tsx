@@ -492,31 +492,39 @@ function LoginDialog({ account }: { account: Account }) {
     }
     setPacking(true);
     try {
-      const res = await fetch("/api/admin/login-pack", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(120_000),
-        body: JSON.stringify({ accountId: account.id, proxyPassword: proxyPassword.trim() }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error || `打包失败 ${res.status}`);
+      if (proxy.type !== "ss" && proxy.username && proxyPassword.trim()) {
+        const res = await fetch("/api/admin/login-pack", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(20_000),
+          body: JSON.stringify({ accountId: account.id, proxyPassword: proxyPassword.trim() }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error || `打包失败 ${res.status}`);
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${safeName(account.email)}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      } else {
+        const a = document.createElement("a");
+        a.href = `/api/admin/login-pack?accountId=${encodeURIComponent(account.id)}`;
+        a.download = `${safeName(account.email)}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
       }
-      const blob = await res.blob();
-      if (blob.size < 64 || (blob.type || "").includes("json")) {
-        throw new Error("打包失败，请刷新后重试");
-      }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${safeName(account.email)}.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
       setProxyPassword("");
-      toast.success("已下载登录包，解压后双击 run.bat");
+      toast.success("已开始下载登录包（约 33MB），看浏览器下载栏");
     } catch (err) {
-      const msg = err instanceof Error && err.name === "TimeoutError" ? "下载超时，请检查网络后重试" : err instanceof Error ? err.message : "打包失败";
+      const msg = err instanceof Error ? err.message : "打包失败";
       setError(msg);
       toast.error(msg);
     } finally {
