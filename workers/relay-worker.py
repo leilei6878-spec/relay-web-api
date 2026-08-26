@@ -355,6 +355,51 @@ def pick_locator(page, names, limit=4):
             pass
     return None, None
 
+def fill_composer(page, box, prompt):
+    try:
+        ok = page.evaluate(
+            """(t) => {
+              const el = document.querySelector('#prompt-textarea') || document.querySelector('[contenteditable="true"]');
+              if (!el) return false;
+              el.focus();
+              try { document.execCommand('selectAll'); } catch (e) {}
+              if (!document.execCommand('insertText', false, t)) {
+                el.textContent = t;
+                el.dispatchEvent(new InputEvent('input', { bubbles: true, data: t, inputType: 'insertText' }));
+              }
+              return (el.innerText || el.textContent || '').trim().length > 0;
+            }""",
+            prompt,
+        )
+        if ok:
+            return True
+    except Exception:
+        pass
+    try:
+        if box:
+            box.fill(prompt, timeout=2000)
+            return True
+    except Exception:
+        pass
+    try:
+        page.locator("#prompt-textarea").first.fill(prompt, timeout=2000)
+        return True
+    except Exception:
+        return False
+
+def click_send(page, btn):
+    try:
+        if btn:
+            btn.click(timeout=1500, force=True)
+            return True
+    except Exception:
+        pass
+    try:
+        page.keyboard.press("Enter")
+        return True
+    except Exception:
+        return False
+
 def snapshot_image_srcs(page):
     out = []
     try:
@@ -757,11 +802,6 @@ def run_chat(body):
         except Exception:
             already = False
         if already:
-            try:
-                page.locator('[data-testid="create-new-chat-button"]').first.click(timeout=800)
-                page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea", timeout=4000)
-            except Exception:
-                pass
             lap("reuse")
         else:
             target = CHAT_URL if not real else "https://chatgpt.com/?temporary-chat=true"
@@ -808,13 +848,9 @@ def run_chat(body):
                 "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
             }
         before = page.locator(",".join(assistant)).count()
-        box.click()
-        box.fill(prompt)
-        btn = first_visible(page, send)
-        if btn:
-            btn.click()
-        else:
-            page.keyboard.press("Enter")
+        if not fill_composer(page, box, prompt):
+            return {"ok": False, "error": "PROVIDER_DOM_CHANGED: cannot fill composer", "fault": "provider"}
+        click_send(page, first_visible(page, send))
         post_phase("generating")
         lap("sent")
         stop_sel = ",".join(stop)
@@ -1043,16 +1079,10 @@ def run_image(body):
                 "fingerprint": page_fingerprint(page, sel),
                 "selectorPackVersion": pack_version,
             }
-        box.click()
-        box.fill(prompt)
-        btn, _ = pick_locator(page, send, 4)
-        try:
-            if btn:
-                btn.click()
-            else:
-                page.keyboard.press("Enter")
-        except Exception:
-            page.keyboard.press("Enter")
+        if not fill_composer(page, box, prompt):
+            return {"ok": False, "error": "PROVIDER_DOM_CHANGED: cannot fill composer", "fault": "provider"}
+        send_btn, _ = pick_locator(page, send, 4)
+        click_send(page, send_btn)
         deadline = time.time() + int(body.get("timeoutMs") or 90000) / 1000
         url = ""
         box_info = None
