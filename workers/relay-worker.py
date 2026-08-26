@@ -445,15 +445,32 @@ def fill_composer(page, box, prompt):
 
 def click_send(page, btn):
     try:
+        ok = page.evaluate("""() => {
+          const form = document.querySelector('form:has(#prompt-textarea), form:has([contenteditable="true"])');
+          const b = document.querySelector('button[data-testid="send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"]');
+          if (b && !b.disabled && b.getAttribute('aria-disabled') !== 'true') {
+            b.click();
+            return 'btn';
+          }
+          if (form && form.requestSubmit) {
+            form.requestSubmit();
+            return 'form';
+          }
+          return '';
+        }""")
+        if ok:
+            return True
+    except Exception:
+        pass
+    try:
         if send_button_enabled(page) and btn:
             btn.click(timeout=1500)
             return True
     except Exception:
         pass
     try:
-        if btn:
-            btn.click(timeout=1500, force=True)
-            return True
+        page.locator("#prompt-textarea").first.press("Enter")
+        return True
     except Exception:
         pass
     try:
@@ -465,7 +482,7 @@ def click_send(page, btn):
 def send_button_enabled(page):
     try:
         return bool(page.evaluate("""() => {
-          const b = document.querySelector('button[data-testid="send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"], button[aria-label*="Send"]');
+          const b = document.querySelector('button[data-testid="send-button"], button[aria-label="Send prompt"], button[aria-label="Send message"]');
           if (!b) return false;
           return !b.disabled && b.getAttribute('aria-disabled') !== 'true' && b.getAttribute('data-disabled') !== 'true';
         }"""))
@@ -734,16 +751,10 @@ def playwright_inst():
     return PW
 
 def noise_route(route):
-    u = route.request.url
-    if any(x in u for x in ("google-analytics", "googletagmanager", "doubleclick", "segment.", "hotjar", "fullstory", "intercom.io", "facebook.net")):
-        return route.abort()
     return route.continue_()
 
 def arm_page(page):
-    try:
-        page.route("**/*", noise_route)
-    except Exception:
-        pass
+    return
 
 def warm_sessions():
     playwright_inst()
