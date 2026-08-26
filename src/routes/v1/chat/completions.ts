@@ -138,8 +138,10 @@ async function logUsage(
   });
 }
 
-function chatJobTimeoutMs(model: string) {
-  return /thinking|o1|o3/i.test(model || "") ? 180_000 : 45_000;
+function chatJobTimeoutMs(model: string, images?: string[]) {
+  if (/thinking|o1|o3/i.test(model || "")) return 180_000;
+  if (images && images.length) return 90_000;
+  return 45_000;
 }
 
 export async function runChat(
@@ -209,7 +211,7 @@ export async function runChat(
       last = { ok: false, status: 503, error: poolUnavailableMessage("chatgpt", plane.accounts, plane.proxies, plane.settings) };
       break;
     }
-    const queued = await enqueueChat(prompt, model, chatJobTimeoutMs(model), images, {
+    const queued = await enqueueChat(prompt, model, chatJobTimeoutMs(model, images), images, {
       idempotencyKey,
       requestId: reqId,
       traceId,
@@ -359,7 +361,7 @@ export function streamChat(
             return;
           }
         }
-        const queued = await enqueueChat(prompt, model, chatJobTimeoutMs(model), images, {
+        const queued = await enqueueChat(prompt, model, chatJobTimeoutMs(model, images), images, {
           idempotencyKey: idem,
           requestId,
           turns,

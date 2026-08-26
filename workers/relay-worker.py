@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Relay 本机 ChatGPT Worker。保持窗口开着，平台试运行会连过来。
-import json, os, socket, ssl, subprocess, sys, tempfile, threading, time, base64, queue
+import json, os, socket, ssl, subprocess, sys, tempfile, threading, time, base64, queue, re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
@@ -229,7 +229,7 @@ def attach_images(page, images):
         loc = page.locator("input[type=file]")
         if loc.count() > 0:
             loc.first.set_input_files(paths)
-            time.sleep(0.7)
+            wait_composer_files(page)
             return
     except Exception:
         pass
@@ -256,6 +256,34 @@ def attach_images(page, images):
             page.locator("input[type=file]").first.set_input_files(paths)
         except Exception:
             pass
+    wait_composer_files(page)
+
+def wait_composer_files(page, timeout_ms=8000):
+    deadline = time.time() + timeout_ms / 1000.0
+    while time.time() < deadline:
+        try:
+            if page.locator('form img, [data-testid*="attachment"] img, button[aria-label*="Remove"], button[aria-label*="移除"]').count() > 0:
+                return True
+        except Exception:
+            pass
+        time.sleep(0.12)
+    return False
+
+# Ignore ChatGPT placeholders such as "Analyzing image" so vision waits for the real answer.
+PLACEHOLDER_TEXT = re.compile(
+    r"^(analyzing( image)?|thinking|working on it|searching|reading|loading|正在(分析|思考|生成|阅读|识别)|分析图片|分析中)[s.。…]*$",
+    re.I,
+)
+
+def usable_assistant_text(text):
+    t = (text or "").strip()
+    if not t:
+        return False
+    if PLACEHOLDER_TEXT.match(t):
+        return False
+    if t.lower() in ("...", "…", "wait", "done"):
+        return False
+    return True
 
 
 def detect_page_state(page, provider="chatgpt"):
@@ -1217,8 +1245,9 @@ def run_chat(body):
         post_phase("generating")
         stop_sel = ",".join(stop)
         want_fast = "thinking" not in (model or "").lower()
-        first_wait = 18 if want_fast else min(120, timeout_ms / 1000.0)
-        deadline = time.time() + (45 if want_fast else timeout_ms / 1000.0)
+        has_images = bool(images)
+        first_wait = (40 if has_images else 18) if want_fast else min(120, timeout_ms / 1000.0)
+        deadline = time.time() + ((75 if has_images else 45) if want_fast else timeout_ms / 1000.0)
         token_deadline = time.time() + first_wait
         text = ""
         last_change = time.time()
@@ -1234,7 +1263,7 @@ def run_chat(body):
                 generating = False
             drained = drain_deltas(page)
             full = (drained.get("full") or "").strip()
-            if full:
+            if usable_assistant_text(full):
                 if not first_delta:
                     first_delta = True
                     mark("T8")
@@ -1245,15 +1274,15 @@ def run_chat(body):
                     last_change = time.time()
                 text = full
             idle = time.time() - last_change
-            if text and not generating and idle >= 0.35:
+            if text and not generating and idle >= (0.6 if has_images else 0.35):
                 break
-            if text and idle >= 1.2:
+            if text and idle >= (2.2 if has_images else 1.2):
                 break
             if not first_delta and time.time() > token_deadline:
                 break
             time.sleep(0.06)
         mark("T9")
-        if not text:
+        if not usable_assistant_text(text):
             pst = detect_page_state(page, "chatgpt")
             return {"ok": False, "error": "TIMEOUT: empty assistant", "fault": "provider", "pageState": pst, "timing": marks, "profile": profile}
         if "sol" in text.lower() or "reasoning" in text.lower() or "推理" in text:

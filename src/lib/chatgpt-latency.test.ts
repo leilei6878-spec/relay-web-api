@@ -14,7 +14,9 @@ test("worker uses staged timeouts instead of 30s clicks", () => {
   assert.match(s, /btn.click\(timeout=1500/);
   assert.match(s, /insert_text/);
   assert.match(s, /Instant/);
-  assert.match(s, /first_wait = 18/);
+  assert.match(s, /has_images else 18/);
+  assert.match(s, /usable_assistant_text/);
+  assert.match(s, /Analyzing image/);
 });
 
 test("worker streams deltas and records T0-T10", () => {
