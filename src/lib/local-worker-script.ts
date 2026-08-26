@@ -129,6 +129,8 @@ def account_lock(aid):
     return ACCOUNT_LOCKS[aid or "_"]
 
 def post_chunk(text, phase=""):
+    if text and not phase:
+        return
     gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
     token = os.environ.get("RELAY_TOKEN") or ""
     jid = os.environ.get("RELAY_JOB_ID") or ""
@@ -411,7 +413,7 @@ CTX_POOL = {}
 POOL_LOCK = threading.Lock()
 MAX_BROWSERS = int(os.environ.get("RELAY_MAX_BROWSERS") or "4")
 MAX_CTX = int(os.environ.get("RELAY_MAX_CTX_PER_BROWSER") or "8")
-CTX_IDLE = int(os.environ.get("RELAY_CTX_IDLE") or "180")
+CTX_IDLE = int(os.environ.get("RELAY_CTX_IDLE") or "600")
 CTX_MAX_REQ = int(os.environ.get("RELAY_CTX_MAX_REQ") or "20")
 
 def reset_playwright():
@@ -448,14 +450,60 @@ def playwright_inst():
         PW = sync_playwright().start()
     return PW
 
+def noise_route(route):
+    u = route.request.url
+    if any(x in u for x in ("google-analytics", "googletagmanager", "doubleclick", "segment.", "hotjar", "fullstory", "intercom.io", "facebook.net")):
+        return route.abort()
+    return route.continue_()
+
+def arm_page(page):
+    try:
+        page.route("**/*", noise_route)
+    except Exception:
+        pass
+
+def warm_sessions():
+    playwright_inst()
+    proxy = pick_proxy() or {"server": "socks5://127.0.0.1:18080"}
+    sess_dir = os.path.join(HERE, "sessions")
+    found = []
+    if os.path.isdir(sess_dir):
+        for n in os.listdir(sess_dir):
+            path = os.path.join(sess_dir, n)
+            try:
+                if n.endswith(".json") and os.path.getsize(path) > 5000:
+                    found.append((n[:-5], path))
+            except Exception:
+                continue
+    if not found:
+        get_pooled_context(proxy, None, "_warm")
+        print("browser warm", flush=True)
+        return
+    for aid, path in found[:3]:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            if not (state.get("cookies") or []):
+                continue
+            browser, ctx, page, key = get_pooled_context(proxy, state, aid)
+            if page is None:
+                page = ctx.new_page()
+                arm_page(page)
+                page.goto("https://chatgpt.com/?temporary-chat=true", wait_until="domcontentloaded", timeout=25000)
+                page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea", timeout=15000)
+            with POOL_LOCK:
+                row = CTX_POOL.get(key)
+                if row:
+                    row["page"] = page
+            print("session warm", aid[:8], flush=True)
+        except Exception as e:
+            print("session warm fail", aid[:8], e, flush=True)
+
 def pw_loop():
     global PW_THREAD
     PW_THREAD = threading.current_thread()
     try:
-        playwright_inst()
-        proxy = pick_proxy() or {"server": "socks5://127.0.0.1:18080"}
-        get_pooled_context(proxy, None, "_warm")
-        print("browser warm", flush=True)
+        warm_sessions()
     except Exception as e:
         print("warmup fail", e, flush=True)
     while True:
@@ -693,10 +741,8 @@ def run_chat(body):
     proxy = job_proxy(body)
     if not proxy:
         return {"ok": False, "error": "PROXY_UNAVAILABLE: job missing account-bound proxy", "fault": "proxy"}
-    if not TEST_URL:
-        post_phase("checking_proxy")
-        if not socks_https_ok(proxy):
-            return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
+    if not TEST_URL and not socks_https_ok(proxy):
+        return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
 
     def first_visible(page, names):
         loc, _sel = pick_locator(page, names, 4)
@@ -704,33 +750,46 @@ def run_chat(body):
 
     def run_on(page, context, close_browser):
         t0 = time.time()
+        def lap(name):
+            print("t+%dms %s" % (int((time.time() - t0) * 1000), name), flush=True)
+        arm_page(page)
         post_phase("opening_chatgpt")
         already = False
         try:
             already = "chatgpt.com" in (page.url or "") and page.locator("#prompt-textarea, textarea#prompt-textarea").count() > 0
         except Exception:
             already = False
-        if not already:
+        if already:
             try:
-                page.goto(CHAT_URL if not real else "https://chatgpt.com/", wait_until="domcontentloaded", timeout=25000)
+                page.locator('[data-testid="create-new-chat-button"]').first.click(timeout=800)
+                page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea", timeout=4000)
+            except Exception:
+                pass
+            lap("reuse")
+        else:
+            target = CHAT_URL if not real else "https://chatgpt.com/?temporary-chat=true"
+            try:
+                page.goto(target, wait_until="domcontentloaded", timeout=25000)
             except Exception as e:
                 t = str(e)
                 if "ERR_CONNECTION_CLOSED" in t or "ERR_CONNECTION_RESET" in t or "ERR_TUNNEL" in t:
                     return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
                 return {"ok": False, "error": "CHAT_PAGE_TIMEOUT: 打不开 chatgpt.com（%s）" % t[:160], "fault": "proxy"}
             try:
-                page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea, [data-testid='send-button']", timeout=12000)
+                page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea, [data-testid='send-button']", timeout=8000)
             except Exception:
                 pst = detect_page_state(page, "chatgpt")
                 if pst == "CHALLENGE":
                     err, fault = page_state_error(pst, False)
                     return {"ok": False, "error": err, "fault": fault, "pageState": pst}
+            lap("goto")
         post_phase("page_ready")
         switched, actual = select_model(page, model)
         if not switched and not TEST_URL:
             code = "MODEL_SELECTION_UNCONFIRMED" if not actual else "MODEL_MISMATCH"
             return {"ok": False, "error": code + ": failed to select " + model, "fault": "provider", "modelActual": actual or ""}
-        attach_images(page, images)
+        if images:
+            attach_images(page, images)
         box = first_visible(page, inp)
         if box is None:
             pst = detect_page_state(page, "chatgpt")
@@ -760,6 +819,7 @@ def run_chat(body):
         else:
             page.keyboard.press("Enter")
         post_phase("generating")
+        lap("sent")
         stop_sel = ",".join(stop)
         deadline = time.time() + timeout_ms / 1000
         text = ""
@@ -767,17 +827,13 @@ def run_chat(body):
         same = 0
         stop_seen = False
         while time.time() < deadline:
-            if not stop_seen:
-                try:
-                    stop_seen = bool(page.locator(stop_sel).first.is_visible())
-                except Exception:
-                    stop_seen = False
             generating = False
-            if stop_seen:
-                try:
-                    generating = bool(page.locator(stop_sel).first.is_visible())
-                except Exception:
-                    generating = False
+            try:
+                generating = bool(page.locator(stop_sel).first.is_visible())
+                if generating:
+                    stop_seen = True
+            except Exception:
+                generating = False
             nodes = page.locator(",".join(assistant))
             n = nodes.count()
             cur = ""
@@ -787,28 +843,22 @@ def run_chat(body):
                 if cur != stable:
                     stable = cur
                     same = 0
-                    post_chunk(cur)
                 else:
                     same += 1
-                    need = 2 if (stop_seen and not generating) else 4
-                    if same >= need and not generating:
+                    if same >= 2 and not generating:
                         text = cur
                         break
-            time.sleep(0.12)
+            time.sleep(0.1)
         if not text:
             text = stable
         if not text:
             pst = detect_page_state(page, "chatgpt")
             return {"ok": False, "error": "TIMEOUT: empty assistant", "fault": "provider", "pageState": pst}
-        try:
-            state_out = context.storage_state()
-        except Exception:
-            state_out = None
         observe = int((time.time() - t0) * 1000)
+        lap("done")
         return {
             "ok": True,
             "text": text,
-            "sessionState": state_out,
             "sessionBaseVersion": int(body.get("sessionVersion") or 0),
             "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
             "modelActual": actual or model,
