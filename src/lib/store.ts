@@ -65,10 +65,10 @@ export const defaultSettings: GatewaySettings = {
 
 function initial(): Omit<State, "hydrated"> {
   return {
-    accounts: seedAccounts(),
-    proxies: seedProxies(),
-    logs: seedLogs(),
-    workers: seedWorkers(),
+    accounts: [],
+    proxies: [],
+    logs: [],
+    workers: [],
     settings: defaultSettings,
   };
 }
@@ -315,7 +315,9 @@ export const useGateway = create<State & Actions>()(
         }),
       updateSettings: (patch) =>
         set({ settings: { ...get().settings, ...patch } }),
-      resetDemo: () => set({ ...initial() }),
+      resetDemo: () => {
+        if (process.env.RELAY_DEMO_MODE === "true") set({ ...initial(), ...{ accounts: seedAccounts(), proxies: seedProxies(), logs: seedLogs(), workers: seedWorkers() } });
+      },
     }),
     {
       name: "relay-gateway-v2",

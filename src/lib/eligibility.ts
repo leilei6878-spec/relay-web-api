@@ -49,6 +49,25 @@ export function proxyCapacity(proxy: Proxy, accounts: Account[]) {
   return accounts.filter((a) => a.proxyId === proxy.id).length;
 }
 
+export function poolUnavailableMessage(
+  platform: Platform,
+  accounts: Account[],
+  proxies: Proxy[],
+  settings: GatewaySettings,
+  extra: Record<string, string> = {},
+) {
+  const label = platform === "gemini" ? "Gemini" : "ChatGPT";
+  const mine = accounts.filter((a) => a.platform === platform);
+  if (!mine.length) {
+    return `没有可调度的健康 ${label} 账号：账号池是空的，请先添加并完成登录`;
+  }
+  const lines = mine.map((a) => {
+    const why = extra[a.id] || eligibilityReason(a, proxies, settings) || "可调度";
+    return `${a.email}（${why}）`;
+  });
+  return `没有可调度的健康 ${label} 账号。当前：${lines.join("；")}`;
+}
+
 export const defaultSelectors = {
   chatgpt: {
     input: ["textarea#prompt-textarea", "div[contenteditable='true']#prompt-textarea"],

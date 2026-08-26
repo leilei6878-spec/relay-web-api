@@ -52,6 +52,21 @@ function later(a?: string | null, b?: string | null) {
   return Date.parse(a) >= Date.parse(b) ? a : b;
 }
 
+const DEMO_ACCOUNT_IDS = new Set(["ac-1", "ac-2", "ac-3", "ac-4", "ac-5", "ac-6", "ac-7", "ac-8"]);
+
+function isBuiltinDemo(accounts: Account[]) {
+  if (accounts.length < 3) return false;
+  return accounts.every(
+    (a) => DEMO_ACCOUNT_IDS.has(a.id) || /@(mail\.test|test\.local)$/.test(a.email),
+  );
+}
+
+function hasRealAccounts(accounts: Account[]) {
+  return accounts.some(
+    (a) => a.sessionPath && !DEMO_ACCOUNT_IDS.has(a.id) && !/@(mail\.test|test\.local)$/.test(a.email),
+  );
+}
+
 function stripProxySecrets(proxies: Proxy[]): Proxy[] {
   return proxies.map((p) => {
     const copy = { ...p };
@@ -74,6 +89,9 @@ export async function writeControlPlane(plane: Omit<ControlPlane, "savedAt">) {
     }
   }
   const oldById = new Map((prev?.accounts || []).map((a) => [a.id, a]));
+  if ((plane.accounts.length === 0 || isBuiltinDemo(plane.accounts)) && hasRealAccounts(prev?.accounts || [])) {
+    return { ok: true as const, skipped: "demo-or-empty-blocked" };
+  }
   const accounts = plane.accounts.map((a) => {
     const old = oldById.get(a.id);
     if (!old) return a;

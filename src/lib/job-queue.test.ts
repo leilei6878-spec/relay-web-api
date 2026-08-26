@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import "./test-env.ts";
 import { resetCoordForTests } from "./coord.ts";
 import { writeControlPlane } from "./control-plane.ts";
-import { claimNext, enqueueChat, finishJob, getJob } from "./job-queue.ts";
+import { claimNext, cancelJob, enqueueChat, finishJob, getJob } from "./job-queue.ts";
 
 process.env.RELAY_SKIP_DB = "1";
 
@@ -142,4 +142,17 @@ test("account failover excludes failed account on next enqueue", async () => {
   });
   assert.equal(second.ok, true);
   if (second.ok) assert.notEqual(second.job.accountId, claimed.job!.accountId);
+});
+
+test("wait deadline cancel is terminal and frees the account", async () => {
+  await seed();
+  const first = await enqueueChat("hold", "gpt-5.6", 8000, [], { idempotencyKey: `hold-${Date.now()}` });
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  await claimNext("qa-worker");
+  await cancelJob(first.job.id, "TIMEOUT: wait deadline");
+  const job = await getJob(first.job.id);
+  assert.equal(job?.status, "cancelled");
+  const second = await enqueueChat("next", "gpt-5.6", 8000, [], { idempotencyKey: `next-${Date.now()}` });
+  assert.equal(second.ok, true, second.ok ? "" : second.error);
 });

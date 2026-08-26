@@ -5,7 +5,8 @@ import { isCanaryAccount } from "./canary";
 import { canDispatch, recordCanaryResult, recordProviderFault } from "./circuit";
 import { readSessionJson, writeSessionFile } from "./chatgpt-runner";
 import { patchAccount, pickAccount, readControlPlane } from "./control-plane";
-import { coordCompareDel, coordDel, coordIncr, coordSet, coordSetNx } from "./coord";
+import { coordCompareDel, coordDel, coordGet, coordIncr, coordSet, coordSetNx } from "./coord";
+import { poolUnavailableMessage } from "./eligibility";
 import { classifyError, decisionFor, normalizeError, type FaultClass } from "./faults";
 import { clearJobEvents, publishJobEvent } from "./job-events";
 import { assertLease, issueLease, type Lease } from "./leases";
@@ -218,6 +219,46 @@ async function save(store: Store) {
   await persist(store);
 }
 
+function isClientAbandon(error: string) {
+  return /TIMEOUT: wait deadline|REQUEST_CANCELLED|客户端断开/.test(error);
+}
+
+async function releaseZombieAccountLease(accountId: string) {
+  const store = await load();
+  const job = store.jobs.find(
+    (j) => j.accountId === accountId && (j.status === "running" || j.status === "queued"),
+  );
+  if (!job) {
+    await coordDel(`account-lease:${accountId}`);
+    return true;
+  }
+  const age = Date.now() - Date.parse(job.startedAt || job.createdAt);
+  const zombie =
+    isClientAbandon(job.error || "") ||
+    job.status === "cancelled" ||
+    age > (job.timeoutMs || 90_000) + 8_000;
+  if (!zombie) return false;
+  job.status = "cancelled";
+  job.error = job.error || "TIMEOUT: wait deadline";
+  job.fault = "infra";
+  job.errorCode = "GENERATION_TIMEOUT";
+  job.lease = undefined;
+  await coordDel(`account-lease:${accountId}`);
+  await coordDel(`job-claim:${job.id}`);
+  await save(store);
+  await patchAccount(accountId, { lockedUntil: null }).catch(() => undefined);
+  return true;
+}
+
+async function unavailableMessage(platform: Job["platform"], extra: Record<string, string> = {}) {
+  const plane = await readControlPlane();
+  for (const a of plane.accounts.filter((x) => x.platform === platform)) {
+    if (extra[a.id]) continue;
+    if (await coordGet(`account-lease:${a.id}`)) extra[a.id] = "正在执行其他任务，请稍候再测";
+  }
+  return poolUnavailableMessage(platform, plane.accounts, plane.proxies, plane.settings, extra);
+}
+
 async function enqueue(
   platform: Job["platform"],
   prompt: string,
@@ -262,19 +303,21 @@ async function enqueue(
         };
       }
       const lockedOk = await coordSetNx(`account-lease:${account.id}`, "pending", timeoutMs);
-      if (lockedOk) break;
-      exclude.push(account.id);
-      account = await pickAccount(platform, exclude);
+      if (!lockedOk) {
+        const stolen = await releaseZombieAccountLease(account.id);
+        if (stolen) {
+          const retry = await coordSetNx(`account-lease:${account.id}`, "pending", timeoutMs);
+          if (retry) break;
+        }
+        exclude.push(account.id);
+        account = await pickAccount(platform, exclude);
+        continue;
+      }
+      break;
     }
     if (!account) {
       if (opts.idempotencyKey) await coordDel(`idem:${opts.idempotencyKey}`);
-      return {
-        ok: false as const,
-        error:
-          platform === "gemini"
-            ? "没有可调度的健康 Gemini 账号（需 Session + sticky，且未占用）"
-            : "没有可调度的健康 ChatGPT 账号（需 Session + sticky，且未占用）",
-      };
+      return { ok: false as const, error: await unavailableMessage(platform) };
     }
     const job: Job = {
       id: uid(),
@@ -727,8 +770,8 @@ export async function listJobs() {
 }
 
 export async function waitJob(id: string, timeoutMs: number) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+  const queuedDeadline = Date.now() + timeoutMs + 20_000;
+  while (Date.now() < queuedDeadline) {
     const job = await getJob(id);
     if (!job) return { ok: false as const, error: "任务丢失" };
     if (job.status === "done" && (job.text || job.url)) {
@@ -736,6 +779,10 @@ export async function waitJob(id: string, timeoutMs: number) {
     }
     if (job.status === "error" || job.status === "dead" || job.status === "cancelled") {
       return { ok: false as const, error: job.error || "任务失败", job };
+    }
+    if (job.status === "running" && job.startedAt) {
+      const remain = Date.parse(job.startedAt) + (job.timeoutMs || timeoutMs) + 5_000 - Date.now();
+      if (remain <= 0) break;
     }
     await new Promise((r) => setTimeout(r, 120));
   }
@@ -756,7 +803,8 @@ export function cancelJob(id: string, error: string) {
     const maxRetry = plane.settings.maxRetry || 3;
     if (job.accountId) await coordDel(`account-lease:${job.accountId}`);
     await coordDel(`job-claim:${job.id}`);
-    if ((job.attempts || 0) < maxRetry && job.status === "running" && !error.includes("REQUEST_CANCELLED")) {
+    const abandon = isClientAbandon(error);
+    if ((job.attempts || 0) < maxRetry && job.status === "running" && !abandon) {
       job.status = "queued";
       job.error = error;
       job.fault = "infra";
@@ -764,8 +812,9 @@ export function cancelJob(id: string, error: string) {
     } else {
       job.status = "cancelled";
       job.error = error;
-      job.fault = error.includes("REQUEST_CANCELLED") ? "client" : "infra";
+      job.fault = abandon && error.includes("REQUEST_CANCELLED") ? "client" : "infra";
       job.errorCode = error.includes("REQUEST_CANCELLED") ? "REQUEST_CANCELLED" : normalizeError(error);
+      if (job.accountId) await patchAccount(job.accountId, { lockedUntil: null }).catch(() => undefined);
     }
     await save(store);
     return { ok: true as const };

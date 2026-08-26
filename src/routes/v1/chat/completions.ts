@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertApiKey, pickAccount, readControlPlane } from "@/lib/control-plane";
+import { poolUnavailableMessage } from "@/lib/eligibility";
 import { getCircuit } from "@/lib/circuit";
 import { decide } from "@/lib/fault-matrix";
 import { enqueueChat, getJob, liveWorkerOnline, waitJob, cancelJob } from "@/lib/job-queue";
@@ -200,7 +201,10 @@ export async function runChat(
   let last: ChatFail = { ok: false, status: 503, error: "没有可调度账号" };
   for (let i = 0; i <= maxRetry; i++) {
     const account = await pickAccount("chatgpt", exclude);
-    if (!account) break;
+    if (!account) {
+      last = { ok: false, status: 503, error: poolUnavailableMessage("chatgpt", plane.accounts, plane.proxies, plane.settings) };
+      break;
+    }
     const queued = await enqueueChat(prompt, model, 90_000, images, {
       idempotencyKey,
       requestId: reqId,

@@ -63,6 +63,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const settings = useGateway((s) => s.settings);
   const [open, setOpen] = useState(false);
   const planeSnap = useRef("");
+  const planeLoaded = useRef(false);
 
   useEffect(() => {
     const unsub = useGateway.persist.onFinishHydration(() => setHydrated(true));
@@ -96,12 +97,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           proxies: plane.proxies || [],
           settings: { ...settings, ...(plane.settings || {}) },
         });
+        planeLoaded.current = true;
       })
       .catch(() => undefined);
   }, [hydrated]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !planeLoaded.current) return;
     const snap = JSON.stringify({ accounts, proxies, settings });
     if (!planeSnap.current || snap === planeSnap.current) return;
     const t = setTimeout(() => {

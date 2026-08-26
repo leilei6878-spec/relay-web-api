@@ -3,7 +3,7 @@ import { isCanaryAccount } from "./canary";
 import { canDispatch, recordCanaryResult, recordProviderFault } from "./circuit";
 import { readSessionJson, writeSessionFile } from "./chatgpt-runner";
 import { patchAccount, pickAccount, readControlPlane } from "./control-plane";
-import { coordCompareDel, coordDel, coordSet, coordSetNx } from "./coord";
+import { coordCompareDel, coordDel, coordGet, coordSet, coordSetNx } from "./coord";
 import { classifyError, decisionFor, normalizeError } from "./faults";
 import { clearJobEvents, publishJobEvent } from "./job-events";
 import { assertLease, issueLease, type Lease } from "./leases";
@@ -97,12 +97,15 @@ export async function enqueuePg(
   }
   if (!account) {
     if (opts.idempotencyKey) await coordDel(`idem:${opts.idempotencyKey}`);
+    const { poolUnavailableMessage } = await import("./eligibility");
+    const plane = await readControlPlane();
+    const extra: Record<string, string> = {};
+    for (const a of plane.accounts.filter((x) => x.platform === platform)) {
+      if (await coordGet(`account-lease:${a.id}`)) extra[a.id] = "正在执行其他任务，请稍候再测";
+    }
     return {
       ok: false as const,
-      error:
-        platform === "gemini"
-          ? "没有可调度的健康 Gemini 账号（需 Session + sticky，且未占用）"
-          : "没有可调度的健康 ChatGPT 账号（需 Session + sticky，且未占用）",
+      error: poolUnavailableMessage(platform, plane.accounts, plane.proxies, plane.settings, extra),
     };
   }
 
@@ -483,8 +486,9 @@ export async function cancelJobPg(id: string, error: string) {
     await dbUnlockAccount(current.accountId).catch(() => undefined);
   }
   await coordDel(`job-claim:${id}`);
+  const abandon = /TIMEOUT: wait deadline|REQUEST_CANCELLED|客户端断开/.test(error);
   let next: Job;
-  if ((current.attempts || 0) < maxRetry && current.status === "running" && !error.includes("REQUEST_CANCELLED")) {
+  if ((current.attempts || 0) < maxRetry && current.status === "running" && !abandon) {
     next = { ...current, status: "queued", error, fault: "infra", lease: undefined };
   } else {
     next = {
