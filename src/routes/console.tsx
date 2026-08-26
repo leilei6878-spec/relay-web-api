@@ -151,7 +151,8 @@ function Console() {
       if (kind === "chat" && ctype.includes("text/event-stream")) {
         setPhase("streaming");
         const assembled = await readSse(res, (delta, meta) => {
-          if (delta) setContent((c) => c + delta);
+          if (meta.replace && delta) setContent(delta);
+          else if (delta) setContent((c) => c + delta);
           if (meta.accountEmail) setAccount(meta.accountEmail);
           if (meta.mode) setMode(meta.mode);
           if (meta.phase) setStep(meta.phase);
@@ -467,7 +468,7 @@ function Console() {
 
 async function readSse(
   res: Response,
-  onDelta: (delta: string, meta: { accountEmail?: string; mode?: string; phase?: string }) => void,
+  onDelta: (delta: string, meta: { accountEmail?: string; mode?: string; phase?: string; replace?: boolean }) => void,
 ) {
   const reader = res.body?.getReader();
   if (!reader) return { error: { message: "无法读取流" } } as { error?: { message?: string }; text?: string; id?: string; mode?: string; accountEmail?: string };
@@ -494,18 +495,23 @@ async function readSse(
           id?: string;
           error?: { message?: string };
           choices?: { delta?: { content?: string } }[];
-          relay?: { accountEmail?: string; mode?: string; phase?: string };
+          relay?: { accountEmail?: string; mode?: string; phase?: string; finalText?: string };
         };
         if (json.id) id = json.id;
         if (json.relay?.accountEmail) accountEmail = json.relay.accountEmail;
         if (json.relay?.mode) mode = json.relay.mode;
         if (json.error?.message) error = json.error;
-        const piece = json.choices?.[0]?.delta?.content || "";
-        if (piece) {
-          text += piece;
-          onDelta(piece, { accountEmail, mode, phase: json.relay?.phase });
+        if (json.relay?.finalText) {
+          text = json.relay.finalText;
+          onDelta(json.relay.finalText, { accountEmail, mode, phase: json.relay.phase, replace: true });
         } else {
-          onDelta("", { accountEmail, mode, phase: json.relay?.phase });
+          const piece = json.choices?.[0]?.delta?.content || "";
+          if (piece) {
+            text += piece;
+            onDelta(piece, { accountEmail, mode, phase: json.relay?.phase });
+          } else {
+            onDelta("", { accountEmail, mode, phase: json.relay?.phase });
+          }
         }
       } catch {
         /* skip malformed chunk */

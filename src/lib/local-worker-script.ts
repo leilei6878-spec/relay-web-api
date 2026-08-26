@@ -617,8 +617,14 @@ def install_mut_observer(page, before):
             if (!t) return;
             if (t === window.__relayFull) return;
             let d = '';
-            if (t.startsWith(window.__relayPrev)) d = t.slice(window.__relayPrev.length);
-            else d = t;
+            const prev = window.__relayPrev || '';
+            if (t.startsWith(prev)) d = t.slice(prev.length);
+            else {
+              let i = 0;
+              const n = Math.min(prev.length, t.length);
+              while (i < n && prev[i] === t[i]) i++;
+              if (i >= Math.max(12, Math.floor(prev.length * 0.5))) d = t.slice(i);
+            }
             window.__relayPrev = t;
             window.__relayFull = t;
             if (d) window.__relayDeltas.push(d);
@@ -1267,14 +1273,19 @@ def run_chat(body):
             drained = drain_deltas(page)
             full = (drained.get("full") or "").strip()
             if usable_assistant_text(full):
-                if not first_delta:
-                    first_delta = True
-                    mark("T8")
-                    post_chunk(full)
+                piece = "".join(drained.get("deltas") or [])
+                if full != text:
                     last_change = time.time()
-                elif drained.get("deltas"):
+                if piece:
+                    if not first_delta:
+                        first_delta = True
+                        mark("T8")
+                    post_chunk(piece)
+                elif not text:
+                    if not first_delta:
+                        first_delta = True
+                        mark("T8")
                     post_chunk(full)
-                    last_change = time.time()
                 text = full
             idle = time.time() - last_change
             if text and not generating and idle >= (0.6 if has_images else 0.35):

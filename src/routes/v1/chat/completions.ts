@@ -4,7 +4,7 @@ import { poolUnavailableMessage } from "@/lib/eligibility";
 import { getCircuit } from "@/lib/circuit";
 import { decide } from "@/lib/fault-matrix";
 import { enqueueChat, getJob, liveWorkerOnline, waitJob, cancelJob } from "@/lib/job-queue";
-import { subscribeJob } from "@/lib/job-events";
+import { nextSseDelta, subscribeJob } from "@/lib/job-events";
 import { parseMessageContent } from "@/lib/media";
 import { prepareChatRequest } from "@/lib/provider/index";
 import type { ChatTurn } from "@/lib/provider/types";
@@ -404,7 +404,7 @@ export function streamChat(
               });
             }
             if (ev.type === "delta" && ev.text) {
-              const chunk = ev.text.startsWith(assembled) ? ev.text.slice(assembled.length) : ev.text;
+              const chunk = nextSseDelta(assembled, ev.text);
               if (chunk) {
                 assembled += chunk;
                 if (!firstSse) firstSse = Date.now();
@@ -447,12 +447,14 @@ export function streamChat(
           await finish();
           return;
         }
-        if (!assembled) {
+        const rest = nextSseDelta(assembled, text);
+        if (rest) {
+          assembled += rest;
           await send({
             id: `chatcmpl-${queued.job.id}`,
             object: "chat.completion.chunk",
             model,
-            choices: [{ index: 0, delta: { content: text } }],
+            choices: [{ index: 0, delta: { content: rest } }],
           });
         }
         await send({
@@ -474,6 +476,7 @@ export function streamChat(
             actualProfile: done.actualProfile || null,
             profileVerified: done.profileVerified ?? false,
             requestedProfile: model === "chatgpt-web-fast" ? "fast" : "auto",
+            finalText: text,
           },
         });
         await send(sseUsageChunk(model, queued.job.id, estimateTokens(prompt), estimateTokens(text)));

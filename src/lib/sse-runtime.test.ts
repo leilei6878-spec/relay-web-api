@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { attachSseLifecycle, sseUsageChunk } from "./sse-runtime.ts";
+import { nextSseDelta } from "./job-events.ts";
+
+test("nextSseDelta only appends new suffix", () => {
+  const a = "这张图属于宠物海报。";
+  assert.equal(nextSseDelta("", a), a);
+  assert.equal(nextSseDelta(a, a + " 7.6/10"), " 7.6/10");
+  assert.equal(nextSseDelta(a, a), "");
+  assert.equal(nextSseDelta(a, "| 维度 | 评分 |\\n" + a), "");
+});
 
 test("SSE timeout fires", async () => {
   const life = attachSseLifecycle({ timeoutMs: 20 });
