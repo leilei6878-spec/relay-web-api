@@ -3,7 +3,7 @@ export const LOCAL_WORKER = "http://127.0.0.1:18765";
 export function localWorkerScript() {
   return `#!/usr/bin/env python3
 # Relay 本机 ChatGPT Worker。保持窗口开着，平台试运行会连过来。
-import json, os, socket, ssl, subprocess, sys, tempfile, threading, time, base64
+import json, os, socket, ssl, subprocess, sys, tempfile, threading, time, base64, queue
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
@@ -404,6 +404,8 @@ def format_turns(turns):
     return "\\n\\n".join(blocks).strip()
 
 PW = None
+PW_THREAD = None
+PW_Q = queue.Queue()
 BROWSER_POOL = {}
 CTX_POOL = {}
 POOL_LOCK = threading.Lock()
@@ -412,12 +414,70 @@ MAX_CTX = int(os.environ.get("RELAY_MAX_CTX_PER_BROWSER") or "8")
 CTX_IDLE = int(os.environ.get("RELAY_CTX_IDLE") or "180")
 CTX_MAX_REQ = int(os.environ.get("RELAY_CTX_MAX_REQ") or "20")
 
+def reset_playwright():
+    global PW, BROWSER_POOL, CTX_POOL
+    for row in list(CTX_POOL.values()):
+        try:
+            if row.get("page"):
+                row["page"].close()
+        except Exception:
+            pass
+        try:
+            if row.get("ctx"):
+                row["ctx"].close()
+        except Exception:
+            pass
+    CTX_POOL.clear()
+    for b in list(BROWSER_POOL.values()):
+        try:
+            b.close()
+        except Exception:
+            pass
+    BROWSER_POOL.clear()
+    try:
+        if PW:
+            PW.stop()
+    except Exception:
+        pass
+    PW = None
+
 def playwright_inst():
     global PW
     if PW is None:
         from playwright.sync_api import sync_playwright
         PW = sync_playwright().start()
     return PW
+
+def pw_loop():
+    global PW_THREAD
+    PW_THREAD = threading.current_thread()
+    try:
+        playwright_inst()
+        proxy = pick_proxy() or {"server": "socks5://127.0.0.1:18080"}
+        get_pooled_context(proxy, None, "_warm")
+        print("browser warm", flush=True)
+    except Exception as e:
+        print("warmup fail", e, flush=True)
+    while True:
+        item = PW_Q.get()
+        if item is None:
+            break
+        body, box = item
+        try:
+            result = exec_job_run(body)
+        except Exception as e:
+            msg = str(e)
+            if "cannot switch to a different thread" in msg or "has exited" in msg:
+                reset_playwright()
+                try:
+                    playwright_inst()
+                    result = exec_job_run(body)
+                except Exception as e2:
+                    result = {"ok": False, "error": "WORKER_CRASH: %s" % str(e2)[:240], "fault": "worker"}
+            else:
+                result = {"ok": False, "error": "WORKER_CRASH: %s" % msg[:240], "fault": "worker"}
+        box["result"] = result
+        box["ev"].set()
 
 def pool_enabled():
     if os.environ.get("RELAY_TEST_URL"):
@@ -847,6 +907,17 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
 
 def exec_job(body):
+    if PW_THREAD is not None and threading.current_thread() is PW_THREAD:
+        return exec_job_run(body)
+    ev = threading.Event()
+    box = {"ev": ev, "result": None}
+    PW_Q.put((body, box))
+    timeout = int(body.get("timeoutMs") or 90000) / 1000.0 + 30
+    if not ev.wait(timeout):
+        return {"ok": False, "error": "WORKER_CRASH: playwright queue timeout", "fault": "worker"}
+    return box["result"] or {"ok": False, "error": "WORKER_CRASH: empty result", "fault": "worker"}
+
+def exec_job_run(body):
     global ACTIVE
     prompt, images = extract_prompt_images(body)
     body = dict(body)
@@ -1185,14 +1256,7 @@ if __name__ == "__main__":
     print("Relay Worker  http://127.0.0.1:%d" % PORT)
     if pick_proxy():
         print("已检测到本机代理")
-    def warmup():
-        try:
-            proxy = pick_proxy() or {"server": "socks5://127.0.0.1:18080"}
-            get_pooled_context(proxy, None, "_warm")
-            print("browser warm", flush=True)
-        except Exception as e:
-            print("warmup fail", e, flush=True)
-    threading.Thread(target=warmup, daemon=True).start()
+    threading.Thread(target=pw_loop, daemon=True).start()
     threading.Thread(target=beat_loop, daemon=True).start()
     threading.Thread(target=poll_gateway, daemon=True).start()
     Server(("127.0.0.1", PORT), H).serve_forever()
