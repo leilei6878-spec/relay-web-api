@@ -27,6 +27,7 @@ node --experimental-strip-types --no-warnings scripts/bootstrap-runtime.mjs >/tm
 WORKER_TOKEN=$(tr -d '\n' < /workspace/storage/worker-token.txt)
 fuser -k 18765/tcp >/dev/null 2>&1 || true
 fuser -k 18766/tcp >/dev/null 2>&1 || true
+sleep 0.6
 # Official daemon: worker credential only, never the customer API key.
 # Headed Chromium under Xvfb so ChatGPT Cloudflare Turnstile can pass.
 RELAY_HEADLESS=0 RELAY_WORKER_PORT=18766 RELAY_CAPACITY=3 \

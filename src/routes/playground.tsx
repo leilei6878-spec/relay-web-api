@@ -141,12 +141,27 @@ pause
         payload,
       }),
     });
-    const body = (await res.json()) as {
+    const rawText = await res.text();
+    let body: {
       error?: { message?: string };
       choices?: { message?: { content?: string } }[];
       data?: { url?: string }[];
       relay?: { accountEmail?: string; mode?: string };
-    };
+    } = {};
+    if (!rawText.trim()) {
+      return {
+        ok: false as const,
+        error:
+          res.status === 504
+            ? "TIMEOUT: 图生图超时，网关没有返回内容。请确认参考图已挂上后重试。"
+            : `网关 ${res.status || 0}：空响应`,
+      };
+    }
+    try {
+      body = JSON.parse(rawText) as typeof body;
+    } catch {
+      return { ok: false as const, error: `HTTP ${res.status}：响应不是 JSON` };
+    }
     if (!res.ok) return { ok: false as const, error: body.error?.message || `网关 ${res.status}` };
     if (kind === "chat") {
       const text = body.choices?.[0]?.message?.content;

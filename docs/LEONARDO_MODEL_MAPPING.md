@@ -19,7 +19,8 @@ Relay never exposes Leonardo account emails, cookies, or internal generation ids
 |---|---|---|
 | prompt | required | `#home-prompt-textarea` **VERIFIED** public home |
 | n | 1–8 | Quantity control **UNVERIFIED**. n=1 proceeds. n>1 without a control → `LEONARDO_DOM_CHANGED` |
-| size | `1024x1024` and `\d+x\d+` | Mapped to nearest of 1:1, 2:3, 16:9, 4:3, 4:5, 9:16 (**VERIFIED** public home) |
+| size | OpenAI `1024x1024` / `1536x1024` / `1024x1536` / `auto`, Google `16:9` + `1K`/`2K`/`4K`, or `WxH` | Snapped to native pixels then applied as aspect + dimensions (not square override) |
+
 | quality | LOW/MEDIUM/HIGH | Control **UNVERIFIED**. MEDIUM default is skipped. HIGH/LOW without a control → fail closed |
 | images[] | max 6 | `Add image reference` + `input[type=file]` **VERIFIED** public home |
 | seed / style / strength / enhance | rejected unless recon confirms | not advertised |

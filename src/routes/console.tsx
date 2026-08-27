@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { ImageInput } from "@/components/image-input";
+import { ASPECT_PRESETS, resolutionOptionsFor, type ImageAspect, type ImageK } from "@/lib/provider/image-size";
 
 export const Route = createFileRoute("/console")({ component: Page });
 
@@ -22,21 +23,7 @@ const IMAGE_MODELS = [
   { id: "gemini-image", label: "Gemini / 出图" },
 ];
 
-const NANO_SIZES = [
-  { id: "1024x1024", label: "1:1 小 1024×1024" },
-  { id: "2048x2048", label: "1:1 中 2048×2048" },
-  { id: "4096x4096", label: "1:1 大 4096×4096" },
-  { id: "848x1264", label: "2:3 竖图" },
-  { id: "1264x848", label: "16:9 横图" },
-];
-const GPT_SIZES = [
-  { id: "1024x1024", label: "1:1 小 1024×1024" },
-  { id: "2048x2048", label: "1:1 中 2048×2048" },
-  { id: "2880x2880", label: "1:1 大 2880×2880" },
-  { id: "848x1264", label: "2:3 竖图" },
-  { id: "1264x848", label: "16:9 横图" },
-];
-
+const MAX_PROMPT_CHARS = 21_000;
 type Phase = "idle" | "sending" | "streaming" | "done" | "error";
 type Kind = "chat" | "image";
 type HistoryItem = {
@@ -67,9 +54,12 @@ function Console() {
   const [model, setModel] = useState("gpt-5.6");
   const [imageModel, setImageModel] = useState("leonardo-gemini");
   const [imageN, setImageN] = useState(1);
-  const [imageSize, setImageSize] = useState("1024x1024");
+  const [imageAspect, setImageAspect] = useState<ImageAspect>("16:9");
+  const [imageK, setImageK] = useState<ImageK>("1K");
   const [imageQuality, setImageQuality] = useState("MEDIUM");
-  const imageSizes = imageModel.includes("gpt-image") ? GPT_SIZES : NANO_SIZES;
+  const resolutions = resolutionOptionsFor(imageModel, imageAspect);
+  const imageSize = (resolutions.find((r) => r.k === imageK) || resolutions[0])?.size || "1376x768";
+  const showQuality = imageModel.includes("gpt-image") || imageModel.startsWith("dall-e");
   const [apiKey, setApiKey] = useState("");
   const [prompt, setPrompt] = useState("你好，你是什么模型？用三句话说明。");
   const [images, setImages] = useState<string[]>([]);
@@ -86,6 +76,7 @@ function Console() {
   const [tab, setTab] = useState<"result" | "request" | "response">("result");
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [workerOnline, setWorkerOnline] = useState<boolean | null>(null);
+  const [poolNote, setPoolNote] = useState("");
   const started = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -101,6 +92,34 @@ function Console() {
   }, []);
 
   useEffect(() => {
+    const load = () =>
+      fetch("/api/admin/plane", { credentials: "include" })
+        .then(
+          (r) =>
+            r.json() as Promise<{
+              accounts?: { platform?: string; status?: string; email?: string; lastError?: string | null }[];
+            }>,
+        )
+        .then((b) => {
+          const need = imageModel === "gemini-image" ? "gemini" : "leonardo";
+          const mine = (b.accounts || []).filter((a) => a.platform === need);
+          const ok = mine.filter((a) => a.status === "healthy" || a.status === "probing");
+          if (ok.length) {
+            setPoolNote("");
+            return;
+          }
+          const row = mine[0];
+          const why = row?.lastError || row?.status || "未添加";
+          const label = need === "gemini" ? "Gemini" : "Leonardo";
+          setPoolNote(
+            `${label} 网页号不可用（${row?.email || "无账号"}：${why}）。现在发出去会立刻失败，请先到「账号池」完成登录后再测图生图。`,
+          );
+        })
+        .catch(() => setPoolNote(""));
+    void load();
+  }, [imageModel]);
+
+  useEffect(() => {
     if (phase !== "sending" && phase !== "streaming") return;
     const t = setInterval(() => setElapsed(Date.now() - started.current), 80);
     return () => clearInterval(t);
@@ -114,6 +133,8 @@ function Console() {
         model: imageModel,
         n: imageN,
         size: imageSize,
+        aspect_ratio: imageAspect,
+        image_size: imageK,
         ...(imageModel.includes("gpt-image") ? { quality: imageQuality } : {}),
         ...(images[0] ? { image: images[0], images } : {}),
       };
@@ -126,11 +147,15 @@ function Console() {
             ...images.map((url) => ({ type: "image_url", image_url: { url } })),
           ];
     return { model, stream: true, messages: [{ role: "user", content }] };
-  }, [kind, model, imageModel, imageN, imageSize, imageQuality, prompt, images]);
+  }, [kind, model, imageModel, imageN, imageSize, imageAspect, imageK, imageQuality, prompt, images]);
 
   async function run() {
     if (!prompt.trim() && images.length === 0) {
       toast.error("请输入内容或添加图片");
+      return;
+    }
+    if (prompt.length > MAX_PROMPT_CHARS) {
+      toast.error(`内容超过 ${MAX_PROMPT_CHARS} 字，请删减后再发`);
       return;
     }
     abortRef.current?.abort();
@@ -224,23 +249,45 @@ function Console() {
         });
         return;
       }
-      const json = (await res.json()) as {
+      const rawText = await res.text();
+      let json: {
         error?: { message?: string };
         choices?: { message?: { content?: string } }[];
-        data?: { url?: string }[];
-        relay?: { accountEmail?: string; mode?: string };
-      };
+        data?: { url?: string; b64_json?: string }[];
+        relay?: { accountEmail?: string; mode?: string; size?: string };
+      } = {};
+      if (!rawText.trim()) {
+        json = {
+          error: {
+            message:
+              res.status === 504
+                ? "TIMEOUT: 图生图超时，网关没有返回内容。请确认参考图已挂上后重试。"
+                : `HTTP ${res.status || 0}：空响应`,
+          },
+        };
+      } else {
+        try {
+          json = JSON.parse(rawText) as typeof json;
+        } catch {
+          json = {
+            error: {
+              message: `HTTP ${res.status}：响应不是 JSON（${rawText.slice(0, 120) || "empty"}）`,
+            },
+          };
+        }
+      }
       const latencyMs = Date.now() - started.current;
       setElapsed(latencyMs);
-      setRawRes(JSON.stringify(json, null, 2));
+      setRawRes(rawText.trim() ? rawText : JSON.stringify(json, null, 2));
       setAccount(json.relay?.accountEmail || "");
       setMode(json.relay?.mode || "");
-      if (!res.ok) {
+      if (!res.ok || json.error) {
         setPhase("error");
         setContent(json.error?.message || `HTTP ${res.status}`);
         toast.error(json.error?.message || `HTTP ${res.status}`);
       } else if (kind === "image") {
-        const url = json.data?.[0]?.url || "";
+        const first = json.data?.[0];
+        const url = first?.url || (first?.b64_json ? `data:image/png;base64,${first.b64_json}` : "");
         setImageUrl(url);
         setPhase(url ? "done" : "error");
         if (!url) toast.error("未返回图片");
@@ -249,6 +296,8 @@ function Console() {
         setContent(text);
         setPhase(text ? "done" : "error");
       }
+      const first = json.data?.[0];
+      const histUrl = first?.url || (first?.b64_json ? `data:image/png;base64,${first.b64_json}` : "");
       pushHistory({
         id: String(Date.now()),
         at: new Date().toISOString(),
@@ -258,13 +307,17 @@ function Console() {
         status: res.status,
         latencyMs,
         content: json.choices?.[0]?.message?.content || json.error?.message || "",
-        imageUrl: json.data?.[0]?.url || "",
+        imageUrl: histUrl,
         mode: json.relay?.mode,
         account: json.relay?.accountEmail,
         raw: json,
       });
     } catch (err) {
-      if ((err as { name?: string }).name === "AbortError") return;
+      if ((err as { name?: string }).name === "AbortError") {
+        setPhase("error");
+        setContent("已停止");
+        return;
+      }
       setPhase("error");
       setContent(err instanceof Error ? err.message : "请求失败");
       toast.error("请求失败");
@@ -289,15 +342,18 @@ function Console() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <header>
-        <h1 className="text-2xl font-medium tracking-tight">API 实时测试</h1>
+        <h1 className="text-2xl font-medium tracking-tight">API 实时测试 · 比例 + 分辨率</h1>
         <p className="mt-2 text-sm text-muted">
-          走正式开放接口。执行器默认在服务器上跑；离线时返回 503，不会换模型。
+          先选比例，再选 Small / Medium / Large。16:9 Small 是 1376×768，不是方图。参考图必须出现缩略图后才会出图。
         </p>
       </header>
       {workerOnline === false && (
         <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-danger">
           服务器执行器离线，正在自动拉起。请稍后再发一次。
         </p>
+      )}
+      {kind === "image" && poolNote && (
+        <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-danger">{poolNote}</p>
       )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_1fr]">
@@ -344,12 +400,7 @@ function Console() {
               <select
                 className="h-11 w-full rounded-sm border border-border bg-elevated px-3 text-sm"
                 value={imageModel}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setImageModel(next);
-                  const sizes = next.includes("gpt-image") ? GPT_SIZES : NANO_SIZES;
-                  if (!sizes.some((s) => s.id === imageSize)) setImageSize(sizes[0]?.id || "1024x1024");
-                }}
+                onChange={(e) => setImageModel(e.target.value)}
               >
                 {IMAGE_MODELS.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -359,22 +410,45 @@ function Console() {
               </select>
             </label>
           )}
-          {kind === "image" && imageModel.startsWith("leonardo-") && (
+          {kind === "image" && (
             <>
               <label className="block text-sm">
-                <span className="mb-1 block text-xs text-muted">尺寸</span>
+                <span className="mb-1 block text-xs text-muted">比例（必选）· Facebook 16:9 / Twitter 4:3 / Instagram 4:5 / TikTok 9:16 / Ultrawide 21:9</span>
                 <select
                   className="h-11 w-full rounded-sm border border-border bg-elevated px-3 text-sm"
-                  value={imageSize}
-                  onChange={(e) => setImageSize(e.target.value)}
+                  value={imageAspect}
+                  onChange={(e) => setImageAspect(e.target.value as ImageAspect)}
                 >
-                {imageSizes.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.label}
+                  {ASPECT_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.hint ? `${p.label} · ${p.hint}` : p.label}
                     </option>
                   ))}
                 </select>
               </label>
+              <div className="block text-sm">
+                <span className="mb-1 block text-xs text-muted">分辨率（必选）· 选比例后再选 Small / Medium / Large</span>
+                <div className="grid grid-cols-3 gap-2">
+                  {resolutions.map((r) => (
+                    <button
+                      key={r.k}
+                      type="button"
+                      onClick={() => setImageK(r.k)}
+                      className={`rounded-sm border px-2 py-2 text-center ${
+                        imageK === r.k ? "border-accent bg-elevated" : "border-border bg-elevated/60"
+                      }`}
+                    >
+                      <span className="block text-sm">{r.tier}</span>
+                      <span className="mt-0.5 block font-mono text-[11px] text-muted">
+                        {r.w}×{r.h}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <span className="mt-1 block font-mono text-[11px] text-subtle">
+                  当前 {imageAspect} · {imageK} · {imageSize.replace("x", "×")}
+                </span>
+              </div>
               <label className="block text-sm">
                 <span className="mb-1 block text-xs text-muted">张数</span>
                 <select
@@ -389,7 +463,7 @@ function Console() {
                   ))}
                 </select>
               </label>
-              {imageModel.includes("gpt-image") && (
+              {showQuality && (
                 <label className="block text-sm">
                   <span className="mb-1 block text-xs text-muted">画质</span>
                   <select
@@ -406,14 +480,24 @@ function Console() {
             </>
           )}
           <label className="block text-sm">
-            <span className="mb-1 block text-xs text-muted">内容</span>
-            <Textarea className="min-h-32" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+            <span className="mb-1 flex items-center justify-between gap-2 text-xs text-muted">
+              <span>内容</span>
+              <span className={`font-mono tabular-nums ${prompt.length >= MAX_PROMPT_CHARS ? "text-danger" : "text-subtle"}`}>
+                {prompt.length} / {MAX_PROMPT_CHARS}
+              </span>
+            </span>
+            <Textarea
+              className="min-h-32"
+              value={prompt}
+              maxLength={MAX_PROMPT_CHARS}
+              onChange={(e) => setPrompt(e.target.value.slice(0, MAX_PROMPT_CHARS))}
+            />
           </label>
           <ImageInput
             images={images}
             onChange={setImages}
-            hint={kind === "chat" ? "对话识图，OpenAI Vision 格式" : imageModel.startsWith("leonardo-") ? "Leonardo 参考图最多 6 张" : "出图参考图，写入 image / images"}
-            max={kind === "image" && imageModel.startsWith("leonardo-") ? 6 : 4}
+            hint={kind === "chat" ? "对话识图，OpenAI Vision 格式" : "参考图写入 image / images（Leonardo 最多 6 张）。未出现缩略图不会出图。"}
+            max={kind === "image" ? 6 : 4}
           />
           <div className="flex gap-2">
             <Button className="flex-1" type="button" onClick={() => void run()} disabled={phase === "sending" || phase === "streaming"}>
@@ -441,7 +525,9 @@ function Console() {
             {account && <span className="font-mono text-[11px] text-subtle">{account}</span>}
             {step && <span className="text-[11px] text-muted">{stepLabel(step)}</span>}
             {mode && (
-              <Badge tone={mode === "live" ? "ok" : "warn"}>{mode === "live" ? "真网页 Worker" : "预览回写"}</Badge>
+              <Badge tone={mode === "live" || mode === "web_account" ? "ok" : "warn"}>
+                {mode === "live" || mode === "web_account" ? "真网页 Worker" : mode === "preview" ? "预览回写" : mode}
+              </Badge>
             )}
           </div>
 
@@ -474,7 +560,14 @@ function Console() {
                   {phase === "idle" && <p className="text-sm text-muted">发送后，这里实时显示接口返回。</p>}
                   {content && <p className="whitespace-pre-wrap text-sm leading-relaxed">{content}</p>}
                   {imageUrl && (
-                    <img src={imageUrl} alt="生成结果" className="mt-3 max-h-96 w-full rounded-md object-contain" />
+                    <>
+                      <img src={imageUrl} alt="生成结果" className="mt-3 max-h-96 w-full rounded-md object-contain" />
+                      {kind === "image" && (
+                        <p className="mt-2 font-mono text-[11px] text-subtle">
+                          请求 {imageAspect} · {imageK} · {imageSize.replace("x", "×")}。横图不应是方图。
+                        </p>
+                      )}
+                    </>
                   )}
                   {!content && !imageUrl && phase === "sending" && (
                     <p className="text-sm text-muted">请求已发出…</p>

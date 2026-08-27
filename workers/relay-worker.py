@@ -197,7 +197,8 @@ def extract_prompt_images(body):
                     else:
                         add(part.get("image_url") or part.get("image") or part)
             prompt = "\n".join([t for t in texts if t]).strip() or prompt
-    return prompt, images[:4]
+    cap = 6 if (body.get("platform") == "leonardo" or is_leonardo_model(body.get("model"))) else 4
+    return prompt, images[:cap]
 
 def materialize_images(images):
     paths = []
@@ -217,9 +218,32 @@ def materialize_images(images):
                 with open(path, "wb") as f:
                     f.write(base64.b64decode(b64))
                 paths.append(path)
+            elif url.startswith("http://") or url.startswith("https://"):
+                import urllib.request
+                path = os.path.join(tempfile.gettempdir(), "relay-img-%s-%d.bin" % (os.getpid(), i))
+                try:
+                    urllib.request.urlretrieve(url, path)
+                    if os.path.getsize(path) > 32:
+                        paths.append(path)
+                except Exception:
+                    continue
         except Exception:
             continue
     return paths
+
+def ref_body_sizes(images):
+    out = set()
+    for item in images or []:
+        url = item if isinstance(item, str) else ((item or {}).get("url") if isinstance(item, dict) else "")
+        if not isinstance(url, str) or not url.startswith("data:") or "," not in url:
+            continue
+        try:
+            raw = base64.b64decode(url.split(",", 1)[1])
+            if raw:
+                out.add(len(raw))
+        except Exception:
+            pass
+    return out
 
 def attach_images(page, images):
     paths = materialize_images(images)
@@ -271,17 +295,25 @@ def wait_composer_files(page, timeout_ms=8000):
 
 def leonardo_refs_attached(page):
     try:
-        if page.locator('button[aria-label*="Remove" i], button[aria-label*="remove image" i], button[aria-label*="Delete" i]').count() > 0:
-            return True
-        thumbs = page.evaluate("""() => {
+        n = page.evaluate("""() => {
+          const remove = [...document.querySelectorAll('button')].filter((b) => {
+            const a = (b.getAttribute('aria-label') || '').toLowerCase();
+            const t = (b.innerText || '').trim().toLowerCase();
+            return /remove|delete|clear reference|remove image/.test(a) || t === '×' || t === 'x';
+          });
           const ta = document.querySelector('#home-prompt-textarea, textarea, div[contenteditable="true"]');
           let root = ta ? ta.parentElement : document.body;
-          for (let i = 0; i < 5 && root && root !== document.body; i++) root = root.parentElement;
+          for (let i = 0; i < 6 && root && root !== document.body; i++) root = root.parentElement;
           root = root || document.body;
-          const imgs = [...root.querySelectorAll('img')].filter((im) => (im.naturalWidth || im.width || 0) >= 24);
-          return imgs.length;
+          const thumbs = [...root.querySelectorAll('img')].filter((im) => {
+            const r = im.getBoundingClientRect();
+            const w = im.naturalWidth || im.width || r.width || 0;
+            const h = im.naturalHeight || im.height || r.height || 0;
+            return w >= 24 && w <= 320 && h >= 24 && h <= 320 && r.width >= 24 && r.height >= 24 && r.bottom > 0 && r.top < window.innerHeight;
+          });
+          return { remove: remove.length, thumbs: thumbs.length };
         }""")
-        if int(thumbs or 0) > 0:
+        if int((n or {}).get("remove") or 0) > 0 or int((n or {}).get("thumbs") or 0) > 0:
             return True
     except Exception:
         pass
@@ -362,7 +394,8 @@ def attach_leonardo_refs(page, images):
             return False
 
     try:
-        if try_set_files() or attached["ok"]:
+        try_set_files()
+        if wait_leonardo_refs(page, 2500):
             return None
         opened = page.evaluate("""() => {
           const ta = document.querySelector('#home-prompt-textarea, textarea[placeholder*="prompt" i], textarea');
@@ -404,7 +437,8 @@ def attach_leonardo_refs(page, images):
             page.wait_for_selector("input[type=file]", timeout=2500, state="attached")
         except Exception:
             pass
-        if try_set_files() or attached["ok"] or leonardo_refs_attached(page):
+        try_set_files()
+        if wait_leonardo_refs(page, 4000):
             return None
         for name in ("Image Guidance", "upload image", "upload", "style reference", "content reference"):
             js_click(name)
@@ -413,7 +447,8 @@ def attach_leonardo_refs(page, images):
                 page.wait_for_selector("input[type=file]", timeout=1200, state="attached")
             except Exception:
                 pass
-            if try_set_files() or attached["ok"] or leonardo_refs_attached(page):
+            try_set_files()
+            if wait_leonardo_refs(page, 2500):
                 return None
         try:
             dump = page.evaluate("""() => [...document.querySelectorAll('button, [role=button], label, input[type=file]')].slice(0, 120).map((e) => ((e.getAttribute('aria-label') || '') + '|' + ((e.innerText || '').trim().slice(0, 36)) + '|' + (e.getAttribute('type') || '') + '|' + e.tagName)).filter((t) => /image|upload|ref|file|add|guid|attach|photo|drop/i.test(t))""")
@@ -421,7 +456,9 @@ def attach_leonardo_refs(page, images):
             page.screenshot(path="/tmp/leo-upload.png", timeout=4000)
         except Exception:
             pass
-        return "LEONARDO_DOM_CHANGED: file input missing"
+        if leonardo_refs_attached(page):
+            return None
+        return "LEONARDO_DOM_CHANGED: reference image did not attach"
     finally:
         try:
             page.remove_listener("filechooser", on_chooser)
@@ -430,10 +467,11 @@ def attach_leonardo_refs(page, images):
                 page.off("filechooser", on_chooser)
             except Exception:
                 pass
-        try:
-            page.keyboard.press("Escape")
-        except Exception:
-            pass
+        if not leonardo_refs_attached(page):
+            try:
+                page.keyboard.press("Escape")
+            except Exception:
+                pass
 
 
 def leonardo_js_fill(page, prompt):
@@ -478,6 +516,39 @@ def leonardo_js_generate(page):
     except Exception as e:
         print("leonardo generate fail", str(e)[:100], flush=True)
         return False
+
+
+def wait_leonardo_generate_ready(page, timeout_ms=20000):
+    deadline = time.time() + timeout_ms / 1000.0
+    while time.time() < deadline:
+        try:
+            ready = page.evaluate("""() => {
+              const b = document.querySelector('button[aria-label="Generate"], button[aria-label*="Generate" i]');
+              if (b && !b.disabled && b.getAttribute('aria-disabled') !== 'true') return true;
+              const t = [...document.querySelectorAll('button')].find((e) => /^(generate|create)$/i.test((e.innerText || '').trim()));
+              return !!(t && !t.disabled && t.getAttribute('aria-disabled') !== 'true');
+            }""")
+            if ready:
+                return True
+        except Exception:
+            pass
+        try:
+            page.wait_for_timeout(280)
+        except Exception:
+            time.sleep(0.28)
+    return False
+
+
+def wait_leonardo_refs(page, timeout_ms=8000):
+    deadline = time.time() + timeout_ms / 1000.0
+    while time.time() < deadline:
+        if leonardo_refs_attached(page):
+            return True
+        try:
+            page.wait_for_timeout(250)
+        except Exception:
+            time.sleep(0.25)
+    return leonardo_refs_attached(page)
 
 
 # Ignore ChatGPT placeholders such as "Analyzing image" so vision waits for the real answer.
@@ -1635,7 +1706,7 @@ class H(BaseHTTPRequestHandler):
             body = {}
         if self.path in ("/image", "/v1/images/generations", "/v1/images/edits"):
             model = (body.get("model") or "")
-            body["platform"] = "leonardo" if str(model).startswith("leonardo-") else "gemini"
+            body["platform"] = "leonardo" if is_leonardo_model(model) else "gemini"
         try:
             result = exec_job(body)
         except Exception as e:
@@ -1673,8 +1744,8 @@ def exec_job_run(body):
     account_lock(aid).acquire()
     ACTIVE += 1
     try:
-        if body.get("platform") in ("gemini", "image", "leonardo") or body.get("kind") == "image":
-            if body.get("platform") == "leonardo" or str(body.get("model") or "").startswith("leonardo-"):
+        if body.get("platform") in ("gemini", "image", "leonardo") or body.get("kind") in ("image", "edit"):
+            if body.get("platform") == "leonardo" or is_leonardo_model(body.get("model")):
                 return run_leonardo(body)
             return run_image(body)
         return run_chat(body)
@@ -1726,7 +1797,6 @@ def run_image(body):
         if pst in ("LOGIN_REQUIRED", "CHALLENGE", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
             err, fault = page_state_error(pst, False)
             return {"ok": False, "error": err, "fault": fault, "pageState": pst}
-        baseline = snapshot_image_srcs(page)
         attach_images(page, images)
         box, _ = pick_locator(page, inp, 4)
         if box is None:
@@ -1744,6 +1814,8 @@ def run_image(body):
             }
         if not fill_composer(page, box, prompt):
             return {"ok": False, "error": "PROVIDER_DOM_CHANGED: cannot fill composer", "fault": "provider"}
+        apply_gemini_aspect(page, body.get("aspect") or size_to_aspect(body.get("size") or "1:1"))
+        baseline = snapshot_image_srcs(page)
         send_btn, _ = pick_locator(page, send, 4)
         click_send(page, send_btn)
         deadline = time.time() + int(body.get("timeoutMs") or 90000) / 1000
@@ -1834,19 +1906,376 @@ def make_image(prompt, images=None):
     return {"ok": True, "url": "data:image/svg+xml;charset=utf-8," + urllib.parse.quote(svg)}
 
 def size_to_aspect(size):
+    raw = str(size or "1024x1024").strip().replace("：", ":").replace("/", ":")
+    low = raw.lower().replace("×", "x").replace(" ", "")
+    named = {
+        "1:1": "1:1", "3:2": "3:2", "2:3": "2:3", "4:3": "4:3", "3:4": "3:4",
+        "16:9": "16:9", "9:16": "9:16", "4:5": "4:5", "5:4": "5:4", "21:9": "21:9",
+        "square": "1:1", "landscape": "16:9", "widescreen": "16:9", "portrait": "9:16",
+    }
+    if low in named:
+        return named[low]
+    native = {
+        (1024, 1024): "1:1", (2048, 2048): "1:1", (4096, 4096): "1:1", (2880, 2880): "1:1",
+        (1264, 848): "3:2", (2528, 1696): "3:2", (1536, 1024): "3:2",
+        (848, 1264): "2:3", (1696, 2528): "2:3", (1024, 1536): "2:3",
+        (1376, 768): "16:9", (2752, 1536): "16:9", (5504, 3072): "16:9", (2048, 1152): "16:9", (3840, 2160): "16:9",
+        (768, 1376): "9:16", (1536, 2752): "9:16", (3072, 5504): "9:16", (1152, 2048): "9:16", (2160, 3840): "9:16",
+        (1200, 896): "4:3", (2400, 1792): "4:3", (896, 1200): "3:4",
+        (928, 1152): "4:5", (1856, 2304): "4:5", (1152, 928): "5:4",
+        (1584, 672): "21:9", (3168, 1344): "21:9", (6336, 2688): "21:9",
+    }
     try:
-        parts = str(size or "1024x1024").lower().replace(" ", "").split("x")
+        parts = low.split("x")
         w, h = int(parts[0]), int(parts[1])
+        if (w, h) in native:
+            return native[(w, h)]
         r = w / float(h)
     except Exception:
         return "1:1"
-    opts = [("1:1", 1.0), ("4:3", 4.0/3), ("16:9", 16.0/9), ("4:5", 4.0/5), ("2:3", 2.0/3), ("9:16", 9.0/16)]
+    opts = [("1:1", 1.0), ("3:2", 1.5), ("2:3", 2.0/3), ("4:3", 4.0/3), ("3:4", 0.75), ("16:9", 16.0/9), ("9:16", 9.0/16), ("4:5", 0.8), ("5:4", 1.25), ("21:9", 21.0/9)]
     best, dist = "1:1", 99.0
     for lab, ar in opts:
         d = abs(r - ar)
         if d < dist:
             dist, best = d, lab
     return best
+
+NATIVE_1K = {
+    "1:1": (1024, 1024), "3:2": (1264, 848), "2:3": (848, 1264),
+    "4:3": (1200, 896), "3:4": (896, 1200), "16:9": (1376, 768), "9:16": (768, 1376),
+    "4:5": (928, 1152), "5:4": (1152, 928), "21:9": (1584, 672),
+}
+
+def parse_size_wh(size):
+    raw = str(size or "1024x1024").strip().lower().replace("×", "x").replace(" ", "")
+    if raw in ("", "auto"):
+        return 1024, 1024
+    if raw in ("1k", "small"):
+        return 1024, 1024
+    if raw in ("2k", "medium"):
+        return 2048, 2048
+    if raw in ("4k", "large"):
+        return 4096, 4096
+    if raw in NATIVE_1K:
+        return NATIVE_1K[raw]
+    try:
+        parts = raw.split("x")
+        return int(parts[0]), int(parts[1])
+    except Exception:
+        return 1024, 1024
+
+def size_tier(w, h, gpt):
+    m = max(w, h)
+    if gpt:
+        if m >= 2500:
+            return "Large", 2880
+        if m >= 1536:
+            return "Medium", 2048
+        return "Small", 1024
+    if m >= 3072:
+        return "Large", 4096
+    if m >= 1536:
+        return "Medium", 2048
+    return "Small", 1024
+
+def click_leonardo_aspect(page, aspect):
+    aspect = str(aspect or "1:1").strip()
+    presets = {
+        "16:9": ["Facebook (16:9)", "Desktop (16:9)", "Facebook", "Desktop"],
+        "9:16": ["TikTok (9:16)", "Mobile (9:16)", "TikTok", "Mobile"],
+        "4:3": ["Twitter (4:3)", "Twitter"],
+        "4:5": ["Instagram (4:5)", "Instagram"],
+        "1:1": ["Square (1:1)", "Square"],
+        "21:9": ["Ultrawide (21:9)", "Ultrawide"],
+        "2:3": ["2:3"],
+        "3:2": ["3:2"],
+        "3:4": ["3:4"],
+        "5:4": ["5:4"],
+    }.get(aspect, [aspect])
+    how = ""
+    try:
+        how = page.evaluate(
+            """(args) => {
+              const aspect = String(args.aspect || '1:1');
+              const vis = (el) => {
+                const r = el.getBoundingClientRect();
+                const st = getComputedStyle(el);
+                return r.width > 4 && r.height > 4 && r.bottom > 0 && r.top < window.innerHeight && st.visibility !== 'hidden' && st.display !== 'none';
+              };
+              const nodes = [...document.querySelectorAll('button, [role=button], [role=radio], [role=option], [role=menuitem], [data-radix-collection-item]')];
+              const buttons = nodes.filter(vis);
+              const linesOf = (el) => ((el.innerText || '').trim().split('\n').map((s) => s.trim()).filter(Boolean));
+              const selected = (el) => el.getAttribute('aria-pressed') === 'true' || el.getAttribute('data-state') === 'on' || el.getAttribute('aria-checked') === 'true';
+              const chip = buttons.find((e) => {
+                const lines = linesOf(e);
+                const t = lines.join(' ');
+                if (lines.includes(aspect) && t.length <= aspect.length + 16) return true;
+                const a = (e.getAttribute('aria-label') || '').trim();
+                return a === aspect || a === ('Aspect ratio: ' + aspect);
+              });
+              if (chip) {
+                if (selected(chip)) return 'chip-already';
+                chip.click();
+                return 'chip';
+              }
+              const custom = buttons.find((e) => {
+                const lines = linesOf(e);
+                const a = (e.getAttribute('aria-label') || '').trim();
+                return lines.includes('Custom') || /^custom$/i.test(a);
+              });
+              if (custom) {
+                custom.click();
+                return 'custom-open';
+              }
+              const opener = buttons.find((e) => /^Aspect ratio:/i.test((e.getAttribute('aria-label') || '').trim()));
+              if (opener) {
+                const cur = (opener.getAttribute('aria-label') || '').replace(/^Aspect ratio:\s*/i, '').trim();
+                if (cur === aspect) return 'already';
+                opener.click();
+                return 'open-legacy:' + cur;
+              }
+              return 'none';
+            }""",
+            {"aspect": aspect},
+        )
+    except Exception as e:
+        how = "err:" + str(e)[:60]
+    if str(how).startswith("custom-open") or str(how).startswith("open-legacy") or str(how) == "none":
+        try:
+            page.wait_for_timeout(400)
+        except Exception:
+            time.sleep(0.4)
+        try:
+            picked = page.evaluate(
+                """(args) => {
+                  const aspect = String(args.aspect || '1:1');
+                  const presets = args.presets || [];
+                  const vis = (el) => {
+                    const r = el.getBoundingClientRect();
+                    const st = getComputedStyle(el);
+                    return r.width > 4 && r.height > 4 && st.visibility !== 'hidden' && st.display !== 'none';
+                  };
+                  const nodes = [...document.querySelectorAll('button, [role=button], [role=radio], [role=option], [role=menuitem], [data-radix-collection-item], [data-slot=dropdown-menu-item]')].filter(vis);
+                  const hit = nodes.find((e) => {
+                    const t = ((e.innerText || '') + ' ' + (e.getAttribute('aria-label') || '')).replace(/\s+/g, ' ').trim();
+                    if (t === aspect || t.indexOf('(' + aspect + ')') >= 0) return true;
+                    return presets.some((p) => t === p || t.indexOf(p) >= 0);
+                  });
+                  if (!hit) return 'miss';
+                  hit.click();
+                  return 'preset:' + ((hit.innerText || '').trim().split('\n')[0]);
+                }""",
+                {"aspect": aspect, "presets": presets},
+            )
+        except Exception:
+            picked = "err"
+        how = str(how) + "+" + str(picked)
+        if str(picked).startswith("miss") or str(picked) == "err":
+            for name in [aspect] + list(presets):
+                try:
+                    loc = page.get_by_text(name, exact=True)
+                    if loc.count() > 0:
+                        loc.first.click(timeout=900, force=True)
+                        how = str(how) + "+pw:" + name
+                        break
+                except Exception:
+                    continue
+    return how
+
+def click_leonardo_resolution(page, aspect, tier, k, w, h):
+    try:
+        dim = page.evaluate(
+            """(args) => {
+              const aspect = String(args.aspect || '1:1');
+              const tier = String(args.tier || 'Small');
+              const k = String(args.k || '1K');
+              const wantX = String(args.w) + 'x' + String(args.h);
+              const vis = (el) => {
+                const r = el.getBoundingClientRect();
+                const st = getComputedStyle(el);
+                return r.width > 4 && r.height > 4 && r.bottom > 0 && r.top < window.innerHeight && st.visibility !== 'hidden' && st.display !== 'none';
+              };
+              const click = (el) => { if (!el) return false; try { el.click(); return true; } catch (e) { return false; } };
+              const norm = (s) => String(s || '').replace(/\s/g, '').replace(/\u00d7/g, 'x').toLowerCase();
+              const buttons = [...document.querySelectorAll('button, [role=button], [role=radio], [role=option]')].filter(vis);
+              const squarePreset = (t) => /^(1024x1024|2048x2048|4096x4096|2880x2880)$/.test(t);
+              const want = norm(wantX);
+              const px = buttons.find((e) => {
+                const t = norm(e.innerText || '');
+                const a = norm(e.getAttribute('aria-label') || '');
+                const first = norm((e.innerText || '').split('\n')[0]);
+                if (aspect !== '1:1' && (squarePreset(first) || squarePreset(t))) return false;
+                return t.indexOf(want) >= 0 || a.indexOf(want) >= 0;
+              });
+              if (click(px)) return 'px';
+              const tbtn = buttons.find((b) => {
+                const raw = (b.innerText || '').trim();
+                const first = raw.split('\n')[0].trim();
+                const t = norm(raw);
+                if (!(first === tier || first.toLowerCase() === tier.toLowerCase() || first.toUpperCase() === k)) return false;
+                if (aspect !== '1:1' && (squarePreset(t) || t.indexOf('1024x1024') >= 0 || t.indexOf('2048x2048') >= 0)) return false;
+                if (/\d{3,5}x\d{3,5}/.test(t) && t.indexOf(want) < 0) return false;
+                return true;
+              });
+              if (click(tbtn)) return 'tier';
+              return aspect === '1:1' ? 'skip' : 'skip-square';
+            }""",
+            {"aspect": aspect, "tier": tier, "k": k, "w": w, "h": h},
+        )
+    except Exception:
+        dim = "err"
+    return dim
+
+def read_displayed_size(page):
+    try:
+        pair = page.evaluate("""() => {
+          const lab = [...document.querySelectorAll('div,p,span,label,h2,h3,h4')].find((e) => {
+            const t = (e.innerText || '').split('\n')[0] || '';
+            return /image dimensions/i.test(t) && t.length < 80;
+          });
+          const root = lab ? (lab.parentElement || lab) : document.body;
+          const blob = ((root && root.innerText) || '').replace(/\u00d7/g, 'x');
+          const m = blob.match(/(\d{3,5})\s*x\s*(\d{3,5})/);
+          if (m) return [Number(m[1]), Number(m[2])];
+          return [0, 0];
+        }""")
+        if pair and len(pair) == 2:
+            return int(pair[0] or 0), int(pair[1] or 0)
+    except Exception:
+        pass
+    return 0, 0
+
+def apply_image_size(page, want_size, aspect=None, tier=None, gpt=False):
+    aspect = (aspect or size_to_aspect(want_size) or "1:1").strip()
+    w, h = parse_size_wh(want_size)
+    if not tier:
+        tier, _px = size_tier(w, h, gpt)
+    k = "4K" if str(tier).lower() == "large" else ("2K" if str(tier).lower() == "medium" else "1K")
+    opened = click_leonardo_aspect(page, aspect)
+    try:
+        page.keyboard.press("Escape")
+    except Exception:
+        pass
+    try:
+        page.wait_for_timeout(400)
+    except Exception:
+        time.sleep(0.4)
+    dim = click_leonardo_resolution(page, aspect, tier, k, w, h)
+    shown_w, shown_h = read_displayed_size(page)
+    print("image size want=%s aspect=%s tier=%s %dx%d open=%s dim=%s shown=%dx%d" % (want_size, aspect, tier, w, h, opened, dim, shown_w, shown_h), flush=True)
+    try:
+        page.keyboard.press("Escape")
+    except Exception:
+        pass
+    return w, h, aspect, tier
+
+def apply_gemini_aspect(page, aspect):
+    aspect = (aspect or "1:1").strip()
+    try:
+        page.evaluate(
+            """(aspect) => {
+              const vis = (el) => {
+                const r = el.getBoundingClientRect();
+                const st = getComputedStyle(el);
+                return r.width > 4 && r.height > 4 && st.visibility !== 'hidden' && st.display !== 'none';
+              };
+              const nodes = [...document.querySelectorAll('button, [role=button], [role=radio], [role=option], [role=menuitem]')];
+              let hit = nodes.find((e) => vis(e) && ((e.innerText || '').trim().split('\n')[0] === aspect || (e.getAttribute('aria-label') || '').trim() === aspect));
+              if (hit) { hit.click(); return; }
+              const opener = nodes.find((e) => vis(e) && /aspect/i.test((e.getAttribute('aria-label') || '') + ' ' + (e.innerText || '')));
+              if (opener) opener.click();
+            }""",
+            aspect,
+        )
+        page.wait_for_timeout(280)
+        page.evaluate(
+            """(aspect) => {
+              const nodes = [...document.querySelectorAll('button, [role=button], [role=radio], [role=option], [role=menuitem]')];
+              const hit = nodes.find((e) => ((e.innerText || '').trim().split('\n')[0] === aspect) || ((e.getAttribute('aria-label') || '').indexOf(aspect) >= 0));
+              if (hit) hit.click();
+            }""",
+            aspect,
+        )
+    except Exception:
+        pass
+
+def aspect_match(w, h, aspect, slack=0.12):
+    try:
+        aw, ah = [float(x) for x in str(aspect).split(":")]
+        if w < 16 or h < 16 or ah == 0:
+            return False
+        return abs((w / float(h)) - (aw / ah)) <= slack
+    except Exception:
+        return True
+
+def is_leonardo_model(model):
+    m = str(model or "").lower()
+    if m == "gemini-image":
+        return False
+    return (
+        m.startswith("leonardo-")
+        or "gpt-image" in m
+        or m.startswith("dall-e")
+        or "nano-banana" in m
+        or "flash-image" in m
+        or "pro-image" in m
+        or "lite-image" in m
+        or "gemini-image-" in m
+        or m.startswith("imagen")
+    )
+
+def is_gpt_image_model(model):
+    m = str(model or "").lower()
+    return "gpt-image" in m or m.startswith("dall-e") or m == "leonardo-gpt-image-2"
+
+def image_wh(raw):
+    if not raw or len(raw) < 24:
+        return 0, 0
+    try:
+        if raw[:8] == b"\x89PNG\r\n\x1a\n":
+            import struct
+            return struct.unpack(">II", raw[16:24])
+        if raw[:2] == b"\xff\xd8":
+            i = 2
+            while i + 9 < len(raw):
+                if raw[i] != 0xff:
+                    i += 1
+                    continue
+                marker = raw[i + 1]
+                if marker in (0xc0, 0xc1, 0xc2):
+                    h = (raw[i + 5] << 8) | raw[i + 6]
+                    w = (raw[i + 7] << 8) | raw[i + 8]
+                    return w, h
+                ln = (raw[i + 2] << 8) | raw[i + 3]
+                if ln < 2:
+                    break
+                i += 2 + ln
+    except Exception:
+        return 0, 0
+    return 0, 0
+
+def upgrade_cdn_url(url):
+    u = str(url or "")
+    if not u.startswith("http"):
+        return u
+    u = re.sub(r"([?&])(w|width|h|height|dpr|q|quality|fm|fit)=[^&]*", r"\1", u)
+    u = re.sub(r"[?&]$", "", u)
+    u = re.sub(r"/(256|384|512|640|768)(/|$)", r"/", u)
+    u = re.sub(r"_(256|384|512|640|768)(\.[a-zA-Z]+)$", r"\2", u)
+    return u
+
+def raw_to_data_url(raw, mime="image/jpeg"):
+    if not raw:
+        return None
+    mt = (mime or "image/jpeg").split(";")[0]
+    if "png" in mt:
+        mt = "image/png"
+    elif "webp" in mt:
+        mt = "image/webp"
+    else:
+        mt = "image/jpeg"
+    return "data:%s;base64,%s" % (mt, base64.b64encode(raw).decode())
 
 def download_result_image(context, url):
     if not url:
@@ -1856,17 +2285,24 @@ def download_result_image(context, url):
     if url.startswith("data:image"):
         return url, None
     if url.startswith("http"):
-        try:
-            resp = context.request.get(url, timeout=20000)
-            raw = resp.body()
-            mime = (resp.headers.get("content-type") or "image/png").split(";")[0]
-            if "svg" in mime:
-                return None, "LEONARDO_RESULT_NOT_FOUND: svg rejected"
-            if not raw or len(raw) < 2048:
-                return None, "LEONARDO_RESULT_NOT_FOUND: image too small"
-            return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode()), None
-        except Exception:
-            return None, "LEONARDO_DOWNLOAD_FAILED"
+        last_err = "LEONARDO_DOWNLOAD_FAILED"
+        for candidate in (url, upgrade_cdn_url(url)):
+            if not candidate:
+                continue
+            try:
+                resp = context.request.get(candidate, timeout=20000)
+                raw = resp.body()
+                mime = (resp.headers.get("content-type") or "image/png").split(";")[0]
+                if "svg" in mime:
+                    last_err = "LEONARDO_RESULT_NOT_FOUND: svg rejected"
+                    continue
+                if not raw or len(raw) < 2048:
+                    last_err = "LEONARDO_RESULT_NOT_FOUND: image too small"
+                    continue
+                return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode()), None
+            except Exception:
+                last_err = "LEONARDO_DOWNLOAD_FAILED"
+        return None, last_err
     return None, "LEONARDO_RESULT_NOT_FOUND"
 
 def run_leonardo(body):
@@ -1882,7 +2318,7 @@ def run_leonardo(body):
     if not state:
         return {"ok": False, "error": "LEONARDO_LOGIN_REQUIRED: no storage state", "fault": "account", "backendMode": "web_account"}
     model = (body.get("model") or "leonardo-gemini").strip()
-    gpt = "gpt-image" in model
+    gpt = is_gpt_image_model(model)
     labels = ["GPT Image 2", "GPT Image", "gpt-image-2"] if gpt else ["Nano Banana 2", "Nano Banana", "Gemini Image 2", "Gemini 2.5 Flash Image", "gemini-image-2", "Gemini 2.5"]
     proxy = job_proxy(body)
     if not proxy:
@@ -1899,7 +2335,7 @@ def run_leonardo(body):
     kind = body.get("kind") or "image"
     pack_version = body.get("selectorPackVersion") or "leonardo-image-v1"
 
-    SKIP_MODEL = set("auto small medium large dynamic custom low high style model quality enhance private reset defaults prompt 1:1 2:3 16:9 4:3".split())
+    SKIP_MODEL = set("auto small medium large dynamic custom low high style model quality enhance private reset defaults prompt 1:1 2:3 3:2 16:9 9:16 4:3 4:5 21:9".split())
 
     def selected_model_label(page):
         try:
@@ -2115,19 +2551,18 @@ def run_leonardo(body):
                 "backendMode": "web_account",
                 "selectorPackVersion": pack_version,
             }
-        aspect = size_to_aspect(want_size)
-        try:
-            page.locator('button[aria-label="Aspect ratio: %s"]' % aspect).first.click(timeout=1200, force=True)
-        except Exception:
-            try:
-                page.get_by_text(aspect, exact=True).first.click(timeout=800)
-            except Exception:
-                pass
-        dim = "Large" if ("4096" in str(want_size) or "2880" in str(want_size)) else ("Medium" if "2048" in str(want_size) else "Small")
-        try:
-            page.get_by_text(dim, exact=True).first.click(timeout=800)
-        except Exception:
-            pass
+        aspect = body.get("aspect") or size_to_aspect(want_size)
+        want_w, want_h = parse_size_wh(want_size)
+        tier, px = size_tier(want_w, want_h, gpt)
+        if body.get("tier"):
+            tier = str(body.get("tier"))
+        want_min = int(max(want_w, want_h) * 0.72)
+        apply_image_size(page, want_size, aspect, tier, gpt)
+        shown_w, shown_h = read_displayed_size(page)
+        if shown_w and shown_h and not aspect_match(shown_w, shown_h, aspect):
+            apply_image_size(page, want_size, aspect, tier, gpt)
+            shown_w, shown_h = read_displayed_size(page)
+        print("leonardo size want=%s aspect=%s tier=%s %dx%d min=%d shown=%dx%d" % (want_size, aspect, tier, want_w, want_h, want_min, shown_w, shown_h), flush=True)
         if want_quality in ("HIGH", "LOW"):
             qhit = False
             for qlab in (want_quality, want_quality.title(), "Quality: " + want_quality.title()):
@@ -2155,25 +2590,73 @@ def run_leonardo(body):
                 )
             except Exception:
                 pass
-        baseline = snapshot_image_srcs(page)
+        ref_sizes = ref_body_sizes(images)
         if images:
             print("leonardo filling prompt before refs", flush=True)
             leonardo_js_fill(page, prompt)
             up_err = attach_leonardo_refs(page, images)
             if up_err:
                 return {"ok": False, "error": up_err + " url=" + (page.url or ""), "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
-            print("leonardo refs attached, filling prompt", flush=True)
+            thumbs = wait_leonardo_refs(page, 10000)
+            print("leonardo refs attached thumbs=%s sizes=%s" % (thumbs, sorted(ref_sizes)[:6]), flush=True)
+            if not thumbs:
+                return {"ok": False, "error": "LEONARDO_DOM_CHANGED: reference image did not attach url=" + (page.url or ""), "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
             filled = leonardo_js_fill(page, prompt)
             print("leonardo fill js", filled, flush=True)
             if not filled:
                 return {"ok": False, "error": "LEONARDO_DOM_CHANGED: cannot fill prompt", "fault": "provider", "backendMode": "web_account"}
+            apply_image_size(page, want_size, aspect, tier, gpt)
+            shown_w, shown_h = read_displayed_size(page)
+            if shown_w and shown_h and not aspect_match(shown_w, shown_h, aspect):
+                apply_image_size(page, want_size, aspect, tier, gpt)
+                shown_w, shown_h = read_displayed_size(page)
+            if shown_w and shown_h and not aspect_match(shown_w, shown_h, aspect):
+                return {"ok": False, "error": "LEONARDO_DOM_CHANGED: Image Dimensions stayed %dx%d, want %s %s" % (shown_w, shown_h, aspect, want_size), "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
+            ready_gen = wait_leonardo_generate_ready(page, 20000)
+            print("leonardo generate ready", ready_gen, flush=True)
+            if not ready_gen:
+                return {"ok": False, "error": "LEONARDO_GENERATION_FAILED: generate did not become ready after refs", "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked, "pageState": "GENERATION_FAILED"}
         elif not fill_composer(page, box, prompt):
             try:
                 box.fill(prompt, timeout=1000)
             except Exception:
                 return {"ok": False, "error": "LEONARDO_DOM_CHANGED: cannot fill prompt", "fault": "provider", "backendMode": "web_account"}
+        try:
+            page.wait_for_timeout(400)
+        except Exception:
+            time.sleep(0.4)
+        shown_w, shown_h = read_displayed_size(page)
+        if shown_w and shown_h and not aspect_match(shown_w, shown_h, aspect):
+            apply_image_size(page, want_size, aspect, tier, gpt)
+            shown_w, shown_h = read_displayed_size(page)
+        if shown_w and shown_h and not aspect_match(shown_w, shown_h, aspect):
+            return {"ok": False, "error": "LEONARDO_DOM_CHANGED: Image Dimensions stayed %dx%d, want %s %s" % (shown_w, shown_h, aspect, want_size), "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
+        baseline = snapshot_image_srcs(page)
+        captures = []
+        def on_resp(resp):
+            try:
+                ct = (resp.headers.get("content-type") or "").lower()
+                url = resp.url or ""
+                if "image/" not in ct or "svg" in ct:
+                    return
+                if any(b in url.lower() for b in ("favicon", "sprite", "logo", "icon", "emoji", "avatar")):
+                    return
+                raw = resp.body()
+                if not raw or len(raw) < 4096:
+                    return
+                if len(raw) in ref_sizes:
+                    return
+                w, h = image_wh(raw)
+                captures.append((len(raw), w, h, url, raw, ct.split(";")[0]))
+            except Exception:
+                pass
+        try:
+            page.on("response", on_resp)
+        except Exception:
+            pass
         print("leonardo clicking generate", flush=True)
-        if not leonardo_js_generate(page):
+        gen_clicked = leonardo_js_generate(page)
+        if not gen_clicked:
             if images:
                 try:
                     page.keyboard.press("Enter")
@@ -2182,6 +2665,7 @@ def run_leonardo(body):
             else:
                 try:
                     gen.click(timeout=1500, force=True)
+                    gen_clicked = True
                 except Exception:
                     page.keyboard.press("Enter")
         page.wait_for_timeout(800)
@@ -2190,7 +2674,11 @@ def run_leonardo(body):
             err, fault = page_state_error(pst2, False, "leonardo")
             return {"ok": False, "error": err, "fault": fault, "pageState": pst2, "backendMode": "web_account", "availableModels": available}
         deadline = time.time() + int(body.get("timeoutMs") or 120000) / 1000
-        url_out = ""
+        fail_at = time.time() + 28
+        done_hint = ("that's a wrap", "how was this output", "time to generate more")
+        progress_hint = ("generating", "queued", "in progress", "creating image", "working on")
+        best = []
+        saw_progress = False
         while time.time() < deadline:
             html2 = ""
             try:
@@ -2200,27 +2688,95 @@ def run_leonardo(body):
             low = html2.lower()
             if "out of tokens" in low or "insufficient tokens" in low:
                 return {"ok": False, "error": "LEONARDO_TOKEN_EXHAUSTED", "fault": "account", "pageState": "TOKEN_EXHAUSTED", "backendMode": "web_account", "tokenState": "TOKEN_EXHAUSTED", "availableModels": available}
+            if any(h in low for h in progress_hint) or captures:
+                saw_progress = True
+            try:
+                busy = page.evaluate("""() => {
+                  const b = document.querySelector('button[aria-label="Generate"], button[aria-label*="Generate" i]');
+                  if (b && (b.disabled || b.getAttribute('aria-disabled') === 'true')) return true;
+                  return !!(document.querySelector('[role=progressbar], [data-loading="true"]'));
+                }""")
+                if busy:
+                    saw_progress = True
+            except Exception:
+                pass
             for src in snapshot_image_srcs(page):
                 if src in baseline:
                     continue
-                if accept_result_image(src, baseline, None):
-                    url_out = src
+                saw_progress = True
+                if not accept_result_image(src, baseline, None):
+                    continue
+                data_url, _derr = download_result_image(context, src)
+                if not data_url:
+                    continue
+                try:
+                    raw = base64.b64decode(data_url.split(",", 1)[-1])
+                except Exception:
+                    continue
+                if len(raw) in ref_sizes:
+                    continue
+                w, h = image_wh(raw)
+                captures.append((len(raw), w, h, src, raw, "image/jpeg"))
+            if images and not saw_progress and time.time() > fail_at:
+                return {"ok": False, "error": "LEONARDO_GENERATION_FAILED: generate did not start (img2img)", "fault": "provider", "pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
+            ranked = sorted(captures, key=lambda row: (1 if aspect_match(row[1], row[2], aspect) else 0, row[1] * row[2], row[0]), reverse=True)
+            picked_rows = []
+            seen = set()
+            for row in ranked:
+                key = (row[1], row[2], row[0])
+                if key in seen:
+                    continue
+                seen.add(key)
+                picked_rows.append(row)
+                if len(picked_rows) >= max(1, want_n):
                     break
-            if url_out:
+            ready = any(h in low for h in done_hint)
+            shaped = [row for row in picked_rows if aspect_match(row[1], row[2], aspect)]
+            strong = [row for row in shaped if max(row[1], row[2]) >= want_min]
+            if strong and (ready or len(strong) >= max(1, want_n)):
+                best = strong[: max(1, want_n)]
                 break
-            time.sleep(0.5)
-        if not url_out:
+            if shaped and ready and time.time() + 8 > deadline:
+                best = shaped[: max(1, want_n)]
+                break
+            time.sleep(0.45)
+        if not best and captures:
+            ranked = sorted(captures, key=lambda row: (1 if aspect_match(row[1], row[2], aspect) else 0, row[1] * row[2], row[0]), reverse=True)
+            shaped = [row for row in ranked if aspect_match(row[1], row[2], aspect)]
+            if not shaped:
+                got = "%dx%d" % (ranked[0][1], ranked[0][2]) if ranked else "none"
+                return {"ok": False, "error": "LEONARDO_RESULT_ASPECT_MISMATCH: want %s got %s" % (aspect, got), "fault": "provider", "pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
+            best = shaped[: max(1, want_n)]
+        if best and max(best[0][1], best[0][2]) < want_min:
+            try:
+                page.get_by_text("Download", exact=False).first.click(timeout=1500)
+                page.wait_for_timeout(2500)
+            except Exception:
+                pass
+            if captures:
+                ranked = sorted([row for row in captures if aspect_match(row[1], row[2], aspect)], key=lambda row: (row[1] * row[2], row[0]), reverse=True)
+                if ranked and max(ranked[0][1], ranked[0][2]) >= max(best[0][1], best[0][2]):
+                    best = ranked[: max(1, want_n)]
+        if not best:
             return {"ok": False, "error": "LEONARDO_RESULT_NOT_FOUND", "fault": "provider", "pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
-        data_url, derr = download_result_image(context, url_out)
-        if not data_url:
-            return {"ok": False, "error": derr or "LEONARDO_DOWNLOAD_FAILED", "fault": "provider", "backendMode": "web_account", "availableModels": available}
+        data_urls = []
+        for row in best:
+            du = raw_to_data_url(row[4], row[5])
+            if du:
+                data_urls.append(du)
+        if not data_urls:
+            return {"ok": False, "error": "LEONARDO_DOWNLOAD_FAILED", "fault": "provider", "backendMode": "web_account", "availableModels": available}
+        print("leonardo result %dx%d bytes=%d n=%d want=%s min=%d" % (best[0][1], best[0][2], best[0][0], len(data_urls), want_size, want_min), flush=True)
         try:
             state_out = context.storage_state()
         except Exception:
             state_out = None
         return {
             "ok": True,
-            "url": data_url,
+            "url": data_urls[0],
+            "urls": data_urls,
+            "width": best[0][1],
+            "height": best[0][2],
             "modelActual": picked or model,
             "backendMode": "web_account",
             "latencyMs": int((time.time() - t0) * 1000),
@@ -2341,12 +2897,17 @@ def poll_gateway():
             if job.get("platform") == "gemini":
                 payload["platform"] = "gemini"
                 payload["model"] = job.get("model") or "gemini-image"
+                payload["size"] = job.get("size") or "1024x1024"
+                payload["aspect"] = job.get("aspect") or ""
+                payload["tier"] = job.get("tier") or ""
             elif job.get("platform") == "leonardo":
                 payload["platform"] = "leonardo"
                 payload["model"] = job.get("model") or "leonardo-gemini"
                 payload["n"] = job.get("n") or 1
                 payload["size"] = job.get("size") or "1024x1024"
                 payload["quality"] = job.get("quality") or "MEDIUM"
+                payload["aspect"] = job.get("aspect") or ""
+                payload["tier"] = job.get("tier") or ""
             else:
                 payload["model"] = job.get("model") or "gpt-5.6"
             try:

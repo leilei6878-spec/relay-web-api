@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
 export function ImageInput({
@@ -20,7 +21,10 @@ export function ImageInput({
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
       if (next.length >= max) break;
-      if (file.size > 4_000_000) continue;
+      if (file.size > 4_000_000) {
+        toast.error(`${file.name || "图片"} 超过 4MB，未加入参考图`);
+        continue;
+      }
       next.push(await readDataUrl(file));
     }
     onChange(next);

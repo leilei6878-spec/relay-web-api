@@ -84,3 +84,81 @@ test("leonardo accept_result_image rejects history and icons", () => {
   assert.equal(out.status, 0, out.stderr || out.stdout);
   assert.match(out.stdout, /ok/);
 });
+
+test("apply_image_size clicks Image Dimensions chips then Small/Medium/Large", () => {
+  const s = localWorkerScript();
+  assert.match(s, /def click_leonardo_aspect/);
+  assert.match(s, /Facebook \(16:9\)/);
+  assert.match(s, /Ultrawide \(21:9\)/);
+  assert.match(s, /TikTok \(9:16\)/);
+  assert.match(s, /skip-square/);
+  assert.match(s, /def aspect_match/);
+  assert.match(s, /LEONARDO_RESULT_ASPECT_MISMATCH/);
+  assert.match(s, /Image Dimensions stayed/);
+  const fn = s.slice(s.indexOf("def click_leonardo_resolution"), s.indexOf("def read_displayed_size"));
+  assert.match(fn, /squarePreset/);
+  assert.equal(fn.includes("aspect !== '1:1'"), true);
+});
+
+test("worker maps 1264x848 to 3:2 and 16:9 size token to 1376x768", () => {
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      "import importlib.util\nspec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py')\nm=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\nassert m.size_to_aspect('1264x848')=='3:2', m.size_to_aspect('1264x848')\nassert m.size_to_aspect('1376x768')=='16:9'\nassert m.size_to_aspect('16:9')=='16:9'\nassert m.size_to_aspect('5504x3072')=='16:9'\nassert m.parse_size_wh('16:9')==(1376,768)\nassert m.parse_size_wh('1536x1024')==(1536,1024)\nassert m.parse_size_wh('5504x3072')==(5504,3072)\nprint('ok')\n",
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /ok/);
+});
+
+test("leonardo img2img attaches refs before generate and fail-fasts", () => {
+  const s = localWorkerScript();
+  assert.match(s, /def wait_leonardo_generate_ready/);
+  assert.match(s, /def ref_body_sizes/);
+  assert.match(s, /generate did not start \(img2img\)/);
+  assert.match(s, /generate did not become ready after refs/);
+  assert.match(s, /reference image did not attach/);
+  const attachIdx = s.indexOf("up_err = attach_leonardo_refs");
+  const readyIdx = s.indexOf("wait_leonardo_generate_ready(page, 20000)");
+  const baselineIdx = s.lastIndexOf("baseline = snapshot_image_srcs(page)");
+  const clickIdx = s.indexOf('print("leonardo clicking generate"');
+  const sizeAfter = s.indexOf("apply_image_size(page, want_size, aspect, tier, gpt)", attachIdx);
+  assert.ok(attachIdx > 0 && readyIdx > attachIdx, "wait generate ready after attach");
+  assert.ok(sizeAfter > attachIdx && sizeAfter < readyIdx, "re-apply size after refs");
+  assert.ok(baselineIdx > readyIdx, "snapshot after refs, not before");
+  assert.ok(clickIdx > baselineIdx, "click generate after snapshot");
+});
+
+test("ref_body_sizes and extract_prompt_images keep leonardo refs", () => {
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      `import importlib.util
+spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py')
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+url=${JSON.stringify(dataUrl)}
+prompt, imgs = m.extract_prompt_images({"model":"nano-banana-2","prompt":"edit me","images":[url]})
+assert prompt=="edit me"
+assert len(imgs)==1
+sizes=m.ref_body_sizes(imgs)
+assert ${png.length} in sizes, sizes
+print("ok")
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /ok/);
+});

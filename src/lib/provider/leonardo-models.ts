@@ -1,4 +1,5 @@
 import type { Account } from "../types";
+import { IMAGE_SIZE_PARAMS, aspectFromSize, resolveImageSpec } from "./image-size";
 
 export const LEONARDO_LOGICAL_MODELS = ["leonardo-gpt-image-2", "leonardo-gemini"] as const;
 export type LeonardoLogicalModel = (typeof LEONARDO_LOGICAL_MODELS)[number];
@@ -13,27 +14,119 @@ export const GEMINI_FAMILY_LABELS = [
   "gemini-2.5-flash-image",
 ];
 
+export const OFFICIAL_GPT_IMAGE_IDS = [
+  "gpt-image-1",
+  "gpt-image-1.5",
+  "gpt-image-1-mini",
+  "gpt-image-2",
+  "dall-e-3",
+  "dall-e-2",
+] as const;
+export const OFFICIAL_NANO_IDS = [
+  "nano-banana-2",
+  "nano-banana",
+  "gemini-2.5-flash-image",
+  "gemini-2.5-flash-image-preview",
+  "gemini-3.1-flash-image",
+  "gemini-3.1-flash-lite-image",
+  "gemini-3-pro-image",
+  "gemini-2.0-flash-preview-image-generation",
+  "gemini-image-2",
+] as const;
+
+/** Official OpenAI Images + Google image fields. Unknown keys still 400; these must pass. */
+export const IMAGE_OFFICIAL_PARAMS = [
+  "prompt",
+  "model",
+  "image",
+  "image_url",
+  "images",
+  "n",
+  "size",
+  "quality",
+  "width",
+  "height",
+  "response_format",
+  "user",
+  "style",
+  "background",
+  "output_format",
+  "output_compression",
+  "moderation",
+  "partial_images",
+  "stream",
+  "revision",
+  ...IMAGE_SIZE_PARAMS,
+] as const;
+
 export const LEONARDO_SIZES = [
   "1024x1024",
   "2048x2048",
   "4096x4096",
   "2880x2880",
+  "1536x1024",
+  "1024x1536",
+  "1792x1024",
+  "1024x1792",
   "848x1264",
   "1264x848",
   "1376x768",
   "768x1376",
+  "1200x896",
+  "896x1200",
+  "928x1152",
+  "1152x928",
+  "1584x672",
+  "2752x1536",
+  "1536x2752",
+  "5504x3072",
+  "3072x5504",
+  "2528x1696",
+  "1696x2528",
+  "auto",
 ] as const;
 export const LEONARDO_QUALITY = ["LOW", "MEDIUM", "HIGH"] as const;
 
-/** Aspect buttons verified on logged-out home (2026-08-26 recon). */
-export const LEONARDO_ASPECTS = ["1:1", "2:3", "16:9", "4:3", "4:5", "9:16"] as const;
+/** Aspect chips: public home plus GPT Image 2 / Nano Banana official set. */
+export const LEONARDO_ASPECTS = [
+  "1:1",
+  "3:2",
+  "2:3",
+  "16:9",
+  "4:3",
+  "3:4",
+  "4:5",
+  "5:4",
+  "9:16",
+  "21:9",
+] as const;
 
 export const LEONARDO_MAX_REFS = 6;
 export const LEONARDO_MAX_N = 8;
 export const LEONARDO_BACKEND_DEFAULT = "web_account" as const;
 
+export function isGptImageModel(model: string) {
+  const m = (model || "").toLowerCase();
+  return m.includes("gpt-image") || m.startsWith("dall-e") || m === "leonardo-gpt-image-2";
+}
+
+export function isNanoBananaModel(model: string) {
+  const m = (model || "").toLowerCase();
+  if (m === "gemini-image") return false;
+  return (
+    m.includes("nano-banana") ||
+    m.includes("flash-image") ||
+    m.includes("pro-image") ||
+    m.includes("lite-image") ||
+    m.includes("gemini-image-") ||
+    m.startsWith("imagen") ||
+    m === "leonardo-gemini"
+  );
+}
+
 export function isLeonardoModel(model: string) {
-  return model.startsWith("leonardo-") || model === "gpt-image-2" || model.startsWith("nano-banana");
+  const m = (model || "").toLowerCase();
+  return m.startsWith("leonardo-") || isGptImageModel(m) || isNanoBananaModel(m);
 }
 
 export function mapLogicalModel(model: string): {
@@ -41,8 +134,7 @@ export function mapLogicalModel(model: string): {
   webLabels: string[];
   webId: string;
 } {
-  const m = (model || "").toLowerCase();
-  if (m.includes("gpt-image") || m === "leonardo-gpt-image-2") {
+  if (isGptImageModel(model)) {
     return { logical: "leonardo-gpt-image-2", webLabels: GPT_IMAGE_LABELS, webId: "gpt-image-2" };
   }
   return { logical: "leonardo-gemini", webLabels: GEMINI_FAMILY_LABELS, webId: process.env.LEONARDO_GEMINI_MODEL || "auto" };
@@ -81,27 +173,58 @@ export function accountHasLeonardoModel(account: Pick<Account, "availableModels"
 }
 
 export function sizeToAspect(size: string): (typeof LEONARDO_ASPECTS)[number] {
-  const [w, h] = (size || "1024x1024").split("x").map((n) => Number(n));
-  if (!w || !h) return "1:1";
-  const r = w / h;
-  const options: [(typeof LEONARDO_ASPECTS)[number], number][] = [
-    ["1:1", 1],
-    ["4:3", 4 / 3],
-    ["16:9", 16 / 9],
-    ["4:5", 4 / 5],
-    ["2:3", 2 / 3],
-    ["9:16", 9 / 16],
-  ];
-  let best: (typeof LEONARDO_ASPECTS)[number] = "1:1";
-  let dist = Infinity;
-  for (const [label, ar] of options) {
-    const d = Math.abs(r - ar);
-    if (d < dist) {
-      dist = d;
-      best = label;
+  const aspect = aspectFromSize(size);
+  if ((LEONARDO_ASPECTS as readonly string[]).includes(aspect)) return aspect as (typeof LEONARDO_ASPECTS)[number];
+  return "1:1";
+}
+
+export function parseSizeBox(size?: string, width?: number, height?: number) {
+  const resolved = resolveImageSpec({ size, width, height });
+  if (!resolved.ok) {
+    if (typeof width === "number" && typeof height === "number" && width > 0 && height > 0) {
+      return { w: Math.round(width), h: Math.round(height), size: `${Math.round(width)}x${Math.round(height)}` };
     }
+    return { w: 1024, h: 1024, size: "1024x1024" };
   }
-  return best;
+  return { w: resolved.spec.width, h: resolved.spec.height, size: resolved.spec.size };
+}
+
+export function sizeTier(w: number, h: number, gpt: boolean): { tier: "Small" | "Medium" | "Large"; px: number } {
+  const spec = resolveImageSpec({
+    model: gpt ? "gpt-image-2" : "nano-banana",
+    width: w,
+    height: h,
+  });
+  if (spec.ok) {
+    const px = Math.max(spec.spec.width, spec.spec.height);
+    return { tier: spec.spec.tier, px };
+  }
+  const m = Math.max(w, h);
+  if (gpt) {
+    if (m >= 2500) return { tier: "Large", px: 2880 };
+    if (m >= 1536) return { tier: "Medium", px: 2048 };
+    return { tier: "Small", px: 1024 };
+  }
+  if (m >= 3072) return { tier: "Large", px: 4096 };
+  if (m >= 1536) return { tier: "Medium", px: 2048 };
+  return { tier: "Small", px: 1024 };
+}
+
+export function normalizeQuality(raw?: string) {
+  const q = (raw || "medium").toString().trim().toLowerCase();
+  if (q === "high" || q === "hd" || q === "high-quality") return "HIGH";
+  if (q === "low") return "LOW";
+  if (q === "auto" || q === "standard") return "MEDIUM";
+  return "MEDIUM";
+}
+
+export function defaultResponseFormat(model: string, requested?: string): "url" | "b64_json" {
+  const r = (requested || "").toLowerCase();
+  if (r === "b64_json" || r === "b64" || r === "base64") return "b64_json";
+  if (r === "url") return "url";
+  const m = (model || "").toLowerCase();
+  if ((m.startsWith("gpt-image") || m.startsWith("dall-e")) && !m.startsWith("leonardo-")) return "b64_json";
+  return "url";
 }
 
 export function validateLeonardoParams(input: {
@@ -110,27 +233,45 @@ export function validateLeonardoParams(input: {
   quality?: string;
   images?: string[];
   logical: LeonardoLogicalModel;
+  width?: number;
+  height?: number;
+  aspectRatio?: string;
+  imageSize?: string;
+  model?: string;
 }) {
   const n = input.n ?? 1;
   if (!Number.isFinite(n) || n < 1 || n > LEONARDO_MAX_N) {
     return { ok: false as const, error: "unsupported parameter: n must be 1-8" };
   }
-  if (input.size && !LEONARDO_SIZES.includes(input.size as (typeof LEONARDO_SIZES)[number]) && !/^\d+x\d+$/.test(input.size)) {
-    return { ok: false as const, error: `unsupported parameter: size ${input.size}` };
-  }
-  if (input.quality && !LEONARDO_QUALITY.includes(input.quality.toUpperCase() as (typeof LEONARDO_QUALITY)[number])) {
-    return { ok: false as const, error: `unsupported parameter: quality ${input.quality}` };
+  const resolved = resolveImageSpec({
+    model: input.model || input.logical,
+    size: input.size,
+    width: input.width,
+    height: input.height,
+    aspectRatio: input.aspectRatio,
+    imageSize: input.imageSize,
+  });
+  if (!resolved.ok) return { ok: false as const, error: resolved.error };
+  if (input.quality) {
+    const q = input.quality.toString().trim().toLowerCase();
+    const ok = ["low", "medium", "high", "hd", "standard", "auto", "high-quality"].includes(q);
+    if (!ok && !LEONARDO_QUALITY.includes(input.quality.toUpperCase() as (typeof LEONARDO_QUALITY)[number])) {
+      return { ok: false as const, error: `unsupported parameter: quality ${input.quality}` };
+    }
   }
   if ((input.images?.length || 0) > LEONARDO_MAX_REFS) {
     return { ok: false as const, error: `unsupported parameter: images max ${LEONARDO_MAX_REFS}` };
   }
-  const size = input.size || "1024x1024";
   return {
     ok: true as const,
     n,
-    size,
-    quality: (input.quality || "MEDIUM").toUpperCase(),
-    aspect: sizeToAspect(size),
+    size: resolved.spec.size,
+    quality: normalizeQuality(input.quality),
+    aspect: resolved.spec.aspect,
+    width: resolved.spec.width,
+    height: resolved.spec.height,
+    tier: resolved.spec.tier,
+    imageSize: resolved.spec.imageSize,
   };
 }
 

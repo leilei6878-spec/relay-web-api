@@ -42,9 +42,13 @@ export function inspectSession(json: string, platform: Platform) {
           )
         : false;
       if (!authHit && !originHit) {
+        const listed = cookies.map((c) => c.name || "").filter(Boolean).slice(0, 12).join("、") || "无";
+        const hasCanva = cookies.some((c) => /canva/i.test(`${c.domain || ""} ${c.name || ""}`));
         return {
           ok: false as const,
-          reason: "Leonardo 登录未完成（没有 Session Cookie。只登录 Canva 或停在授权页不够）",
+          reason: hasCanva
+            ? `Leonardo 登录未完成：已有 Canva Cookie，但没有 Leonardo Session（${listed}）。请在 Leonardo 点 Continue with Canva，授权弹窗走完，等到 Sign In 消失。`
+            : `Leonardo 登录未完成：当前是游客 Cookie（${listed}）。必须先在 Canva 国际站登录，再在 Leonardo 用 Canva 授权；公开出图页不算登录。`,
         };
       }
     }
@@ -66,6 +70,36 @@ export function inspectSession(json: string, platform: Platform) {
     return { ok: true as const, cookieCount: cookies.length, warning, expiresAt: expiresAt || undefined };
   } catch {
     return { ok: false as const, reason: "登录文件无法解析" };
+  }
+}
+
+export function summarizeStorageState(json: string, platform?: Platform) {
+  try {
+    const parsed = JSON.parse(json) as { cookies?: { name?: string; domain?: string }[] };
+    const cookies = Array.isArray(parsed.cookies) ? parsed.cookies : [];
+    const cookieNames = cookies.map((c) => c.name || "").filter(Boolean);
+    const plat = platform || "leonardo";
+    const inspected = inspectSession(json, plat);
+    const authNames = cookies
+      .filter((c) => leonardoAuthCookie(c.name || "", c.domain || ""))
+      .map((c) => c.name || "")
+      .filter(Boolean);
+    return {
+      ok: inspected.ok,
+      reason: inspected.ok ? undefined : inspected.reason,
+      warning: inspected.ok ? inspected.warning : undefined,
+      cookieCount: cookieNames.length,
+      cookieNames: cookieNames.slice(0, 24),
+      authNames,
+    };
+  } catch {
+    return {
+      ok: false as const,
+      reason: "登录文件无法解析",
+      cookieCount: 0,
+      cookieNames: [] as string[],
+      authNames: [] as string[],
+    };
   }
 }
 
@@ -141,6 +175,7 @@ export function loginHelperScript(account: Account, proxy: Proxy, password: stri
 import re, base64, json, os, shutil, socket, subprocess, time
 HERE = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() else os.getcwd()
 PLATFORM = ${JSON.stringify(account.platform)}
+EMAIL = ${email}
 READY_SEL = ${JSON.stringify(readySel)}
 IDP_HOSTS = [
     "google.com", "googleapis.com", "gstatic.com", "googleusercontent.com",
@@ -200,6 +235,30 @@ def save_state(context):
     except Exception:
         ctxs = [context]
     cookies, origins, seen = [], [], set()
+    merged = all_cookies(context)
+    for c in merged:
+        key = (c.get("domain"), c.get("name"), c.get("path") or "/", c.get("partitionKey") or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        row = {}
+        for k in ("name", "value", "domain", "path", "expires", "httpOnly", "secure", "sameSite"):
+            if c.get(k) is not None:
+                row[k] = c.get(k)
+        if "name" not in row or "value" not in row:
+            continue
+        if "path" not in row:
+            row["path"] = "/"
+        ss = str(row.get("sameSite") or "")
+        if ss.lower() in ("strict", "lax", "none"):
+            row["sameSite"] = ss[0].upper() + ss[1:].lower()
+            if row["sameSite"] == "None":
+                row["sameSite"] = "None"
+        elif "sameSite" in row:
+            del row["sameSite"]
+        if row.get("sameSite") == "None":
+            row["secure"] = True
+        cookies.append(row)
     for ctx in ctxs:
         try:
             st = ctx.storage_state()
@@ -207,7 +266,7 @@ def save_state(context):
             print("读取登录态失败", e)
             continue
         for c in st.get("cookies") or []:
-            key = (c.get("domain"), c.get("name"), c.get("path") or "/")
+            key = (c.get("domain"), c.get("name"), c.get("path") or "/", c.get("partitionKey") or "")
             if key in seen:
                 continue
             seen.add(key)
@@ -279,7 +338,33 @@ def all_cookies(context):
     for ctx in ctxs:
         try:
             for c in ctx.cookies():
-                key = (c.get("domain"), c.get("name"))
+                key = (c.get("domain"), c.get("name"), c.get("path") or "/", c.get("partitionKey") or "")
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(c)
+        except Exception:
+            pass
+        try:
+            st = ctx.storage_state()
+            for c in st.get("cookies") or []:
+                key = (c.get("domain"), c.get("name"), c.get("path") or "/", c.get("partitionKey") or "")
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(c)
+        except Exception:
+            pass
+    for ctx in ctxs:
+        try:
+            pages = list(ctx.pages or [])
+            page = pages[0] if pages else None
+            if not page:
+                continue
+            cdp = ctx.new_cdp_session(page)
+            dumped = cdp.send("Network.getAllCookies") or {}
+            for c in dumped.get("cookies") or []:
+                key = (c.get("domain"), c.get("name"), c.get("path") or "/", c.get("partitionKey") or "")
                 if key in seen:
                     continue
                 seen.add(key)
@@ -320,7 +405,7 @@ def canva_logged_in(page):
     u = (page.url or "").lower()
     if "canva.cn" in u or "canva.com" not in u:
         return False
-    if "/login" in u or "/signup" in u:
+    if any(k in u for k in ("/login", "/signup", "/sign-up", "/oidc", "/_login")):
         return False
     try:
         if page.get_by_text("Finish logging in").count() > 0:
@@ -331,7 +416,42 @@ def canva_logged_in(page):
         pass
     if sign_in_visible(page):
         return False
-    return True
+    in_app = any(k in u for k in ("/folder", "/design", "/projects", "/home", "/s/", "/org/"))
+    if in_app:
+        return True
+    try:
+        return canva_has_session(page.context)
+    except Exception:
+        return False
+
+def canva_has_session(context):
+    n = 0
+    for c in all_cookies(context):
+        d = (c.get("domain") or "").lower()
+        name = c.get("name") or ""
+        if "canva.com" not in d:
+            continue
+        if is_noise_cookie(name):
+            continue
+        n += 1
+        if re.search(r"^(CDI|CII|ASI|CAE|CID|CON)$", name, re.I):
+            return True
+    return n >= 3
+
+def canva_ready(context):
+    if canva_has_session(context):
+        for pg in all_pages(context):
+            u = (pg.url or "").lower()
+            if "canva.com" in u and "canva.cn" not in u and "/login" not in u:
+                return True
+        return True
+    for pg in all_pages(context):
+        try:
+            if canva_logged_in(pg):
+                return True
+        except Exception:
+            pass
+    return False
 
 def attach_canva_com_guard(context):
     def handle_route(route):
@@ -433,27 +553,60 @@ def all_pages(context):
 def oauth_busy(pages):
     for p in pages:
         u = (p.url or "").lower()
-        if "auth.leonardo.ai" in u or "amazoncognito" in u or "cognito-idp" in u:
-            return True
-        if "leonardo.ai" in u and any(k in u for k in ("/oauth", "/callback", "/authorize")):
+        if "/generate" in u and "callback" not in u and "oauth" not in u and "authorize" not in u:
+            pass
+        elif any(k in u for k in (
+            "auth.leonardo.ai", "amazoncognito", "cognito-idp",
+            "/oauth", "oauth2", "/callback", "/authorize", "client_id=",
+            "/brand/oauth", "/oidc",
+        )):
             return True
         try:
             if p.get_by_text("Finish logging in").count() > 0:
+                return True
+            if p.get_by_text("wants to access").count() > 0:
+                return True
+            if p.get_by_text("Allow Leonardo").count() > 0:
                 return True
         except Exception:
             pass
     return False
 
-def click_canva_sso(page):
-    labels = ("Canva", "Continue with Canva", "Log in with Canva", "Sign in with Canva")
-    for label in labels:
+def canva_sso_labels():
+    return [
+        "Continue with Canva",
+        "Log in with Canva",
+        "Sign in with Canva",
+        "Sign in with canva",
+        "Continue with canva",
+        "Canva",
+    ]
+
+def list_sso_buttons(page):
+    found = []
+    for label in canva_sso_labels() + ["Microsoft", "Google", "Apple", "Continue with Email"]:
         for role in ("button", "link"):
             try:
                 loc = page.get_by_role(role, name=label)
+                if loc.count() > 0 and loc.first.is_visible():
+                    found.append(label)
+                    break
+            except Exception:
+                pass
+    return found
+
+def click_canva_sso(page):
+    u = (page.url or "").lower()
+    if "leonardo.ai" not in u:
+        return False
+    for label in canva_sso_labels():
+        for role in ("button", "link"):
+            try:
+                loc = page.get_by_role(role, name=label, exact=(label == "Canva"))
                 if loc.count() == 0 or not loc.first.is_visible():
                     continue
                 try:
-                    with page.context.expect_popup(timeout=8000) as pop:
+                    with page.context.expect_popup(timeout=8000):
                         loc.first.click(timeout=2500)
                     print("已弹出 Canva 授权窗口，请在弹窗里点允许，不要关掉")
                     return True
@@ -463,7 +616,23 @@ def click_canva_sso(page):
                     return True
             except Exception:
                 pass
+    try:
+        hit = page.evaluate("""() => {
+          const nodes = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+          const el = nodes.find((n) => /continue with canva|log in with canva|sign in with canva/i.test((n.innerText || n.getAttribute('aria-label') || '').trim()));
+          if (!el) return '';
+          el.click();
+          return (el.innerText || '').trim().slice(0, 40);
+        }""")
+        if hit:
+            print("已用页面按钮点 Canva 授权:", hit)
+            return True
+    except Exception:
+        pass
     return False
+
+def click_idp_sso(page):
+    return click_canva_sso(page)
 
 def leonardo_ready(context):
     pages = all_pages(context)
@@ -479,16 +648,20 @@ def leonardo_ready(context):
 def wait_login(page, context):
     print("在弹出窗口登录", ${email})
     if PLATFORM == "leonardo":
-        print("会同时打开 Canva 和 Leonardo 两个标签。检测的是 Leonardo 登录态，只登录 Canva 不会保存。")
-        print("先在 Canva 标签登录，再回到 Leonardo 标签点 Canva 授权，授权弹窗不要关。")
+        print("必须用 Canva 授权 Leonardo，不要点 Microsoft / Google。")
+        print("会同时打开 Canva 和 Leonardo 两个标签。")
+        print("阶段：1) Canva 国际站登录  2) Leonardo 点 Continue with Canva  3) 授权弹窗走完  4) Sign In 消失才保存")
+        print("公开出图页也有 Generate，那不是登录。只登录 Canva、不点授权也不会保存。")
         ensure_canva_and_leonardo_tabs(context, page)
     else:
         print("看到聊天输入框会自动保存；也可以回到这里按回车。")
     redirected = False
-    clicked_sso = False
+    clicked_sso = 0
+    last_sso_at = 0
     reloaded_once = False
     last_hint = 0
-    for i in range(180):
+    phase = "canva"
+    for i in range(240):
         try:
             pages = all_pages(context)
             for pg in pages:
@@ -499,7 +672,9 @@ def wait_login(page, context):
             ready = leonardo_ready(context) if PLATFORM == "leonardo" else None
             if PLATFORM == "leonardo" and ready:
                 print("检测到 Leonardo Session Cookie，正在保存…")
-                return save_state(ready.context)
+                time.sleep(1.2)
+                ready2 = leonardo_ready(context) or ready
+                return save_state(ready2.context)
             if PLATFORM != "leonardo":
                 if logged_in(page, context):
                     print("检测到已登录，正在保存…")
@@ -516,8 +691,9 @@ def wait_login(page, context):
                 continue
             pages = all_pages(context)
             if oauth_busy(pages):
+                phase = "oauth"
                 if time.time() - last_hint > 8:
-                    print("正在等待 Canva 授权弹窗完成…")
+                    print("正在等 Canva 授权弹窗完成，请点允许，不要关弹窗…")
                     last_hint = time.time()
                 time.sleep(2)
                 continue
@@ -544,18 +720,42 @@ def wait_login(page, context):
                         break
                 time.sleep(2)
                 continue
-            if not clicked_sso:
-                for pg in pages:
-                    u = pg.url or ""
-                    if "leonardo.ai" not in u:
-                        continue
-                    if "/auth/login" in u or sign_in_visible(pg):
-                        if click_canva_sso(pg):
-                            clicked_sso = True
-                        break
-            if i % 10 == 0:
+            if not canva_ready(context):
+                phase = "canva"
+                if time.time() - last_hint > 8:
+                    print("请先在 Canva 标签登录 canva.com 国际站（不要用 canva.cn）。登好后再回到 Leonardo。")
+                    last_hint = time.time()
+                time.sleep(2)
+                continue
+            phase = "sso"
+            leo_login = None
+            for pg in pages:
+                u = pg.url or ""
+                if "leonardo.ai" not in u:
+                    continue
+                if "/auth/login" in u or sign_in_visible(pg):
+                    leo_login = pg
+                    break
+            if leo_login is not None:
+                now = time.time()
+                if clicked_sso < 3 and now - last_sso_at > 12:
+                    try:
+                        leo_login.bring_to_front()
+                    except Exception:
+                        pass
+                    found = list_sso_buttons(leo_login)
+                    if found:
+                        print("Leonardo 登录页按钮:", ", ".join(found), "→ 只点 Canva")
+                    if click_canva_sso(leo_login):
+                        clicked_sso += 1
+                        last_sso_at = now
+                        phase = "oauth"
+            if i % 8 == 0:
                 hits = leonardo_auth_names(all_cookies(context))
-                print("仍在等 Leonardo Session Cookie。已登录 Canva 不够。当前授权 Cookie:", hits or "无")
+                names = [c.get("name") or "" for c in all_cookies(context)][:18]
+                print("阶段 %s | Canva %s" % (phase, "已登录" if canva_ready(context) else "未登录"))
+                print("仍在等 Leonardo Session。当前授权 Cookie:", hits or "无")
+                print("当前全部 Cookie:", ", ".join(names) or "无")
         except Exception:
             pass
         time.sleep(2)
@@ -569,6 +769,9 @@ def wait_login(page, context):
         if ready:
             return save_state(ready.context)
         print("当前仍是游客（没有 Leonardo Session Cookie）。没有写入 state.json。")
+        names = [c.get("name") or "" for c in all_cookies(context)][:24]
+        print("当前 Cookie:", ", ".join(names) or "无")
+        print("必须用 Canva 授权：Canva 国际站登录后，在 Leonardo 点 Continue with Canva，等到 Sign In 消失。")
         return False
     if logged_in(page, context):
         return save_state(context)
@@ -708,15 +911,28 @@ def clone_chrome_profile(src_user_data, dest):
         "Web Data", "Web Data-journal", "Preferences", "Secure Preferences",
         "Local Storage", "Session Storage", "Network", "IndexedDB",
     ]
+    nested = [
+        os.path.join("Network", "Cookies"),
+        os.path.join("Network", "Cookies-journal"),
+        os.path.join("Network", "Network Persistent State"),
+    ]
     if os.path.isdir(src_default):
         for name in names:
             s = os.path.join(src_default, name)
             if os.path.exists(s) and copy_locked(s, os.path.join(dest_default, name)):
                 copied += 1
+        for rel in nested:
+            s = os.path.join(src_default, rel)
+            if os.path.exists(s):
+                time.sleep(0.15)
+                if copy_locked(s, os.path.join(dest_default, rel)):
+                    copied += 1
     ls = os.path.join(src_user_data, "Local State")
     if os.path.isfile(ls) and copy_locked(ls, os.path.join(dest, "Local State")):
         copied += 1
     print("已从本机 Chrome 复制 %d 项登录数据到专用窗口（日常 Chrome 不用关）" % copied)
+    if copied < 3:
+        print("复制到的登录数据很少。请在弹出的专用窗口里重新登录 Canva 国际站。")
     return copied
 
 def close_login_browser(browser, cdp):
@@ -1004,7 +1220,7 @@ pause
 
 export function loginPackReadme(platform: Platform) {
   return platform === "leonardo"
-    ? "1. Unzip\n2. Keep your daily Chrome open\n3. Double-click run.bat — it copies your Canva login into one dedicated window\n4. Only use that window: Canva should already be signed in, then authorize Leonardo. Drag state.json back.\n"
+    ? "1. Unzip\n2. Keep daily Chrome open\n3. Double-click run.bat — one dedicated window\n4. Log into canva.com (not canva.cn) in that window\n5. On Leonardo click Continue with Canva. Finish the popup. Wait until Sign In disappears.\n6. Drag state.json back. Guest cookies are rejected.\n"
     : "1. Unzip\n2. Double-click run.bat\n3. Login in the window, then press Enter in the terminal\n4. Drag state.json back to Relay\n";
 }
 

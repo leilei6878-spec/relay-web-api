@@ -52,9 +52,21 @@ export async function ensureWorkerToken() {
 }
 
 export function bearerToken(request: Request) {
-  const header = request.headers.get("authorization") || request.headers.get("x-api-key") || "";
+  const header =
+    request.headers.get("authorization") ||
+    request.headers.get("x-api-key") ||
+    request.headers.get("x-goog-api-key") ||
+    "";
   const m = header.match(/^Bearer\s+(.+)$/i);
-  return (m ? m[1] : header).trim();
+  let token = (m ? m[1] : header).trim();
+  if (!token) {
+    try {
+      token = new URL(request.url).searchParams.get("key") || "";
+    } catch {
+      token = "";
+    }
+  }
+  return token.trim();
 }
 
 export function readCookie(request: Request, name: string) {

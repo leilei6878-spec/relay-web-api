@@ -7,7 +7,7 @@ import { coordDel, coordGet, coordSet, coordSetNx, releaseJobLeases } from "./co
 import { classifyError, decisionFor, normalizeError } from "./faults";
 import { clearJobEvents, publishJobEvent } from "./job-events";
 import { assertLease, issueLease, type Lease } from "./leases";
-import { persistImageUrl } from "./objects";
+import { persistImageUrl, persistImageUrls } from "./objects";
 import type { EnqueueOpts, Job, WorkerRow } from "./job-queue";
 import {
   dbCancelJobAtomic,
@@ -133,6 +133,8 @@ export async function enqueuePg(
     n: opts.n,
     size: opts.size,
     quality: opts.quality,
+    aspect: opts.aspect,
+    tier: opts.tier,
     backendMode: platform === "leonardo" ? "web_account" : undefined,
   };
 
@@ -270,6 +272,7 @@ export async function finishJobPg(
     ok: boolean;
     text?: string;
     url?: string;
+    urls?: string[];
     error?: string;
     fault?: string;
     leaseId?: string;
@@ -312,7 +315,7 @@ export async function finishJobPg(
     return { ok: false as const, error: proof.error };
   }
 
-  const has = Boolean(result.text || result.url);
+  const has = Boolean(result.text || result.url || (result.urls && result.urls.length));
   const decision = decisionFor(result.error, result.fault);
   const fault = decision.fault_domain || classifyError(result.error);
   if (result.timing) current.timing = result.timing;
@@ -355,20 +358,32 @@ export async function finishJobPg(
     }
   }
 
+  const rawUrls = (Array.isArray(result.urls) ? result.urls : []).filter((u) => typeof u === "string" && u);
+  if (result.url && !rawUrls.includes(result.url)) rawUrls.unshift(result.url);
   let url = result.url;
+  let urls = rawUrls;
   if ((current.platform === "gemini" || current.platform === "leonardo") && result.ok) {
     const { assertGeneratedImage } = await import("./provider/index");
-    const gate = assertGeneratedImage(url, { allowSvg: process.env.RELAY_ALLOW_MOCK === "1" });
-    if (!gate.ok) {
-      result = { ...result, ok: false, error: gate.error };
-    } else {
-      url = gate.url;
+    const checked: string[] = [];
+    for (const item of urls.length ? urls : url ? [url] : []) {
+      const gate = assertGeneratedImage(item, { allowSvg: process.env.RELAY_ALLOW_MOCK === "1" });
+      if (!gate.ok) {
+        result = { ...result, ok: false, error: gate.error };
+        break;
+      }
+      checked.push(gate.url);
+    }
+    if (result.ok) {
+      urls = checked;
+      url = checked[0];
     }
   }
-  if (url && result.ok && (current.platform === "gemini" || current.platform === "leonardo")) {
-    const stored = await persistImageUrl(url);
-    if (stored.ok) url = stored.url;
-    else result = { ...result, ok: false, error: `IMAGE_NOT_FOUND: media store ${stored.error}` };
+  if (urls.length && result.ok && (current.platform === "gemini" || current.platform === "leonardo")) {
+    const stored = await persistImageUrls(urls);
+    if (stored.ok) {
+      urls = stored.urls;
+      url = stored.urls[0];
+    } else result = { ...result, ok: false, error: `IMAGE_NOT_FOUND: media store ${stored.error}` };
   }
 
   const status = result.ok && has ? "done" : "error";
@@ -377,6 +392,7 @@ export async function finishJobPg(
     status,
     text: result.text,
     url,
+    urls,
     error: result.error,
     fault,
     errorCode: decision.code,

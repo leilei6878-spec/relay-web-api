@@ -31,6 +31,9 @@ artifacts/
 screenshots/
 attachments/
 public/__grok/
+__pycache__/
+*.pyc
+*.pyo
 
 # editor / OS
 .DS_Store

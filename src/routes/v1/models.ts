@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { chatgptAdapter, geminiAdapter, leonardoAdapter } from "@/lib/provider/index";
+import { OFFICIAL_GPT_IMAGE_IDS, OFFICIAL_NANO_IDS } from "@/lib/provider/leonardo-models";
 
 function asModel(id: string, owned: string, caps: ReturnType<typeof chatgptAdapter.capabilities>, description: string) {
   return {
@@ -21,14 +22,21 @@ function asModel(id: string, owned: string, caps: ReturnType<typeof chatgptAdapt
 const chatgpt = chatgptAdapter.capabilities();
 const gemini = geminiAdapter.capabilities();
 const leonardo = leonardoAdapter.capabilities();
+const gptImageCaps = { ...leonardo, imageGeneration: true, imageEdit: true, chat: false };
 
-const MODELS = [
+export const MODELS = [
   ...chatgpt.models.map((id) =>
     asModel(id, "relay-chatgpt", chatgpt, id === "gpt-4o" ? "GPT-4o Vision" : "ChatGPT web, vision + multi-turn"),
   ),
   asModel("gemini-image", "relay-gemini", gemini, "Gemini 出图 / 参考图编辑（mask 不支持）"),
   asModel("leonardo-gpt-image-2", "relay-leonardo", leonardo, "Leonardo web GPT Image 2"),
   asModel("leonardo-gemini", "relay-leonardo", leonardo, "Leonardo web Gemini / Nano Banana family"),
+  ...OFFICIAL_GPT_IMAGE_IDS.map((id) =>
+    asModel(id, "openai", gptImageCaps, "OpenAI Images API compatible (GPT Image)"),
+  ),
+  ...OFFICIAL_NANO_IDS.map((id) =>
+    asModel(id, "google", gptImageCaps, "Gemini / Nano Banana official generateContent + Images API"),
+  ),
 ];
 
 export const Route = createFileRoute("/v1/models")({
@@ -39,7 +47,7 @@ export const Route = createFileRoute("/v1/models")({
           status: 204,
           headers: {
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "authorization, content-type, x-api-key",
+            "Access-Control-Allow-Headers": "authorization, content-type, x-api-key, x-goog-api-key",
             "Access-Control-Allow-Methods": "GET, OPTIONS",
           },
         }),

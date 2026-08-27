@@ -90,6 +90,31 @@ export const readSessionFile = createServerFn({ method: "POST" })
     return readSessionJson(data.accountId);
   });
 
+export const diagnoseSessionFile = createServerFn({ method: "POST" })
+  .validator((input: { accountId: string; platform?: Platform }) => input)
+  .handler(async ({ data }) => {
+    const { assertAdminFromFn } = await import("./authz");
+    const auth = await assertAdminFromFn();
+    if (!auth.ok) {
+      return { ok: false as const, error: auth.error, cookieNames: [] as string[], authNames: [] as string[], cookieCount: 0 };
+    }
+    const { readSessionJson } = await import("./chatgpt-runner");
+    const { summarizeStorageState } = await import("./session-file");
+    const file = await readSessionJson(data.accountId);
+    if (!file.ok) {
+      return { ok: false as const, error: file.error, cookieNames: [] as string[], authNames: [] as string[], cookieCount: 0 };
+    }
+    const sum = summarizeStorageState(file.json, data.platform);
+    return {
+      ok: sum.ok,
+      error: sum.ok ? undefined : sum.reason,
+      reason: sum.reason,
+      cookieCount: sum.cookieCount,
+      cookieNames: sum.cookieNames,
+      authNames: sum.authNames,
+    };
+  });
+
 export const runChatgptWeb = createServerFn({ method: "POST" })
   .validator((input: ChatgptWebInput) => input)
   .handler(async ({ data }) => {

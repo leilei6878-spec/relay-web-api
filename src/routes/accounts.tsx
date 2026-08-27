@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { AccountStatusBadge, PlatformBadge } from "@/components/status";
@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getApiKey, saveSessionFile } from "@/lib/gateway";
+import { diagnoseSessionFile, getApiKey, saveSessionFile } from "@/lib/gateway";
 import { whyBlocked } from "@/lib/readiness";
 import { useGateway } from "@/lib/store";
 import { safeName } from "@/lib/session-file";
@@ -109,6 +109,16 @@ function AccountsView() {
         <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-muted">
           当前页面是空的。账号通常还在服务器上，只是管理登录没带上。请刷新本页；不要重新导入。
         </p>
+      )}
+      {accounts.some((a) => a.platform === "leonardo" && a.status === "pending_login") && (
+        <div className="rounded-xl border border-border bg-surface px-4 py-3 text-sm">
+          <p className="font-medium text-fg">Leonardo 登录还没完成</p>
+          <p className="mt-1 text-muted">
+            当前文件只有游客 Cookie，没有 Leonardo Session。必须用 Canva 授权：先在专用窗口登录
+            canva.com 国际站，再在 Leonardo 点 Continue with Canva，授权弹窗走完、Sign In 消失后把新的
+            state.json 拖回来。公开出图页不算登录。
+          </p>
+        </div>
       )}
 
       <ol className="grid gap-3 rounded-xl border border-border bg-surface p-4 text-sm text-muted sm:grid-cols-3">
@@ -235,6 +245,11 @@ function AccountsView() {
                   {a.sessionCookieCount ? (
                     <p className="text-[11px] text-subtle">已登记 {a.sessionCookieCount} 枚 Cookie</p>
                   ) : null}
+                  {a.platform === "leonardo" && a.status === "pending_login" && (
+                    <p className="text-[11px] text-warn">
+                      必须用 Canva 授权：Canva 国际站登录后，在 Leonardo 点 Continue with Canva
+                    </p>
+                  )}
                   {a.lockedUntil && new Date(a.lockedUntil).getTime() > Date.now() && (
                     <p className="text-[11px] text-warn">占用中</p>
                   )}
@@ -447,11 +462,32 @@ function LoginDialog({ account }: { account: Account }) {
   const [packing, setPacking] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [proxyPassword, setProxyPassword] = useState("");
+  const [diagnosis, setDiagnosis] = useState("");
 
   const bound = Boolean(account.proxyId);
   const activeProxies = proxies.filter((p) => p.status === "active");
   const proxy = proxies.find((p) => p.id === account.proxyId) ?? null;
   const site = account.platform === "gemini" ? "Gemini" : account.platform === "leonardo" ? "Leonardo" : "ChatGPT";
+
+  useEffect(() => {
+    if (!open || account.platform !== "leonardo") {
+      setDiagnosis("");
+      return;
+    }
+    let cancelled = false;
+    void diagnoseSessionFile({ data: { accountId: account.id, platform: "leonardo" } }).then((row) => {
+      if (cancelled) return;
+      if (row.ok) {
+        setDiagnosis(`当前登录文件可用，已有 Session Cookie${row.authNames?.length ? `（${row.authNames.slice(0, 3).join("、")}）` : ""}。`);
+        return;
+      }
+      const names = (row.cookieNames || []).join("、") || "无";
+      setDiagnosis(row.error || row.reason || `登录文件无效。Cookie：${names}`);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, account.id, account.platform]);
 
   function bind() {
     setError("");
@@ -578,10 +614,11 @@ function LoginDialog({ account }: { account: Account }) {
         <p className="text-sm text-muted">
           平台绑好代理后点「下载一键登录包」。解压双击 run.bat，不用自己对 IP。
           {account.platform === "leonardo"
-            ? " 只会弹出一个专用窗口，日常 Chrome 不用关。窗口里应已带上 Canva 登录。再到 Leonardo 标签用 Canva 授权，授权弹窗不要关。要等到 Leonardo 的 Sign In 消失、出现 Session Cookie 才保存。"
+            ? " 只会弹出一个专用窗口。必须用 Canva 授权：先在 Canva 标签登录国际站（不要用 canva.cn），再在 Leonardo 点 Continue with Canva。授权弹窗不要关。等到 Sign In 消失才保存。公开出图页不算登录。"
             : ""}
         </p>
         {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+        {diagnosis && !error && <p className="mt-2 text-sm text-warn">{diagnosis}</p>}
 
         <div className="mt-4 space-y-2 rounded-md border border-border bg-elevated p-3">
           <p className="text-xs font-medium text-fg">1. 绑定 sticky 代理</p>

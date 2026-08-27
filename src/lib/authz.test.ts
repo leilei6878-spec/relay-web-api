@@ -40,3 +40,15 @@ test("unknown bearer does not fall back to admin cookie", async () => {
   const p = await classify(req);
   assert.equal(p, null);
 });
+
+test("x-goog-api-key and ?key= are customer tokens", async () => {
+  const row = await createApiKey({ name: "goog-key" });
+  const goog = new Request("http://127.0.0.1/v1beta/models/gemini-2.5-flash-image:generateContent", {
+    headers: { "x-goog-api-key": row.key },
+  });
+  const p = await classify(goog);
+  assert.equal(p?.kind, "customer");
+  const q = new Request(`http://127.0.0.1/v1beta/models/x:generateContent?key=${encodeURIComponent(row.key)}`);
+  const p2 = await classify(q);
+  assert.equal(p2?.kind, "customer");
+});

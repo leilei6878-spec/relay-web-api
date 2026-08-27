@@ -45,7 +45,12 @@ export const Route = createFileRoute("/v1/chat/completions")({
   server: {
     handlers: {
       OPTIONS: async () => new Response(null, { status: 204, headers: cors() }),
-      POST: async ({ request }) => {
+      POST: async ({ request }) => handleChat(request),
+    },
+  },
+});
+
+export async function handleChat(request: Request): Promise<Response> {
         try {
           bootProductionGuard();
         } catch (err) {
@@ -101,10 +106,7 @@ export const Route = createFileRoute("/v1/chat/completions")({
           completion(result, parsed.images.length, estimateTokens(prompt), estimateTokens(result.text)),
           { headers: cors() },
         );
-      },
-    },
-  },
-});
+}
 
 async function logUsage(
   key: ApiKeyRecord,

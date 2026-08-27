@@ -7,13 +7,14 @@ import { detectPageState, errorForPageState } from "./page-state.ts";
 import { accountEligibleForModel, leonardoAdapter } from "./leonardo.ts";
 import {
   accountHasLeonardoModel,
+  isLeonardoModel,
   mapLogicalModel,
   pickGeminiLabel,
   sizeToAspect,
   validateLeonardoParams,
 } from "./leonardo-models.ts";
 import { inspectSession } from "../session-probe.ts";
-import { loginHelperScript, parseStorageState } from "../session-file.ts";
+import { loginHelperScript, parseStorageState, summarizeStorageState } from "../session-file.ts";
 import { packFor } from "./selectors.ts";
 import type { Account, GatewaySettings, Proxy } from "../types.ts";
 
@@ -69,12 +70,32 @@ test("logical model mapping is not hardcoded to one gemini web name", () => {
   assert.match(pick, /Nano Banana/);
   assert.equal(sizeToAspect("1024x1024"), "1:1");
   assert.equal(sizeToAspect("768x1376"), "9:16");
+  assert.equal(sizeToAspect("1264x848"), "3:2");
+  assert.equal(sizeToAspect("1376x768"), "16:9");
+  assert.equal(sizeToAspect("1584x672"), "21:9");
+  assert.equal(sizeToAspect("5504x3072"), "16:9");
 });
 
 test("validate n/size/quality/refs", () => {
   assert.equal(validateLeonardoParams({ n: 9, logical: "leonardo-gemini" }).ok, false);
   assert.equal(validateLeonardoParams({ n: 1, images: new Array(7).fill("data:image/png;base64,aa"), logical: "leonardo-gpt-image-2" }).ok, false);
   assert.equal(validateLeonardoParams({ n: 2, size: "1024x1024", quality: "HIGH", logical: "leonardo-gpt-image-2" }).ok, true);
+  const ar = validateLeonardoParams({ n: 1, size: "16:9", logical: "leonardo-gemini" });
+  assert.equal(ar.ok, true);
+  if (ar.ok) {
+    assert.equal(ar.aspect, "16:9");
+    assert.equal(ar.size, "1376x768");
+  }
+  const gptLand = validateLeonardoParams({ n: 1, size: "1536x1024", logical: "leonardo-gpt-image-2", model: "gpt-image-1" });
+  assert.equal(gptLand.ok, true);
+  if (gptLand.ok) {
+    assert.equal(gptLand.aspect, "3:2");
+    assert.equal(gptLand.size, "1264x848");
+  }
+  assert.equal(isLeonardoModel("gemini-image"), false);
+  assert.equal(isLeonardoModel("gpt-image-1"), true);
+  assert.equal(isLeonardoModel("gemini-2.5-flash-image"), true);
+  assert.equal(isLeonardoModel("nano-banana-2"), true);
 });
 
 test("page states: login, image ready, token exhausted, queue", () => {
@@ -192,6 +213,11 @@ test("leonardo landing cookies are not a session", () => {
   const guest = inspectSession(guestJson, "leonardo");
   assert.equal(guest.ok, false);
   assert.match(guest.reason || "", /未完成|游客/);
+  assert.match(guest.reason || "", /anonymous-id/);
+  const summary = summarizeStorageState(guestJson, "leonardo");
+  assert.equal(summary.ok, false);
+  assert.ok(summary.cookieNames.includes("anonymous-id"));
+  assert.equal(summary.authNames.length, 0);
   const parsed = parseStorageState(guestJson, "leonardo");
   assert.equal(parsed.ok, false);
   if (!parsed.ok) assert.match(parsed.error, /未完成|游客/);
@@ -302,10 +328,40 @@ test("leonardo login helper waits for Sign In to disappear, not the public compo
   assert.match(py, /callbackUrl/);
   assert.match(py, /oauth_busy/);
   assert.match(py, /click_canva_sso/);
+  assert.match(py, /click_idp_sso/);
+  assert.match(py, /canva_sso_labels/);
+  assert.match(py, /canva_ready/);
+  assert.match(py, /canva_has_session/);
+  assert.match(py, /必须用 Canva 授权/);
+  assert.match(py, /Network.*Cookies/);
   assert.match(py, /ensure_canva_and_leonardo_tabs/);
   assert.match(py, /已打开 Leonardo 标签/);
   assert.match(py, /session_token/);
   assert.match(py, /拒绝保存/);
+  assert.match(py, /Continue with Canva/);
+  assert.equal(py.includes("Hotmail / Outlook 请在 Leonardo 点 Microsoft"), false);
+  assert.equal(py.includes("return ms + canva"), false);
+  const hotmail = loginHelperScript(
+    acc({ email: "AssanteFerraiolo98@hotmail.com", status: "pending_login", sessionPath: null }),
+    {
+      id: "px-1",
+      name: "Japan",
+      type: "http",
+      host: "127.0.0.1",
+      port: 9,
+      username: "",
+      stickySessionId: "s",
+      region: "JP",
+      status: "active",
+      maxAccounts: 8,
+      remark: "",
+      createdAt: new Date().toISOString(),
+    },
+    "",
+  );
+  assert.match(hotmail, /必须用 Canva 授权/);
+  assert.match(hotmail, /不要点 Microsoft/);
+  assert.equal(hotmail.includes("请在 Leonardo 点 Microsoft"), false);
 });
 
 test("leonardo SS helper pins canva.com through the bound node", () => {

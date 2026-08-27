@@ -13,6 +13,7 @@ export const Route = createFileRoute("/api/worker/result")({
           ok?: boolean;
           text?: string;
           url?: string;
+          urls?: string[];
           error?: string;
           fault?: string;
           leaseId?: string;
@@ -37,6 +38,7 @@ export const Route = createFileRoute("/api/worker/result")({
             ok: Boolean(body.ok),
             text: body.text,
             url: body.url,
+            urls: body.urls,
             error: body.error,
             fault: body.fault,
             leaseId: body.leaseId,

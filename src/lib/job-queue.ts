@@ -10,13 +10,14 @@ import { poolUnavailableMessage } from "./eligibility";
 import { classifyError, decisionFor, normalizeError, type FaultClass } from "./faults";
 import { clearJobEvents, publishJobEvent } from "./job-events";
 import { assertLease, issueLease, type Lease } from "./leases";
-import { persistImageUrl } from "./objects";
+import { persistImageUrl, persistImageUrls } from "./objects";
 import { jsonAllowedFor, persistenceMode, pgSotActive } from "./persist-mode";
 import { addAttempt, finishAttempt } from "./requests";
 import { getSecret, proxySecretKey } from "./secrets";
 import { proxyServer } from "./session-file";
 import { uid } from "./utils";
 import { applySessionUpdate, getAdapter, assertGeneratedImage } from "./provider/index";
+import { isLeonardoModel } from "./provider/leonardo-models";
 import type { ChatTurn } from "./provider/types";
 
 export type Job = {
@@ -46,6 +47,7 @@ export type Job = {
   excludeAccountIds?: string[];
   text?: string;
   url?: string;
+  urls?: string[];
   error?: string;
   lease?: Lease;
   kind?: "chat" | "image" | "edit" | "canary";
@@ -61,6 +63,8 @@ export type Job = {
   n?: number;
   size?: string;
   quality?: string;
+  aspect?: string;
+  tier?: string;
   backendMode?: "web_account" | "official_api";
 };
 
@@ -75,6 +79,8 @@ export type EnqueueOpts = {
   n?: number;
   size?: string;
   quality?: string;
+  aspect?: string;
+  tier?: string;
 };
 
 export type WorkerRow = {
@@ -363,6 +369,8 @@ async function enqueue(
       n: opts.n,
       size: opts.size,
       quality: opts.quality,
+      aspect: opts.aspect,
+      tier: opts.tier,
       backendMode: platform === "leonardo" ? "web_account" : undefined,
     };
     if (opts.idempotencyKey) await coordSet(`idem:${opts.idempotencyKey}`, job.id, 86_400_000);
@@ -398,7 +406,7 @@ export function enqueueImage(
   images: string[] = [],
   opts?: EnqueueOpts,
 ) {
-  const platform = model.startsWith("leonardo-") || model === "gpt-image-2" ? "leonardo" : "gemini";
+  const platform = isLeonardoModel(model) ? "leonardo" : "gemini";
   if (pgSotActive()) {
     return import("./pg-jobs").then((m) => m.enqueuePg(platform, prompt, model, timeoutMs, images, opts));
   }
@@ -566,6 +574,7 @@ export function finishJob(
     ok: boolean;
     text?: string;
     url?: string;
+    urls?: string[];
     error?: string;
     fault?: string;
     leaseId?: string;
@@ -601,7 +610,7 @@ export function finishJob(
     }
     const proof = assertLease(job.lease, result);
     if (!proof.ok) return { ok: false as const, error: proof.error };
-    const has = Boolean(result.text || result.url);
+    const has = Boolean(result.text || result.url || (result.urls && result.urls.length));
     const decision = decisionFor(result.error, result.fault);
     const fault = decision.fault_domain || classifyError(result.error);
     if (result.timing) job.timing = result.timing;
@@ -629,24 +638,36 @@ export function finishJob(
       }
     }
     let url = result.url;
+    let urls = (Array.isArray(result.urls) ? result.urls : []).filter((u: string) => typeof u === "string" && u) as string[];
+    if (url && !urls.includes(url)) urls.unshift(url);
     if ((job.platform === "gemini" || job.platform === "leonardo") && result.ok && job.kind !== "canary" && result.text !== "CANARY") {
-      const gate = assertGeneratedImage(url, { allowSvg: process.env.RELAY_ALLOW_MOCK === "1" });
-      if (!gate.ok) {
-        result = { ...result, ok: false, error: gate.error };
-      } else {
-        url = gate.url;
+      const checked: string[] = [];
+      for (const item of urls.length ? urls : url ? [url] : []) {
+        const gate = assertGeneratedImage(item, { allowSvg: process.env.RELAY_ALLOW_MOCK === "1" });
+        if (!gate.ok) {
+          result = { ...result, ok: false, error: gate.error };
+          break;
+        }
+        checked.push(gate.url);
+      }
+      if (result.ok) {
+        urls = checked;
+        url = checked[0];
       }
     }
-    if (url && result.ok && (job.platform === "gemini" || job.platform === "leonardo") && job.kind !== "canary") {
-      const stored = await persistImageUrl(url);
-      if (stored.ok) url = stored.url;
-      else {
+    if (urls.length && result.ok && (job.platform === "gemini" || job.platform === "leonardo") && job.kind !== "canary") {
+      const stored = await persistImageUrls(urls);
+      if (stored.ok) {
+        urls = stored.urls;
+        url = stored.urls[0];
+      } else {
         result = { ...result, ok: false, error: `IMAGE_NOT_FOUND: media store ${stored.error}` };
       }
     }
     job.status = result.ok && has && !result.error ? "done" : "error";
     job.text = result.text;
     job.url = url;
+    job.urls = urls;
     job.error = result.error;
     job.fault = fault;
     job.errorCode = decision.code;
@@ -820,8 +841,8 @@ export async function listJobs() {
   return load();
 }
 
-export async function waitJob(id: string, timeoutMs: number) {
-  const queuedDeadline = Date.now() + timeoutMs + 20_000;
+export async function waitJob(id: string, timeoutMs: number, opts?: { graceMs?: number; cancelOnTimeout?: boolean }) {
+  const queuedDeadline = Date.now() + timeoutMs + (opts?.graceMs ?? 20_000);
   while (Date.now() < queuedDeadline) {
     const job = await getJob(id);
     if (!job) return { ok: false as const, error: "任务丢失" };
@@ -836,6 +857,9 @@ export async function waitJob(id: string, timeoutMs: number) {
       if (remain <= 0) break;
     }
     await new Promise((r) => setTimeout(r, 120));
+  }
+  if (opts?.cancelOnTimeout === false) {
+    return { ok: false as const, error: "TIMEOUT: wait deadline" };
   }
   await cancelJob(id, "TIMEOUT: wait deadline");
   return { ok: false as const, error: "TIMEOUT: wait deadline, job cancelled" };

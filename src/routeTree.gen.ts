@@ -42,6 +42,7 @@ import { Route as ApiWorkerResultRouteImport } from './routes/api/worker/result'
 import { Route as V1ChatCompletionsRouteImport } from './routes/v1/chat/completions'
 import { Route as V1ImagesEditsRouteImport } from './routes/v1/images/edits'
 import { Route as V1ImagesGenerationsRouteImport } from './routes/v1/images/generations'
+import { Route as V1betaModelsSplatRouteImport } from './routes/v1beta/models/$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -208,6 +209,11 @@ const V1ImagesGenerationsRoute = V1ImagesGenerationsRouteImport.update({
   path: '/v1/images/generations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const V1betaModelsSplatRoute = V1betaModelsSplatRouteImport.update({
+  id: '/v1beta/models/$',
+  path: '/v1beta/models/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -243,6 +249,7 @@ export interface FileRoutesByFullPath {
   '/v1/chat/completions': typeof V1ChatCompletionsRoute
   '/v1/images/edits': typeof V1ImagesEditsRoute
   '/v1/images/generations': typeof V1ImagesGenerationsRoute
+  '/v1beta/models/$': typeof V1betaModelsSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -278,6 +285,7 @@ export interface FileRoutesByTo {
   '/v1/chat/completions': typeof V1ChatCompletionsRoute
   '/v1/images/edits': typeof V1ImagesEditsRoute
   '/v1/images/generations': typeof V1ImagesGenerationsRoute
+  '/v1beta/models/$': typeof V1betaModelsSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -314,6 +322,7 @@ export interface FileRoutesById {
   '/v1/chat/completions': typeof V1ChatCompletionsRoute
   '/v1/images/edits': typeof V1ImagesEditsRoute
   '/v1/images/generations': typeof V1ImagesGenerationsRoute
+  '/v1beta/models/$': typeof V1betaModelsSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -351,6 +360,7 @@ export interface FileRouteTypes {
     | '/v1/chat/completions'
     | '/v1/images/edits'
     | '/v1/images/generations'
+    | '/v1beta/models/$'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -386,6 +396,7 @@ export interface FileRouteTypes {
     | '/v1/chat/completions'
     | '/v1/images/edits'
     | '/v1/images/generations'
+    | '/v1beta/models/$'
   id:
     | '__root__'
     | '/'
@@ -421,6 +432,7 @@ export interface FileRouteTypes {
     | '/v1/chat/completions'
     | '/v1/images/edits'
     | '/v1/images/generations'
+    | '/v1beta/models/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -457,6 +469,7 @@ export interface RootRouteChildren {
   V1ChatCompletionsRoute: typeof V1ChatCompletionsRoute
   V1ImagesEditsRoute: typeof V1ImagesEditsRoute
   V1ImagesGenerationsRoute: typeof V1ImagesGenerationsRoute
+  V1betaModelsSplatRoute: typeof V1betaModelsSplatRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -692,6 +705,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof V1ImagesGenerationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/v1beta/models/$': {
+      id: '/v1beta/models/$'
+      path: '/v1beta/models/$'
+      fullPath: '/v1beta/models/$'
+      preLoaderRoute: typeof V1betaModelsSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -729,6 +749,7 @@ const rootRouteChildren: RootRouteChildren = {
   V1ChatCompletionsRoute: V1ChatCompletionsRoute,
   V1ImagesEditsRoute: V1ImagesEditsRoute,
   V1ImagesGenerationsRoute: V1ImagesGenerationsRoute,
+  V1betaModelsSplatRoute: V1betaModelsSplatRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

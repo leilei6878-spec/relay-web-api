@@ -26,4 +26,12 @@ export async function persistImageUrl(url: string): Promise<{ ok: true; id: stri
   }
 }
 
-export { uid };
+export async function persistImageUrls(urls: string[]): Promise<{ ok: true; urls: string[] } | { ok: false; error: string }> {
+  const out: string[] = [];
+  for (const url of urls) {
+    const stored = await persistImageUrl(url);
+    if (!stored.ok) return stored;
+    out.push(stored.url);
+  }
+  return { ok: true, urls: out };
+}
