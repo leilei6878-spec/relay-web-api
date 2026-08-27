@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { adminCookieHeader, assertAdmin, ensureAdminToken } from "@/lib/authz";
+import { adminCookieHeader, allowAutomaticAdminLogin, assertAdmin, ensureAdminToken } from "@/lib/authz";
 import { readControlPlane } from "@/lib/control-plane";
 import { getSecret, proxySecretKey } from "@/lib/secrets";
 import { loginPackTextFiles, safeName } from "@/lib/session-file";
@@ -8,7 +8,7 @@ import { zipStore } from "@/lib/zip-store";
 async function ensureAdmin(request: Request) {
   const auth = await assertAdmin(request);
   if (auth.ok) return { ok: true as const, setCookie: "" };
-  if (process.env.RELAY_REQUIRE_ADMIN_LOGIN === "1") {
+  if (!allowAutomaticAdminLogin()) {
     return { ok: false as const, error: auth.error };
   }
   const token = await ensureAdminToken();

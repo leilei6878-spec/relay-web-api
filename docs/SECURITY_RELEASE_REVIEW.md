@@ -45,7 +45,9 @@ No GitHub PATs in tree.
 
 ## CORS
 
-Public API `*`. Admin session cookie is HttpOnly + SameSite=Lax. Do not put the admin cookie on a public CDN origin without `RELAY_REQUIRE_ADMIN_LOGIN=1`.
+Public API `*`. Admin session cookie is HttpOnly + SameSite=Lax. Automatic admin
+login is disabled unconditionally in production; the production Compose default
+also sets `RELAY_REQUIRE_ADMIN_LOGIN=1`.
 
 ## Log redaction
 

@@ -84,9 +84,24 @@ export function adminCookieHeader(token: string, secure = false) {
     "Path=/",
     "HttpOnly",
     "Max-Age=86400",
-    secure ? "SameSite=None; Secure" : "SameSite=Lax",
+    "SameSite=Lax",
   ];
+  if (secure) parts.push("Secure");
   return parts.join("; ");
+}
+
+/**
+ * Automatic admin login is a local-development convenience only.
+ *
+ * Production must always require the configured admin credential, even when
+ * RELAY_REQUIRE_ADMIN_LOGIN is missing or explicitly set to a falsey value.
+ * This keeps a compose/env regression from turning a public GET request into
+ * an administrator session.
+ */
+export function allowAutomaticAdminLogin(
+  env: { NODE_ENV?: string; RELAY_REQUIRE_ADMIN_LOGIN?: string } = process.env,
+) {
+  return env.NODE_ENV !== "production" && env.RELAY_REQUIRE_ADMIN_LOGIN !== "1";
 }
 
 export async function classify(request: Request): Promise<Principal | null> {

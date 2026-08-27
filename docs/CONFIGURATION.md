@@ -18,6 +18,8 @@ Production (`NODE_ENV=production`) **fails closed** unless all of these resolve
 Forbidden in production: `RELAY_DEMO_MODE=true`, `RELAY_ALLOW_MOCK=1`, `RELAY_TEST_URL=self`.
 
 Optional: `LOG_LEVEL`, `MAX_WORKERS`, `MAX_WORKER_CONCURRENCY`, `PROVIDER_CANARY_ENABLED`,
-`RELAY_REQUIRE_ADMIN_LOGIN=1`, `RELAY_METRICS_TOKEN` (gates `/metrics`).
+`RELAY_REQUIRE_ADMIN_LOGIN=1`, `RELAY_METRICS_TOKEN` (gates `/metrics`). Automatic
+admin login is never available when `NODE_ENV=production`; the flag also disables
+the convenience in development.
 
 Development may omit the above; `/readyz` reports `degraded`.
