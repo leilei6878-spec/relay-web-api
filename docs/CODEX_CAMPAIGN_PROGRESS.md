@@ -2,7 +2,7 @@
 
 Started: 2026-08-27  
 Takeover HEAD: `b30a9f7d52653344d8512f5479b8f882c88500d0`  
-Current phase: Phase 7 — local automated campaign complete; release operations next
+Current phase: Phase 9 — local acceptance complete; external deployment/live gates blocked
 
 ## Rules for this log
 
@@ -51,7 +51,7 @@ At takeover:
 | 7D | Dev + production browser render | COMPLETE | Desktop and 390×844 mobile render with visible content, no horizontal overflow, and zero browser-console warnings/errors. Production-only partial runtime response crash was found, fixed, rebuilt, and retested. |
 | 7E | Production dependency audit | COMPLETE | Official npm audit 0 vulnerabilities after removing unpatched `image-size` and replacing it with bounded PNG/JPEG/WebP parsing. |
 | 8 | Real providers + soak | BLOCKED_BY_ENVIRONMENT | Needs healthy sessions/accounts and reachable production worker/infrastructure. |
-| 9 | Final acceptance | PENDING | `CODEX_FINAL_ACCEPTANCE.md`, requirement-by-requirement completion audit. |
+| 9 | Final acceptance | COMPLETE | `CODEX_FINAL_ACCEPTANCE.md` answers all 30 required questions and preserves every external/live blocker. |
 
 ## Environment blockers (do not stop local phases)
 
@@ -85,6 +85,11 @@ runs. No zero is inferred from unit tests:
 - `06cca41` — truthful chat model contract, exact vision attach, abort recovery
 - `ac0ae39` — frozen references, strict image provenance, warm runtime closure
 - `71fd1f1` — distributed provider self-healing and bounded admission
+- `68e60ed` — cross-platform full local reliability and 500-job leak campaign
+- `1035633` — fail-closed production backup/restore and Compose contract
+- `47be2f3` — exact release identity and `0.9.0-rc2`
+- `9e4fc8b` — production-dashboard partial runtime response resilience
+- `d9ccd60` — bounded image metadata parsing; production dependency audit 0
 
 ## Phase 7 evidence (2026-08-28)
 
