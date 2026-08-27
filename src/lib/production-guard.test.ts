@@ -49,9 +49,26 @@ test("production fully configured is ready", () => {
     RELAY_S3_BUCKET: "b",
     RELAY_S3_ACCESS_KEY: "k",
     RELAY_S3_SECRET_KEY: "s",
+    RELAY_RELEASE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   } as NodeJS.ProcessEnv);
   assert.equal(report.ready, true);
   assert.deepEqual(report.blockers, []);
+});
+
+test("production refuses an unidentified release commit", () => {
+  const report = runProductionReadinessCheck({
+    NODE_ENV: "production",
+    DATABASE_URL: "postgres://x",
+    REDIS_URL: "redis://x",
+    RELAY_ADMIN_TOKEN: "ad-relay-aaaaaaaaaaaaaaaaaaaaaaaa",
+    RELAY_WORKER_TOKEN: "wk-relay-aaaaaaaaaaaaaaaaaaaaaaaa",
+    RELAY_SECRETS_KEY: "test-encryption-key-not-for-prod",
+    RELAY_S3_BUCKET: "b",
+    RELAY_S3_ACCESS_KEY: "k",
+    RELAY_S3_SECRET_KEY: "s",
+  } as NodeJS.ProcessEnv);
+  assert.equal(report.ready, false);
+  assert.match(report.blockers.join(" "), /release_identity/);
 });
 
 test("production missing encryption key is not ready", () => {

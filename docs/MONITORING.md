@@ -2,8 +2,8 @@
 
 | Endpoint | Meaning |
 |---|---|
-| `GET /healthz` | Process alive. Always 200 if the HTTP server started. |
-| `GET /readyz` | Postgres, Redis, secrets, media, worker token, migrations, provider config. 503 if production required item fails. |
+| `GET /healthz` | Process alive plus release version, schema, exact commit and build time. Always 200 if the HTTP server started. |
+| `GET /readyz` | Postgres, Redis, secrets, media, worker token, migrations, provider config and release identity. 503 if a production-required item fails. |
 | `GET /metrics` | Prometheus text. Optional `RELAY_METRICS_TOKEN`. |
 | `GET /api/admin/metrics` | JSON SLO + queue + accounts + circuit (admin). |
 | `GET /internal/readiness` | Live pings (admin). |

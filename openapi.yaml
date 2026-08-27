@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Relay Public API
-  version: 0.9.0-rc1
+  version: 0.9.0-rc2
   description: |
     OpenAI-compatible public API for the Relay web-to-API gateway.
     Admin and Worker endpoints are intentionally omitted.

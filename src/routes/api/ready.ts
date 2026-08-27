@@ -4,6 +4,7 @@ import { coordBackend } from "@/lib/coord";
 import { persistenceMode } from "@/lib/persist-mode";
 import { objectStoreConfigured } from "@/lib/media-store";
 import { dbSource } from "@/lib/db";
+import { releaseIdentity } from "@/lib/release";
 
 export const Route = createFileRoute("/api/ready")({
   server: {
@@ -13,13 +14,19 @@ export const Route = createFileRoute("/api/ready")({
           bootProductionGuard();
         } catch (err) {
           return Response.json(
-            { ready: false, production: true, error: err instanceof Error ? err.message : "fail-closed" },
+            {
+              ready: false,
+              production: true,
+              release: releaseIdentity(),
+              error: err instanceof Error ? err.message : "fail-closed",
+            },
             { status: 503 },
           );
         }
         const report = runProductionReadinessCheck();
         const body = {
           ...report,
+          release: releaseIdentity(),
           backend: {
             db: dbSource,
             persist: persistenceMode(),

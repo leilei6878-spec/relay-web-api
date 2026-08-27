@@ -1,4 +1,5 @@
-import { isProduction, mockModeEnabled, readEnv } from "./env-mode";
+import { mockModeEnabled, readEnv } from "./env-mode";
+import { releaseIdentity } from "./release";
 
 export type CheckId =
   | "database"
@@ -9,7 +10,8 @@ export type CheckId =
   | "migrations"
   | "admin_auth"
   | "provider_config"
-  | "encryption_key";
+  | "encryption_key"
+  | "release_identity";
 
 export type CheckStatus = "ok" | "missing" | "degraded" | "forbidden";
 
@@ -38,6 +40,7 @@ const REQUIRED_IN_PRODUCTION: CheckId[] = [
   "admin_auth",
   "provider_config",
   "encryption_key",
+  "release_identity",
 ];
 
 function item(
@@ -72,6 +75,7 @@ export function runProductionReadinessCheck(env: NodeJS.ProcessEnv = process.env
   const chatgpt = readEnv("RELAY_PROVIDER_CHATGPT", env) !== "off";
   const gemini = readEnv("RELAY_PROVIDER_GEMINI", env) !== "off";
   const providerOk = chatgpt && gemini && !mock;
+  const release = releaseIdentity(env);
 
   const items: CheckItem[] = [
     item(
@@ -144,6 +148,15 @@ export function runProductionReadinessCheck(env: NodeJS.ProcessEnv = process.env
           ? "Mock/Test/Demo mode is forbidden in production"
           : "Provider config disabled"
         : "Mock mode allowed in non-production",
+    ),
+    item(
+      "release_identity",
+      production,
+      release.commit !== "unknown" ? "ok" : production ? "missing" : "degraded",
+      `Release commit ${release.commit}`,
+      production
+        ? "RELAY_RELEASE_SHA (or a supported platform commit SHA) must identify the deployed commit"
+        : "Commit identity unavailable in this development process",
     ),
   ];
 

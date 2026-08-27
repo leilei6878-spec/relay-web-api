@@ -4,6 +4,7 @@ import { isProduction, mockModeEnabled, readEnv } from "./env-mode";
 import { objectStoreConfigured } from "./media-store";
 import { persistenceMode } from "./persist-mode";
 import { runProductionReadinessCheck, type CheckId, type CheckItem, type CheckStatus } from "./production-guard";
+import { releaseIdentity } from "./release";
 
 export type LiveReadiness = {
   production: boolean;
@@ -64,6 +65,7 @@ function overlay(item: CheckItem, live: { ok: boolean; detail: string }): CheckI
 
 export async function runLiveReadinessCheck(): Promise<LiveReadiness> {
   const base = runProductionReadinessCheck();
+  const release = releaseIdentity();
   const db = await pingDatabase();
   const redis = await pingRedis();
   const live: LiveReadiness["live"] = {
@@ -93,6 +95,10 @@ export async function runLiveReadinessCheck(): Promise<LiveReadiness> {
     provider_config: {
       ok: !mockModeEnabled() || !isProduction(),
       detail: mockModeEnabled() ? "mock mode" : "ChatGPT + Gemini enabled",
+    },
+    release_identity: {
+      ok: release.commit !== "unknown" || !isProduction(),
+      detail: release.commit === "unknown" ? "release commit unknown" : `commit ${release.commit}`,
     },
   };
 

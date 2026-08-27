@@ -23,6 +23,7 @@ test("production Compose requires secrets and publishes the documented host port
     "RELAY_WORKER_TOKEN",
     "RELAY_SECRETS_KEY",
     "RELAY_PUBLIC_URL",
+    "RELAY_RELEASE_SHA",
   ]) {
     assert.ok(compose.includes(`\${${name}:?`), `${name} must use required Compose interpolation`);
   }

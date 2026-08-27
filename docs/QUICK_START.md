@@ -23,7 +23,8 @@ curl http://127.0.0.1:8080/v1/models \
 ```
 cp .env.example .env
 # fill POSTGRES_PASSWORD, RELAY_ADMIN_TOKEN, RELAY_WORKER_TOKEN,
-# RELAY_SECRETS_KEY, RELAY_PUBLIC_URL and S3_*; no required value has a default
+# RELAY_SECRETS_KEY, RELAY_PUBLIC_URL, RELAY_RELEASE_SHA=$(git rev-parse HEAD),
+# and S3_*; no required value has a default
 docker compose -f docker-compose.production.yml up -d --build
 curl -sf http://127.0.0.1:8088/healthz
 curl -sf http://127.0.0.1:8088/readyz

@@ -10,13 +10,16 @@ Services: `postgres`, `redis`, bundled `minio`, `gateway`, and `worker`.
 
 ```
 cp .env.example .env
-# set RELAY_ADMIN_TOKEN, RELAY_WORKER_TOKEN, RELAY_SECRETS_KEY, S3_* 
+# set RELAY_ADMIN_TOKEN, RELAY_WORKER_TOKEN, RELAY_SECRETS_KEY, S3_*
+# and RELAY_RELEASE_SHA=$(git rev-parse HEAD)
 docker compose -f docker-compose.production.yml up -d --build
 ```
 
 Gateway entrypoint runs `npm run db:migrate` then `vite preview` on container
 port `8080`, published by default at host `127.0.0.1:8088`.
 Worker entrypoint runs the Playwright Python daemon against `RELAY_GATEWAY`.
+`/healthz`, `/readyz`, `/api/ready`, and `/api/runtime` expose the release
+identity; production readiness is false when the exact commit is unknown.
 
 **Compose-up in the Grok workspace: NOT_EXECUTED** (no Docker daemon). Verify on the first real host before calling the install production.
 

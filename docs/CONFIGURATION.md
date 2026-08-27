@@ -14,10 +14,11 @@ Production (`NODE_ENV=production`) **fails closed** unless all of these resolve
 | `RELAY_SECRETS_KEY` | `SESSION_ENCRYPTION_KEY` | AES-256-GCM for proxy/session secrets. |
 | `RELAY_S3_BUCKET` + access/secret | `S3_*` / `AWS_*` | Object media. Local disk forbidden. |
 | `RELAY_PUBLIC_URL` | `PUBLIC_BASE_URL` | Absolute URLs for stored images. |
+| `RELAY_RELEASE_SHA` | platform commit SHA | Exact deployed Git commit; production readiness rejects `unknown`. |
 
 Forbidden in production: `RELAY_DEMO_MODE=true`, `RELAY_ALLOW_MOCK=1`, `RELAY_TEST_URL=self`.
 
-Optional: `LOG_LEVEL`, `MAX_WORKERS`, `MAX_WORKER_CONCURRENCY`, `PROVIDER_CANARY_ENABLED`,
+Optional: `RELAY_BUILD_TIME` (ISO-8601), `LOG_LEVEL`, `MAX_WORKERS`, `MAX_WORKER_CONCURRENCY`, `PROVIDER_CANARY_ENABLED`,
 `RELAY_REQUIRE_ADMIN_LOGIN=1`, `RELAY_METRICS_TOKEN` (gates `/metrics`). Automatic
 admin login is never available when `NODE_ENV=production`; the flag also disables
 the convenience in development.

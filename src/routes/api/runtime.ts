@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { listJobs, liveWorkerOnline } from "@/lib/job-queue";
 import { runProductionReadinessCheck } from "@/lib/production-guard";
 import { serverWorkerStatus } from "@/lib/server-worker";
+import { releaseIdentity } from "@/lib/release";
 
 export const Route = createFileRoute("/api/runtime")({
   server: {
@@ -18,6 +19,7 @@ export const Route = createFileRoute("/api/runtime")({
           }));
         const production = runProductionReadinessCheck();
         return Response.json({
+          release: releaseIdentity(),
           workerOnline: await liveWorkerOnline(),
           workers: live,
           queued: jobs.filter((j) => j.status === "queued" || j.status === "running").length,
