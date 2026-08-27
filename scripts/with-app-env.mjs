@@ -87,6 +87,17 @@ export function projectRoot() {
   return dirname(dirname(fileURLToPath(import.meta.url)));
 }
 
+/** Run Vite's JS entry directly on Windows; `.cmd` shims need a shell. */
+export function commandInvocation(command, args, platform = process.platform, root = projectRoot()) {
+  if (platform === "win32" && command === "vite") {
+    return {
+      command: process.execPath,
+      args: [join(root, "node_modules", "vite", "bin", "vite.js"), ...args],
+    };
+  }
+  return { command, args };
+}
+
 /**
  * Whether `moduleUrl` is the script node was asked to run.
  *
@@ -111,7 +122,8 @@ function main(argv) {
     process.exit(2);
   }
   const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
-  const child = spawn(command, args, { stdio: "inherit", env });
+  const invocation = commandInvocation(command, args);
+  const child = spawn(invocation.command, invocation.args, { stdio: "inherit", env });
   // The dev server is long-running and is stopped by signalling this wrapper.
   for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
     process.on(signal, () => child.kill(signal));

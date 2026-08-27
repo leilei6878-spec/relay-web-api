@@ -159,6 +159,7 @@ export async function probeProxyJob(data: ProbeProxyInput) {
     const started = Date.now();
     const tunnel = await runCurl(["-sS", "--max-time", "12", "--socks5-hostname", `127.0.0.1:${local}`, "https://api.ipify.org"]);
     const tunnelMs = Date.now() - started;
+    const tunnelDetail = tunnel.ok ? tunnel.text : tunnel.error;
     if (tunnel.ok) {
       const ip = tunnel.text.trim();
       if (/^[\d.:a-fA-F]+$/.test(ip)) {
@@ -177,7 +178,7 @@ export async function probeProxyJob(data: ProbeProxyInput) {
       portOk: true,
       portMs: port.ms,
       tunnelOk: false,
-      error: `SS 节点 TCP 通，但 SOCKS ${local} 仍出不了网（${tunnel.text || "无响应"}）`,
+      error: `SS 节点 TCP 通，但 SOCKS ${local} 仍出不了网（${tunnelDetail || "无响应"}）`,
       ms: tunnelMs,
     };
   }

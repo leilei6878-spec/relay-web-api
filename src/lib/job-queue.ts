@@ -22,6 +22,11 @@ import { validateJobImageUrls } from "./provider/image-result-validator";
 import { describeDataUrl } from "./provider/reference-verify";
 import type { ChatTurn } from "./provider/types";
 
+export type JobTiming = Record<
+  string,
+  string | number | boolean | null | undefined | Record<string, number>
+>;
+
 export type Job = {
   id: string;
   status: "queued" | "running" | "done" | "error" | "cancelled" | "dead";
@@ -58,7 +63,7 @@ export type Job = {
   pageState?: string;
   requestedModel?: string;
   actualModel?: string;
-  timing?: Record<string, unknown>;
+  timing?: JobTiming;
   actualProfile?: string;
   profileVerified?: boolean;
   recoveryLevel?: number;
@@ -608,7 +613,7 @@ export function finishJob(
     pageState?: string;
     fingerprint?: string;
     selectorPackVersion?: string;
-    timing?: Record<string, unknown>;
+    timing?: JobTiming;
     actualProfile?: string;
     profileVerified?: boolean;
     recoveryLevel?: number;

@@ -17,7 +17,6 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint --if-present
-        continue-on-error: true
       - name: Relay unit + distributed tests
         run: npm run test:ci
       - name: Secret scan

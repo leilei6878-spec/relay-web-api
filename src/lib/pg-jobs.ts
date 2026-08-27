@@ -8,7 +8,7 @@ import { classifyError, decisionFor, normalizeError } from "./faults";
 import { clearJobEvents, publishJobEvent } from "./job-events";
 import { assertLease, issueLease, type Lease } from "./leases";
 import { persistImageUrl, persistImageUrls } from "./objects";
-import type { EnqueueOpts, Job, WorkerRow } from "./job-queue";
+import type { EnqueueOpts, Job, JobTiming, WorkerRow } from "./job-queue";
 import {
   dbCancelJobAtomic,
   dbClaimJob,
@@ -288,7 +288,7 @@ export async function finishJobPg(
     pageState?: string;
     fingerprint?: string;
     selectorPackVersion?: string;
-    timing?: Record<string, unknown>;
+    timing?: JobTiming;
     actualProfile?: string;
     profileVerified?: boolean;
     recoveryLevel?: number;

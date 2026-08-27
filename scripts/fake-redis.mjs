@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment -- this intentionally tiny RESP fixture is plain JavaScript.
 // @ts-nocheck
 import net from "node:net";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
