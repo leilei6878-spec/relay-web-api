@@ -110,7 +110,7 @@ POST_SUBMIT_STATES = set("SUBMITTED GENERATING RESULT_DETECTED RESULT_VALIDATED 
 
 def set_submission_state(ctx, state):
     if ctx is None:
-        return
+        return False
     ctx.submission_state = state
     if state == "SUBMITTING":
         ctx.click_attempted = True
@@ -123,7 +123,7 @@ def set_submission_state(ctx, state):
             ctx.retry_safety = "UNKNOWN"
         else:
             ctx.retry_safety = "UNSAFE"
-    post_phase(state.lower(), ctx)
+    return post_phase(state.lower(), ctx)
 
 def fail_job(ctx, error, fault="provider", extra=None):
     extra = dict(extra or {})
@@ -233,6 +233,32 @@ def proxy_fingerprint(proxy):
         return ""
     return str(proxy.get("server") or "").strip()
 
+def proxy_pool_key(proxy):
+    if not isinstance(proxy, dict) or not proxy.get("server"):
+        return "direct"
+    material = json.dumps(
+        [
+            str(proxy.get("id") or ""),
+            str(proxy.get("server") or ""),
+            str(proxy.get("username") or ""),
+            str(proxy.get("password") or ""),
+            str(proxy.get("bypass") or ""),
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:20]
+    return "%s#%s" % (str(proxy.get("server") or ""), digest)
+
+def playwright_proxy(proxy):
+    if not isinstance(proxy, dict) or not proxy.get("server"):
+        return None
+    return {
+        key: proxy[key]
+        for key in ("server", "username", "password", "bypass")
+        if proxy.get(key)
+    }
+
 def proxy_healthy(c):
     if not isinstance(c, dict):
         return False
@@ -296,14 +322,14 @@ def account_lock(aid):
 
 def post_chunk(text, phase="", ctx=None):
     if os.environ.get("RELAY_STREAM_CHUNKS") == "0" and text and not phase:
-        return
+        return False
     if ctx is None:
-        return
+        return False
     gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
     token = os.environ.get("RELAY_TOKEN") or ""
     jid = ctx.job_id
     if not (gw and token and jid and (text or phase)):
-        return
+        return not gw
     try:
         import urllib.request
         payload = {
@@ -311,6 +337,7 @@ def post_chunk(text, phase="", ctx=None):
             "leaseId": ctx.lease_id or "",
             "fencingToken": ctx.fencing_token or None,
             "attemptId": ctx.attempt_id or "",
+            "workerId": ctx.worker_id or "",
             "traceId": ctx.trace_id or "",
             "accountId": ctx.account_id or "",
         }
@@ -318,6 +345,9 @@ def post_chunk(text, phase="", ctx=None):
             payload["text"] = text
         if phase:
             payload["phase"] = phase
+            if str(phase).upper() == str(ctx.submission_state or "").upper():
+                payload["submissionState"] = ctx.submission_state
+                payload["retrySafety"] = ctx.retry_safety
         req = urllib.request.Request(
             gw + "/api/worker/chunk",
             data=json.dumps(payload).encode("utf-8"),
@@ -325,11 +355,12 @@ def post_chunk(text, phase="", ctx=None):
             method="POST",
         )
         urllib.request.urlopen(req, timeout=8).read()
+        return True
     except Exception:
-        pass
+        return False
 
 def post_phase(phase, ctx=None):
-    post_chunk("", phase, ctx)
+    return post_chunk("", phase, ctx)
 
 def post_result(ctx, result):
     gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
@@ -361,6 +392,10 @@ def post_result(ctx, result):
         "tokenState": result.get("tokenState"),
         "backendMode": result.get("backendMode") or "web_account",
         "queueDepth": result.get("queueDepth"),
+        "timing": result.get("timing"),
+        "actualProfile": result.get("actualProfile"),
+        "profileVerified": result.get("profileVerified"),
+        "recoveryLevel": result.get("recoveryLevel"),
         "traceId": ctx.trace_id,
         "accountId": ctx.account_id,
         "proxyId": ctx.proxy_id,
@@ -1200,8 +1235,8 @@ class AssistantCompletionDetector:
         if not self.first_delta_at:
             self.first_delta_at = now
         self.last_delta_at = now
-        if self.state in (self.WAITING_FIRST_DELTA, self.POSSIBLY_COMPLETE):
-            if self.state == self.POSSIBLY_COMPLETE:
+        if self.state in (self.WAITING_FIRST_DELTA, self.POSSIBLY_COMPLETE, self.CONFIRMED_COMPLETE):
+            if self.state in (self.POSSIBLY_COMPLETE, self.CONFIRMED_COMPLETE):
                 self.premature_guard_triggered = True
             self.state = self.STREAMING
             self.possibly_at = 0
@@ -2270,7 +2305,7 @@ def recycle_idle_contexts():
 def get_pooled_context(proxy, storage_state, account_id):
     shard = current_shard()
     p = playwright_inst()
-    proxy_key = ((proxy or {}).get("server") if isinstance(proxy, dict) else "") or "direct"
+    proxy_key = proxy_pool_key(proxy)
     with shard.lock:
         recycle_idle_contexts()
         browser = shard.browser_pool.get(proxy_key)
@@ -2344,8 +2379,9 @@ def open_browser(p, proxy):
     args = ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
     ignore = ["--enable-automation"]
     kw = {"headless": HEADLESS, "args": args, "ignore_default_args": ignore}
-    if proxy:
-        kw["proxy"] = proxy
+    launch_proxy = playwright_proxy(proxy)
+    if launch_proxy:
+        kw["proxy"] = launch_proxy
     if not HEADLESS:
         for channel in ("chrome", "msedge"):
             try:
@@ -2542,18 +2578,28 @@ def run_chat(body, ctx=None):
         except Exception:
             pass
         arm_page(page)
-        net = {"req": None, "res": None, "finished": False}
+        net = {"armed": False, "req": None, "res": None, "finished": False, "urls": set()}
+        def arm_turn_network():
+            net["armed"] = True
+            net["req"] = None
+            net["res"] = None
+            net["finished"] = False
+            net["urls"] = set()
         def on_req(req):
             u = req.url or ""
-            if net["req"] is None and any(x in u for x in ("/backend-api/", "/conversation")):
+            if not net["armed"] or str(getattr(req, "method", "")).upper() != "POST":
+                return
+            if any(x in u for x in ("/backend-api/", "/conversation")):
+                net["urls"].add(u)
+            if net["req"] is None and u in net["urls"]:
                 net["req"] = time.time()
         def on_res(res):
             u = res.url or ""
-            if net["res"] is None and any(x in u for x in ("/backend-api/", "/conversation")):
+            if net["armed"] and net["res"] is None and u in net["urls"]:
                 net["res"] = time.time()
         def on_req_done(req):
             u = req.url or ""
-            if any(x in u for x in ("/backend-api/", "/conversation")):
+            if net["armed"] and u in net["urls"]:
                 net["finished"] = True
         try:
             page.on("request", on_req)
@@ -2636,8 +2682,12 @@ def run_chat(body, ctx=None):
             }
         mark("T5")
         install_mut_observer(page, page.locator("div[data-message-author-role='assistant']").count())
+        arm_turn_network()
         set_submission_state(ctx, "INPUT_READY")
-        set_submission_state(ctx, "SUBMITTING")
+        if not set_submission_state(ctx, "SUBMITTING"):
+            ctx.submission_state = "INPUT_READY"
+            ctx.retry_safety = "SAFE"
+            return fail_job(ctx, "WORKER_TIMEOUT: submission checkpoint unavailable", "worker", {"timing": marks})
         sub = submit_prompt(page, prompt, inp, send, stop)
         mark("T6")
         if sub.get("acked"):
@@ -2649,7 +2699,11 @@ def run_chat(body, ctx=None):
             composer_ready(page, COMPOSER_READY_TIMEOUT)
             switched, actual = select_model(page, model)
             install_mut_observer(page, page.locator("div[data-message-author-role='assistant']").count())
-            set_submission_state(ctx, "SUBMITTING")
+            arm_turn_network()
+            if not set_submission_state(ctx, "SUBMITTING"):
+                ctx.submission_state = "INPUT_READY"
+                ctx.retry_safety = "SAFE"
+                return fail_job(ctx, "WORKER_TIMEOUT: submission checkpoint unavailable", "worker", {"recoveryLevel": recovery_level, "timing": marks})
             sub = submit_prompt(page, prompt, inp, send, stop)
             if sub.get("acked"):
                 set_submission_state(ctx, "SUBMITTED")
@@ -2724,6 +2778,24 @@ def run_chat(body, ctx=None):
                     post_chunk(gap, "streaming", ctx)
             text = final_dom
             det.on_delta(final_dom, time.time())
+            reconfirm_deadline = min(
+                deadline,
+                time.time() + (stable_ms + chat_confirm_ms() + 1000) / 1000.0,
+            )
+            while time.time() < reconfirm_deadline and det.state != det.CONFIRMED_COMPLETE:
+                latest = read_assistant_full(page)
+                if usable_assistant_text(latest) and latest != text:
+                    if latest.startswith(text or ""):
+                        gap = latest[len(text or ""):]
+                        if gap:
+                            post_chunk(gap, "streaming", ctx)
+                    text = latest
+                    det.on_delta(latest, time.time())
+                det.on_stop(stop_generating_visible(page, stop), time.time())
+                if last_assistant_complete_signal(page):
+                    det.on_semantic_complete(time.time())
+                det.tick(time.time())
+                time.sleep(0.06)
         chat_obs = det.report(text)
         print("CHAT_COMPLETION", json.dumps(chat_obs, ensure_ascii=False), flush=True)
         if det.very_short_completion:
@@ -2994,7 +3066,10 @@ def run_image(body, ctx=None):
         boundary = create_generation_boundary(page, ctx, "gemini")
         baseline = boundary.get("baseline_asset_urls") or snapshot_image_srcs(page)
         send_btn, _ = pick_locator(page, send, 4)
-        set_submission_state(ctx, "SUBMITTING")
+        if not set_submission_state(ctx, "SUBMITTING"):
+            ctx.submission_state = "INPUT_READY"
+            ctx.retry_safety = "SAFE"
+            return fail_job(ctx, "WORKER_TIMEOUT: submission checkpoint unavailable", "worker")
         click_send(page, send_btn)
         set_submission_state(ctx, "SUBMITTED")
         deadline = time.time() + int(body.get("timeoutMs") or 90000) / 1000
@@ -3844,7 +3919,10 @@ def run_leonardo(body, ctx=None):
         except Exception:
             pass
         print("leonardo clicking generate", flush=True)
-        set_submission_state(ctx, "SUBMITTING")
+        if not set_submission_state(ctx, "SUBMITTING"):
+            ctx.submission_state = "INPUT_READY"
+            ctx.retry_safety = "SAFE"
+            return fail_job(ctx, "WORKER_TIMEOUT: submission checkpoint unavailable", "worker", {"backendMode": "web_account", "availableModels": available, "modelActual": picked})
         gen_clicked = leonardo_js_generate(page)
         if not gen_clicked:
             if images:

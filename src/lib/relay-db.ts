@@ -1,6 +1,7 @@
 import { getSql } from "./db";
 import type { Account, GatewaySettings, Proxy } from "./types";
 import type { ApiKeyRecord } from "./api-keys";
+import { recoveryDisposition, resetSubmissionForRetry } from "./job-recovery";
 
 export type PlaneRow = {
   accounts: Account[];
@@ -477,14 +478,62 @@ export async function dbFinishJobAtomic(input: {
   return Boolean(rows[0]);
 }
 
-export async function dbCancelJobAtomic(jobId: string, extra: Record<string, unknown>) {
+export async function dbCheckpointJobAtomic(input: {
+  jobId: string;
+  leaseId: string;
+  fencingToken: number;
+  submissionRank: number;
+  retrySafetyRank: number;
+  extra: Record<string, unknown>;
+}) {
+  const db = await sql();
+  const rows = await db.query<{ id: string }>(
+    `update relay_jobs
+        set extra=$1::jsonb
+      where id=$2
+        and status='running'
+        and lease_id=$3
+        and fencing_token=$4
+        and coalesce((extra->>'submissionRank')::int, -1) <= $5
+        and coalesce((extra->>'retrySafetyRank')::int, -1) <= $6
+      returning id`,
+    [
+      json(input.extra),
+      input.jobId,
+      input.leaseId,
+      input.fencingToken,
+      input.submissionRank,
+      input.retrySafetyRank,
+    ],
+  );
+  return Boolean(rows[0]);
+}
+
+export async function dbCancelJobAtomic(input: {
+  jobId: string;
+  extra: Record<string, unknown>;
+  expectedStatus: "queued" | "running";
+  leaseId?: string | null;
+  fencingToken?: number | null;
+}) {
   const db = await sql();
   const rows = await db.query<{ id: string }>(
     `update relay_jobs
         set status=$1, error=$2, fault=$3, extra=$4::jsonb
-      where id=$5 and status in ('queued','running')
+      where id=$5
+        and status=$6
+        and ($6 <> 'running' or (lease_id=$7 and fencing_token=$8))
       returning id`,
-    [extra.status, extra.error || null, extra.fault || null, json(extra), jobId],
+    [
+      input.extra.status,
+      input.extra.error || null,
+      input.extra.fault || null,
+      json(input.extra),
+      input.jobId,
+      input.expectedStatus,
+      input.leaseId ?? null,
+      input.fencingToken ?? null,
+    ],
   );
   return Boolean(rows[0]);
 }
@@ -552,47 +601,109 @@ export async function dbPatchAccount(id: string, patch: Record<string, unknown>)
   return true;
 }
 
-export async function dbReclaimDeadJobs(deadMs: number, graceMs: number, maxRetry: number) {
-  const db = await sql();
-  const rows = await db.query<{ extra: unknown; id: string; attempts: number }>(
-    `select extra, id, attempts from relay_jobs
-      where status='running'
-        and started_at is not null
-        and extract(epoch from (now() - started_at)) * 1000 > $1`,
-    [Math.max(deadMs, graceMs)],
+type QueryDb = {
+  query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]>;
+};
+
+export async function reclaimDeadJobsWithDb(
+  db: QueryDb,
+  deadMs: number,
+  graceMs: number,
+  maxRetry: number,
+) {
+  const rows = await db.query<{
+    extra: unknown;
+    id: string;
+    attempts: number;
+    lease_id: string | null;
+    fencing_token: number | null;
+    timed_out: boolean;
+  }>(
+    `select j.extra, j.id, j.attempts, j.lease_id, j.fencing_token,
+            (extract(epoch from (now() - j.started_at)) * 1000 > coalesce(j.timeout_ms, 90000) + 8000) as timed_out
+       from relay_jobs j
+       left join relay_workers w on w.name=j.worker_id
+      where j.status='running'
+        and j.started_at is not null
+        and extract(epoch from (now() - j.started_at)) * 1000 > $2
+        and (
+          extract(epoch from (now() - j.started_at)) * 1000 > coalesce(j.timeout_ms, 90000) + 8000
+          or j.worker_id is null
+          or w.last_beat is null
+          or extract(epoch from (now() - w.last_beat)) * 1000 > $1
+        )`,
+    [deadMs, graceMs],
   );
   const recovered: Record<string, unknown>[] = [];
   for (const row of rows) {
-    const extra = { ...(row.extra as object) } as Record<string, unknown>;
+    let extra = { ...(row.extra as object) } as Record<string, unknown>;
     const attempts = Number(row.attempts || extra.attempts || 1);
-    if (attempts < maxRetry) {
+    extra.attempts = attempts;
+    const disposition = recoveryDisposition(extra, maxRetry);
+    let applied = false;
+    if (disposition === "requeue") {
+      extra = resetSubmissionForRetry(extra);
       extra.status = "queued";
-      extra.error = "WORKER_CRASH: 执行器掉线，已回队";
-      extra.fault = "worker";
-      extra.errorCode = "WORKER_CRASH";
+      extra.error = row.timed_out ? "WORKER_TIMEOUT: 已回队" : "WORKER_CRASH: 执行器掉线，已回队";
+      extra.fault = row.timed_out ? "infra" : "worker";
+      extra.errorCode = row.timed_out ? "WORKER_TIMEOUT" : "WORKER_CRASH";
       extra.workerName = undefined;
       extra.workerId = undefined;
       extra.startedAt = undefined;
       extra.lease = undefined;
-      await db.query(
-        `update relay_jobs set status='queued', worker_id=null, lease_id=null, extra=$1::jsonb, error=$2, fault='worker'
-          where id=$3 and status='running'`,
-        [json(extra), extra.error, row.id],
+      extra.leaseId = undefined;
+      extra.attemptId = undefined;
+      const updated = await db.query<{ id: string }>(
+        `update relay_jobs
+            set status='queued', worker_id=null, attempt_id=null, lease_id=null,
+                started_at=null, extra=$1::jsonb, error=$2, fault=$3
+          where id=$4 and status='running'
+            and lease_id is not distinct from $5
+            and fencing_token is not distinct from $6
+          returning id`,
+        [json(extra), extra.error, extra.fault, row.id, row.lease_id, row.fencing_token],
       );
+      applied = Boolean(updated[0]);
+    } else if (disposition === "uncertain") {
+      extra.status = "error";
+      extra.error = "RESULT_UNCERTAIN: worker lost after possible provider submission";
+      extra.fault = "provider";
+      extra.errorCode = "RESULT_UNCERTAIN";
+      extra.lease = undefined;
+      const updated = await db.query<{ id: string }>(
+        `update relay_jobs
+            set status='error', extra=$1::jsonb, error=$2, fault='provider', finished_at=now()
+          where id=$3 and status='running'
+            and lease_id is not distinct from $4
+            and fencing_token is not distinct from $5
+          returning id`,
+        [json(extra), extra.error, row.id, row.lease_id, row.fencing_token],
+      );
+      applied = Boolean(updated[0]);
     } else {
       extra.status = "dead";
-      extra.error = "WORKER_CRASH: dead-letter";
-      extra.fault = "worker";
-      extra.errorCode = "WORKER_CRASH";
-      await db.query(
-        `update relay_jobs set status='dead', extra=$1::jsonb, error=$2, fault='worker'
-          where id=$3 and status='running'`,
-        [json(extra), extra.error, row.id],
+      extra.error = row.timed_out ? "WORKER_TIMEOUT: dead-letter" : "WORKER_CRASH: dead-letter";
+      extra.fault = row.timed_out ? "infra" : "worker";
+      extra.errorCode = row.timed_out ? "WORKER_TIMEOUT" : "WORKER_CRASH";
+      extra.lease = undefined;
+      const updated = await db.query<{ id: string }>(
+        `update relay_jobs
+            set status='dead', extra=$1::jsonb, error=$2, fault=$3, finished_at=now()
+          where id=$4 and status='running'
+            and lease_id is not distinct from $5
+            and fencing_token is not distinct from $6
+          returning id`,
+        [json(extra), extra.error, extra.fault, row.id, row.lease_id, row.fencing_token],
       );
+      applied = Boolean(updated[0]);
     }
-    recovered.push(extra);
+    if (applied) recovered.push(extra);
   }
   return recovered;
+}
+
+export async function dbReclaimDeadJobs(deadMs: number, graceMs: number, maxRetry: number) {
+  return reclaimDeadJobsWithDb(await sql(), deadMs, graceMs, maxRetry);
 }
 
 export async function dbInsertRequestIdempotent(row: Record<string, unknown>): Promise<{ request: Record<string, unknown>; replay: boolean }> {

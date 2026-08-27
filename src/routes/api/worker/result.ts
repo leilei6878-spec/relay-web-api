@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertWorker } from "@/lib/authz";
-import { finishJob } from "@/lib/job-queue";
+import { finishJob, type JobTiming } from "@/lib/job-queue";
 
 export const Route = createFileRoute("/api/worker/result")({
   server: {
@@ -31,6 +31,12 @@ export const Route = createFileRoute("/api/worker/result")({
           tokenState?: string;
           backendMode?: "web_account" | "official_api";
           queueDepth?: number;
+          timing?: JobTiming;
+          actualProfile?: string;
+          profileVerified?: boolean;
+          recoveryLevel?: number;
+          retrySafety?: "SAFE" | "UNKNOWN" | "UNSAFE";
+          submissionState?: string;
         };
         if (!body.id) return Response.json({ error: "缺少任务 id" }, { status: 400 });
         return Response.json(
@@ -55,6 +61,12 @@ export const Route = createFileRoute("/api/worker/result")({
             tokenState: body.tokenState,
             backendMode: body.backendMode,
             queueDepth: body.queueDepth,
+            timing: body.timing,
+            actualProfile: body.actualProfile,
+            profileVerified: body.profileVerified,
+            recoveryLevel: body.recoveryLevel,
+            retrySafety: body.retrySafety,
+            submissionState: body.submissionState,
           }),
         );
       },

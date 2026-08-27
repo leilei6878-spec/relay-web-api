@@ -21,6 +21,12 @@ import { isLeonardoModel } from "./provider/leonardo-models";
 import { validateJobImageUrls } from "./provider/image-result-validator";
 import { describeDataUrl } from "./provider/reference-verify";
 import type { ChatTurn } from "./provider/types";
+import {
+  applySubmissionCheckpoint,
+  recoveryDisposition,
+  resetSubmissionForRetry,
+  type SubmissionCheckpoint,
+} from "./job-recovery";
 
 export type JobTiming = Record<
   string,
@@ -69,6 +75,8 @@ export type Job = {
   recoveryLevel?: number;
   retrySafety?: "SAFE" | "UNSAFE" | "UNKNOWN";
   submissionState?: string;
+  submissionRank?: number;
+  retrySafetyRank?: number;
   n?: number;
   size?: string;
   quality?: string;
@@ -211,22 +219,47 @@ async function reclaim(store: Store): Promise<Store> {
     }
     const workerDead = !grace && !hbFresh && (!worker || now - Date.parse(worker.lastBeat) > deadMs);
     if (!timedOut && !workerDead) continue;
-    if (job.accountId) await coordDel(`account-lease:${job.accountId}`);
-    if (job.id) await coordDel(`job-claim:${job.id}`);
-    const attempts = job.attempts || 1;
-    if (attempts < maxRetry) {
+    const disposition = recoveryDisposition(job, maxRetry);
+    if (disposition === "requeue") {
+      Object.assign(job, resetSubmissionForRetry(job));
       job.status = "queued";
       job.error = workerDead ? "WORKER_CRASH: 执行器掉线，已回队" : "WORKER_TIMEOUT: 已回队";
       job.fault = workerDead ? "worker" : "infra";
       job.errorCode = workerDead ? "WORKER_CRASH" : "WORKER_TIMEOUT";
       job.workerName = undefined;
+      job.workerId = undefined;
       job.startedAt = undefined;
       job.lease = undefined;
+      job.leaseId = undefined;
+      job.attemptId = undefined;
+      await coordDel(`job-claim:${job.id}`);
+      if (job.accountId) {
+        await coordSet(`account-lease:${job.accountId}`, job.id, job.timeoutMs || 90_000);
+      }
+    } else if (disposition === "uncertain") {
+      job.status = "error";
+      job.error = "RESULT_UNCERTAIN: worker lost after possible provider submission";
+      job.fault = "provider";
+      job.errorCode = "RESULT_UNCERTAIN";
+      job.lease = undefined;
+      if (job.accountId) {
+        await releaseJobLeases(job.id, job.accountId, job.workerName || job.workerId);
+        await patchAccount(job.accountId, { lockedUntil: null }).catch(() => undefined);
+      } else {
+        await coordDel(`job-claim:${job.id}`);
+      }
     } else {
       job.status = "dead";
       job.error = timedOut ? "WORKER_TIMEOUT: dead-letter" : "WORKER_CRASH: dead-letter";
       job.fault = workerDead ? "worker" : "infra";
       job.errorCode = timedOut ? "WORKER_TIMEOUT" : "WORKER_CRASH";
+      job.lease = undefined;
+      if (job.accountId) {
+        await releaseJobLeases(job.id, job.accountId, job.workerName || job.workerId);
+        await patchAccount(job.accountId, { lockedUntil: null }).catch(() => undefined);
+      } else {
+        await coordDel(`job-claim:${job.id}`);
+      }
     }
   }
   return store;
@@ -824,6 +857,37 @@ export function finishJob(
   });
 }
 
+export function checkpointJob(
+  id: string,
+  checkpoint: SubmissionCheckpoint & {
+    leaseId?: string;
+    fencingToken?: number;
+    attemptId?: string;
+    workerId?: string;
+  },
+) {
+  if (pgSotActive()) {
+    return import("./pg-jobs").then((m) => m.checkpointJobPg(id, checkpoint));
+  }
+  return locked(async () => {
+    const store = await load();
+    const job = store.jobs.find((j) => j.id === id);
+    if (!job) return { ok: false as const, error: "任务不存在" };
+    if (job.status !== "running") {
+      return { ok: false as const, error: "STALE_LEASE: job is not running" };
+    }
+    const proof = assertLease(job.lease, checkpoint);
+    if (!proof.ok) return { ok: false as const, error: proof.error };
+    Object.assign(job, applySubmissionCheckpoint(job, checkpoint));
+    await save(store);
+    return {
+      ok: true as const,
+      submissionState: job.submissionState,
+      retrySafety: job.retrySafety,
+    };
+  });
+}
+
 export async function getJob(id: string) {
   if (pgSotActive()) {
     const m = await import("./pg-jobs");
@@ -903,7 +967,14 @@ export async function waitJob(id: string, timeoutMs: number, opts?: { graceMs?: 
   if (opts?.cancelOnTimeout === false) {
     return { ok: false as const, error: "TIMEOUT: wait deadline" };
   }
-  await cancelJob(id, "TIMEOUT: wait deadline");
+  const cancelled = await cancelJob(id, "TIMEOUT: wait deadline");
+  if ("retained" in cancelled && cancelled.retained) {
+    return {
+      ok: false as const,
+      error: "RESULT_UNCERTAIN: wait deadline; submitted attempt retained for recovery",
+      job: await getJob(id),
+    };
+  }
   return { ok: false as const, error: "TIMEOUT: wait deadline, job cancelled" };
 }
 
@@ -918,20 +989,40 @@ export function cancelJob(id: string, error: string) {
     if (job.status === "done") return { ok: true as const };
     const plane = await readControlPlane();
     const maxRetry = plane.settings.maxRetry || 3;
-    if (job.accountId) await coordDel(`account-lease:${job.accountId}`);
-    await coordDel(`job-claim:${job.id}`);
     const abandon = isClientAbandon(error);
-    if ((job.attempts || 0) < maxRetry && job.status === "running" && !abandon) {
+    const disposition = recoveryDisposition(job, maxRetry);
+    if (job.status === "running" && disposition === "uncertain") {
+      job.error = error;
+      await save(store);
+      return { ok: true as const, retained: true as const, status: job.status };
+    }
+    if (disposition === "requeue" && job.status === "running" && !abandon) {
+      Object.assign(job, resetSubmissionForRetry(job));
       job.status = "queued";
       job.error = error;
       job.fault = "infra";
+      job.workerName = undefined;
+      job.workerId = undefined;
+      job.startedAt = undefined;
       job.lease = undefined;
+      job.leaseId = undefined;
+      job.attemptId = undefined;
+      await coordDel(`job-claim:${job.id}`);
+      if (job.accountId) {
+        await coordSet(`account-lease:${job.accountId}`, job.id, job.timeoutMs || 90_000);
+      }
     } else {
       job.status = "cancelled";
       job.error = error;
       job.fault = abandon && error.includes("REQUEST_CANCELLED") ? "client" : "infra";
       job.errorCode = error.includes("REQUEST_CANCELLED") ? "REQUEST_CANCELLED" : normalizeError(error);
-      if (job.accountId) await patchAccount(job.accountId, { lockedUntil: null }).catch(() => undefined);
+      job.lease = undefined;
+      if (job.accountId) {
+        await releaseJobLeases(job.id, job.accountId, job.workerName || job.workerId);
+        await patchAccount(job.accountId, { lockedUntil: null }).catch(() => undefined);
+      } else {
+        await coordDel(`job-claim:${job.id}`);
+      }
     }
     await save(store);
     return { ok: true as const };

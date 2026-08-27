@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import "./test-env.ts";
 import { resetCoordForTests } from "./coord.ts";
 import { writeControlPlane } from "./control-plane.ts";
-import { claimNext, cancelJob, enqueueChat, finishJob, getJob } from "./job-queue.ts";
+import { checkpointJob, claimNext, cancelJob, enqueueChat, finishJob, getJob } from "./job-queue.ts";
 
 process.env.RELAY_SKIP_DB = "1";
 
@@ -156,6 +156,100 @@ test("wait deadline cancel is terminal and frees the account", async () => {
   assert.equal(job?.status, "cancelled");
   const second = await enqueueChat("next", "gpt-5.6", 8000, [], { idempotencyKey: `next-${Date.now()}` });
   assert.equal(second.ok, true, second.ok ? "" : second.error);
+});
+
+test("post-submit cancellation retains the running attempt and never requeues", async () => {
+  await seed();
+  const queued = await enqueueChat("paid", "gpt-5.6", 8000, [], {
+    idempotencyKey: `unsafe-${Date.now()}`,
+  });
+  assert.equal(queued.ok, true);
+  if (!queued.ok) return;
+  const next = await claimNext("qa-worker");
+  assert.ok(next.job);
+  const job = next.job!;
+  const checkpoint = await checkpointJob(job.id, {
+    leaseId: job.leaseId,
+    fencingToken: job.fencingToken,
+    attemptId: job.attemptId,
+    workerId: "qa-worker",
+    submissionState: "SUBMITTED",
+    retrySafety: "UNSAFE",
+  });
+  assert.equal(checkpoint.ok, true);
+
+  const stale = await checkpointJob(job.id, {
+    leaseId: job.leaseId,
+    fencingToken: job.fencingToken,
+    attemptId: job.attemptId,
+    workerId: "different-worker",
+    submissionState: "GENERATING",
+    retrySafety: "UNSAFE",
+  });
+  assert.equal(stale.ok, false);
+  if (!stale.ok) assert.match(stale.error, /worker_id mismatch/);
+
+  const cancelled = await cancelJob(job.id, "TIMEOUT: wait deadline");
+  assert.equal(cancelled.ok, true);
+  assert.equal("retained" in cancelled && cancelled.retained, true);
+  assert.equal((await getJob(job.id))?.status, "running");
+
+  const finished = await finishJob(job.id, {
+    ok: true,
+    text: "provider result",
+    leaseId: job.leaseId,
+    fencingToken: job.fencingToken,
+    attemptId: job.attemptId,
+    workerId: "qa-worker",
+    submissionState: "RESULT_VALIDATED",
+    retrySafety: "UNSAFE",
+  });
+  assert.equal(finished.ok, true);
+  assert.equal((await getJob(job.id))?.status, "done");
+});
+
+test("dead-worker reclaim requeues SAFE work but terminalizes submitted work", async () => {
+  const oldDead = process.env.RELAY_WORKER_DEAD_MS;
+  const oldGrace = process.env.RELAY_CLAIM_GRACE_MS;
+  process.env.RELAY_WORKER_DEAD_MS = "1";
+  process.env.RELAY_CLAIM_GRACE_MS = "1";
+  try {
+    await seed();
+    const safe = await enqueueChat("safe", "gpt-5.6", 8000, [], {
+      idempotencyKey: `reclaim-safe-${Date.now()}`,
+    });
+    assert.equal(safe.ok, true);
+    if (!safe.ok) return;
+    await claimNext("dead-safe-worker");
+    await new Promise((resolve) => setTimeout(resolve, 8));
+    assert.equal((await getJob(safe.job.id))?.status, "queued");
+
+    await seed();
+    const unsafe = await enqueueChat("unsafe", "gpt-5.6", 8000, [], {
+      idempotencyKey: `reclaim-unsafe-${Date.now()}`,
+    });
+    assert.equal(unsafe.ok, true);
+    if (!unsafe.ok) return;
+    const claimed = await claimNext("dead-unsafe-worker");
+    const job = claimed.job!;
+    await checkpointJob(job.id, {
+      leaseId: job.leaseId,
+      fencingToken: job.fencingToken,
+      attemptId: job.attemptId,
+      workerId: "dead-unsafe-worker",
+      submissionState: "SUBMITTED",
+      retrySafety: "UNSAFE",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 8));
+    const recovered = await getJob(job.id);
+    assert.equal(recovered?.status, "error");
+    assert.match(recovered?.error || "", /RESULT_UNCERTAIN/);
+  } finally {
+    if (oldDead === undefined) delete process.env.RELAY_WORKER_DEAD_MS;
+    else process.env.RELAY_WORKER_DEAD_MS = oldDead;
+    if (oldGrace === undefined) delete process.env.RELAY_CLAIM_GRACE_MS;
+    else process.env.RELAY_CLAIM_GRACE_MS = oldGrace;
+  }
 });
 
 test("queue cap returns QUEUE_FULL 429", async () => {

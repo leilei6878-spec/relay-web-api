@@ -15,5 +15,14 @@ test("stale worker result is rejected", () => {
   assert.equal(assertLease(lease, { leaseId: "nope", fencingToken: 4, attemptId: lease.attemptId }).ok, false);
   assert.equal(assertLease(lease, { leaseId: lease.leaseId, fencingToken: 1, attemptId: lease.attemptId }).ok, false);
   assert.equal(assertLease(undefined, { leaseId: lease.leaseId, fencingToken: 4 }).ok, false);
+  assert.equal(
+    assertLease(lease, {
+      leaseId: lease.leaseId,
+      fencingToken: 4,
+      attemptId: lease.attemptId,
+      workerId: "w2",
+    }).ok,
+    false,
+  );
   assert.equal(assertLease(lease, { leaseId: lease.leaseId, fencingToken: 4, attemptId: lease.attemptId }).ok, true);
 });

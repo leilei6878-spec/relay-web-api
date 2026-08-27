@@ -600,7 +600,11 @@ d.on_delta('我是GPT-5.6。三句话说明。', 2.0)
 assert d.tick(2.5)=='STREAMING', d.state
 assert d.tick(3.6)=='POSSIBLY_COMPLETE', d.state
 assert d.tick(4.3)=='CONFIRMED_COMPLETE', d.state
-assert 'GPT-5.6' in d.streamed_text
+assert d.on_delta('我是GPT-5.6。三句话说明。补充完整。', 4.35)=='STREAMING', d.state
+assert d.premature_guard_triggered is True
+assert d.tick(5.9)=='POSSIBLY_COMPLETE', d.state
+assert d.tick(6.6)=='CONFIRMED_COMPLETE', d.state
+assert '补充完整' in d.streamed_text
 print('pause-350-ok')
 `,
     ],
@@ -675,5 +679,29 @@ print('stop-seen-ok')
   );
   assert.equal(out.status, 0, out.stderr || out.stdout);
   assert.match(out.stdout, /stop-seen-ok/);
+});
+
+test("worker persists submission safety checkpoints and final timing metadata", () => {
+  const s = localWorkerScript();
+  assert.match(s, /payload\["submissionState"\] = ctx\.submission_state/);
+  assert.match(s, /payload\["retrySafety"\] = ctx\.retry_safety/);
+  assert.match(s, /submission checkpoint unavailable/);
+  assert.match(s, /if not set_submission_state\(ctx, "SUBMITTING"\)/);
+  assert.match(s, /"workerId": ctx\.worker_id or ""/);
+  assert.match(s, /"timing": result\.get\("timing"\)/);
+  assert.match(s, /"actualProfile": result\.get\("actualProfile"\)/);
+  assert.match(s, /"profileVerified": result\.get\("profileVerified"\)/);
+  assert.match(s, /"recoveryLevel": result\.get\("recoveryLevel"\)/);
+  assert.match(s, /"armed": False/);
+  assert.match(s, /arm_turn_network\(\)/);
+});
+
+test("browser pool key includes proxy identity and credentials", () => {
+  const s = localWorkerScript();
+  assert.match(s, /def proxy_pool_key/);
+  assert.match(s, /hashlib\.sha256\(material\.encode\("utf-8"\)\)/);
+  assert.match(s, /proxy_key = proxy_pool_key\(proxy\)/);
+  assert.match(s, /def playwright_proxy/);
+  assert.doesNotMatch(s, /kw\["proxy"\] = proxy\s*$/m);
 });
 

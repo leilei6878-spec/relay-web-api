@@ -29,5 +29,8 @@ export function assertLease(held: Lease | undefined, proof: { leaseId?: string; 
   if (proof.attemptId && proof.attemptId !== held.attemptId) {
     return { ok: false as const, error: "STALE_LEASE: attempt_id mismatch" };
   }
+  if (proof.workerId && proof.workerId !== held.workerId) {
+    return { ok: false as const, error: "STALE_LEASE: worker_id mismatch" };
+  }
   return { ok: true as const };
 }

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertWorker } from "@/lib/authz";
-import { getJob } from "@/lib/job-queue";
+import { checkpointJob, getJob } from "@/lib/job-queue";
 import { assertLease } from "@/lib/leases";
 import { publishJobEvent } from "@/lib/job-events";
 
@@ -17,12 +17,19 @@ export const Route = createFileRoute("/api/worker/chunk")({
           leaseId?: string;
           fencingToken?: number;
           attemptId?: string;
+          workerId?: string;
+          retrySafety?: "SAFE" | "UNKNOWN" | "UNSAFE";
+          submissionState?: string;
         };
         if (!body.id || (!body.text && !body.phase)) return Response.json({ error: "缺少 id/text" }, { status: 400 });
         const job = await getJob(body.id);
         if (!job) return Response.json({ error: "任务不存在" }, { status: 404 });
         const proof = assertLease(job.lease, body);
         if (!proof.ok) return Response.json({ error: proof.error }, { status: 409 });
+        if (body.submissionState || body.retrySafety) {
+          const saved = await checkpointJob(body.id, body);
+          if (!saved.ok) return Response.json({ error: saved.error }, { status: 409 });
+        }
         if (body.phase) publishJobEvent(body.id, { type: "phase", phase: body.phase });
         if (body.text) publishJobEvent(body.id, { type: "delta", text: body.text });
         return Response.json({ ok: true });

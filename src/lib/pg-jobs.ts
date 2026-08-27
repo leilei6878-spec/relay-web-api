@@ -11,6 +11,7 @@ import { persistImageUrl, persistImageUrls } from "./objects";
 import type { EnqueueOpts, Job, JobTiming, WorkerRow } from "./job-queue";
 import {
   dbCancelJobAtomic,
+  dbCheckpointJobAtomic,
   dbClaimJob,
   dbFinishJobAtomic,
   dbGetJob,
@@ -29,6 +30,12 @@ import { getSecret, proxySecretKey } from "./secrets";
 import { proxyServer } from "./session-file";
 import { uid } from "./utils";
 import { markResilience } from "./resilience-metrics";
+import {
+  applySubmissionCheckpoint,
+  recoveryDisposition,
+  resetSubmissionForRetry,
+  type SubmissionCheckpoint,
+} from "./job-recovery";
 
 const PENDING = "__pending__";
 
@@ -43,7 +50,13 @@ async function reclaimAll() {
     const id = String(j.id || "");
     const accountId = String(j.accountId || "");
     if (id) await coordDel(`job-claim:${id}`);
-    if (accountId) await coordDel(`account-lease:${accountId}`);
+    if (accountId && j.status === "queued") {
+      await coordSet(`account-lease:${accountId}`, id, Number(j.timeoutMs || 90_000));
+    } else if (accountId) {
+      await coordDel(`account-lease:${accountId}`);
+      await dbUnlockAccount(accountId).catch(() => undefined);
+      await patchAccount(accountId, { lockedUntil: null }).catch(() => undefined);
+    }
   }
   return recovered;
 }
@@ -544,21 +557,71 @@ export async function finishJobPg(
   return { ok: true as const };
 }
 
+export async function checkpointJobPg(
+  id: string,
+  checkpoint: SubmissionCheckpoint & {
+    leaseId?: string;
+    fencingToken?: number;
+    attemptId?: string;
+    workerId?: string;
+  },
+) {
+  const current = asJob(await dbGetJob(id));
+  if (!current) return { ok: false as const, error: "任务不存在" };
+  if (current.status !== "running") {
+    return { ok: false as const, error: "STALE_LEASE: job is not running" };
+  }
+  const held: Lease = current.lease || {
+    leaseId: current.leaseId || "",
+    fencingToken: current.fencingToken || 0,
+    attemptId: current.attemptId || "",
+    workerId: current.workerId || current.workerName || "",
+    jobId: current.id,
+  };
+  const proof = assertLease(held, checkpoint);
+  if (!proof.ok) return { ok: false as const, error: proof.error };
+  const next = applySubmissionCheckpoint(current, checkpoint);
+  const applied = await dbCheckpointJobAtomic({
+    jobId: id,
+    leaseId: held.leaseId,
+    fencingToken: held.fencingToken,
+    submissionRank: next.submissionRank,
+    retrySafetyRank: next.retrySafetyRank,
+    extra: next as unknown as Record<string, unknown>,
+  });
+  if (!applied) return { ok: false as const, error: "STALE_LEASE: checkpoint race" };
+  return {
+    ok: true as const,
+    submissionState: next.submissionState,
+    retrySafety: next.retrySafety,
+  };
+}
+
 export async function cancelJobPg(id: string, error: string) {
   const current = asJob(await dbGetJob(id));
   if (!current) return { ok: false as const };
   if (current.status === "done") return { ok: true as const };
   const plane = await readControlPlane();
   const maxRetry = plane.settings.maxRetry || 3;
-  if (current.accountId) {
-    await coordDel(`account-lease:${current.accountId}`);
-    await dbUnlockAccount(current.accountId).catch(() => undefined);
-  }
-  await coordDel(`job-claim:${id}`);
   const abandon = /TIMEOUT: wait deadline|REQUEST_CANCELLED|客户端断开/.test(error);
+  const disposition = recoveryDisposition(current, maxRetry);
+  if (current.status === "running" && disposition === "uncertain") {
+    return { ok: true as const, retained: true as const, status: current.status };
+  }
   let next: Job;
-  if ((current.attempts || 0) < maxRetry && current.status === "running" && !abandon) {
-    next = { ...current, status: "queued", error, fault: "infra", lease: undefined };
+  if (disposition === "requeue" && current.status === "running" && !abandon) {
+    next = resetSubmissionForRetry({
+      ...current,
+      status: "queued",
+      error,
+      fault: "infra",
+      lease: undefined,
+      leaseId: undefined,
+      attemptId: undefined,
+      workerId: undefined,
+      workerName: undefined,
+      startedAt: undefined,
+    });
   } else {
     next = {
       ...current,
@@ -566,9 +629,25 @@ export async function cancelJobPg(id: string, error: string) {
       error,
       fault: error.includes("REQUEST_CANCELLED") ? "client" : "infra",
       errorCode: error.includes("REQUEST_CANCELLED") ? "REQUEST_CANCELLED" : normalizeError(error),
+      lease: undefined,
     };
   }
-  await dbCancelJobAtomic(id, next as unknown as Record<string, unknown>);
+  const applied = await dbCancelJobAtomic({
+    jobId: id,
+    extra: next as unknown as Record<string, unknown>,
+    expectedStatus: current.status === "running" ? "running" : "queued",
+    leaseId: current.leaseId,
+    fencingToken: current.fencingToken,
+  });
+  if (!applied) return { ok: false as const, error: "STALE_LEASE: cancel race" };
+  await coordDel(`job-claim:${id}`);
+  if (current.accountId && next.status === "queued") {
+    await coordSet(`account-lease:${current.accountId}`, id, current.timeoutMs || 90_000);
+  } else if (current.accountId) {
+    await coordDel(`account-lease:${current.accountId}`);
+    await dbUnlockAccount(current.accountId).catch(() => undefined);
+    await patchAccount(current.accountId, { lockedUntil: null }).catch(() => undefined);
+  }
   return { ok: true as const };
 }
 
