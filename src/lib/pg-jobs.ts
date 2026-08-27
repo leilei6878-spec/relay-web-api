@@ -234,10 +234,12 @@ export async function claimNextPg(
 
   const session = job.accountId ? await readSessionJson(job.accountId) : { ok: false as const, error: "无账号" };
   const acc = plane.accounts.find((a) => a.id === job.accountId);
-  const bound = acc ? plane.proxies.find((p) => p.id === acc.proxyId) : null;
+  const boundId = job.proxyId || acc?.proxyId;
+  const bound = boundId ? plane.proxies.find((p) => p.id === boundId) : null;
   const password = bound ? (await getSecret(proxySecretKey(bound.id))) || "" : "";
   const proxy = bound
     ? {
+        id: bound.id,
         server: proxyServer(bound),
         username: bound.type === "ss" ? "" : bound.username,
         password: bound.type === "ss" ? "" : password,

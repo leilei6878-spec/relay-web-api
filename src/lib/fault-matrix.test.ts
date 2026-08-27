@@ -9,6 +9,7 @@ test("every required error code has a decision", () => {
     "ACCOUNT_RATE_LIMIT",
     "PROXY_UNAVAILABLE",
     "PROXY_TIMEOUT",
+    "PROXY_IDENTITY_MISMATCH",
     "WORKER_CRASH",
     "WORKER_TIMEOUT",
     "PROVIDER_DOM_CHANGED",
@@ -71,4 +72,16 @@ test("LEONARDO_TOKEN_EXHAUSTED switches account", () => {
   const d = decide("LEONARDO_TOKEN_EXHAUSTED");
   assert.equal(d.switch_account, true);
   assert.equal(d.account_health_effect, "cool");
+});
+
+test("assigned proxy failure never rebinds the account", () => {
+  const down = decide("PROXY_UNAVAILABLE: assigned proxy unreachable");
+  assert.equal(down.code, "PROXY_UNAVAILABLE");
+  assert.equal(down.switch_account, false);
+  assert.equal(down.switch_proxy, false);
+  const drift = decide("PROXY_IDENTITY_MISMATCH: expected socks5://127.0.0.1:18080 got socks5://127.0.0.1:10808");
+  assert.equal(drift.code, "PROXY_IDENTITY_MISMATCH");
+  assert.equal(drift.switch_account, false);
+  assert.equal(drift.switch_proxy, false);
+  assert.equal(drift.retry_same_account, false);
 });

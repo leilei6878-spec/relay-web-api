@@ -162,3 +162,45 @@ print("ok")
   assert.equal(out.status, 0, out.stderr || out.stdout);
   assert.match(out.stdout, /ok/);
 });
+
+test("production job_proxy never falls back to a different local SOCKS", () => {
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      `
+import importlib.util, os
+os.environ["NODE_ENV"] = "production"
+os.environ.pop("RELAY_ALLOW_PROXY_FALLBACK", None)
+spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+m.pick_proxy = lambda: {"server": "socks5://127.0.0.1:10808", "id": "B"}
+m.port_open = lambda port: int(port) == 10808
+m.socks_https_ok = lambda c: str((c or {}).get("server") or "").endswith(":10808")
+body = {"proxy": {"server": "socks5://127.0.0.1:18080", "id": "A"}, "proxyId": "A"}
+assert m.job_proxy(body) is None, m.job_proxy(body)
+assert "assigned proxy unreachable" in m.proxy_fail_error(body)
+m.port_open = lambda port: True
+m.socks_https_ok = lambda c: True
+got = m.job_proxy(body)
+assert got["server"] == "socks5://127.0.0.1:18080", got
+assert got["id"] == "A"
+assert m.job_proxy({}) is None
+err = m.proxy_identity_error(body, {"server": "socks5://127.0.0.1:10808", "id": "B"})
+assert err and "PROXY_IDENTITY_MISMATCH" in err, err
+os.environ["NODE_ENV"] = "development"
+os.environ["RELAY_ALLOW_PROXY_FALLBACK"] = "1"
+m.socks_https_ok = lambda c: True
+m.port_open = lambda port: True
+fb = m.job_proxy({})
+assert fb and "10808" in fb["server"], fb
+print("ok")
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /ok/);
+});

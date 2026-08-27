@@ -6,6 +6,7 @@ export const ErrorCode = {
   ACCOUNT_RATE_LIMIT: "ACCOUNT_RATE_LIMIT",
   PROXY_UNAVAILABLE: "PROXY_UNAVAILABLE",
   PROXY_TIMEOUT: "PROXY_TIMEOUT",
+  PROXY_IDENTITY_MISMATCH: "PROXY_IDENTITY_MISMATCH",
   WORKER_CRASH: "WORKER_CRASH",
   WORKER_TIMEOUT: "WORKER_TIMEOUT",
   PROVIDER_DOM_CHANGED: "PROVIDER_DOM_CHANGED",
@@ -71,7 +72,7 @@ export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
     fault_domain: "proxy",
     retry_same_account: false,
     switch_account: false,
-    switch_proxy: true,
+    switch_proxy: false,
     provider_circuit_effect: "none",
     account_health_effect: "none",
   },
@@ -80,7 +81,16 @@ export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
     fault_domain: "proxy",
     retry_same_account: false,
     switch_account: false,
-    switch_proxy: true,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
+  PROXY_IDENTITY_MISMATCH: {
+    code: "PROXY_IDENTITY_MISMATCH",
+    fault_domain: "proxy",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: false,
     provider_circuit_effect: "none",
     account_health_effect: "none",
   },
@@ -241,7 +251,7 @@ export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
     fault_domain: "proxy",
     retry_same_account: false,
     switch_account: false,
-    switch_proxy: true,
+    switch_proxy: false,
     provider_circuit_effect: "none",
     account_health_effect: "none",
   },
@@ -283,6 +293,7 @@ export function normalizeError(error?: string, faultHint?: string): ErrorCode {
   if (t.includes("SESSION") || t.includes("LOGIN") || t.includes("COOKIE") || t.includes("SESSION_INVALID")) {
     return "ACCOUNT_SESSION_EXPIRED";
   }
+  if (t.includes("IDENTITY_MISMATCH")) return "PROXY_IDENTITY_MISMATCH";
   if (t.includes("PROXY") && t.includes("TIMEOUT")) return "PROXY_TIMEOUT";
   if (t.includes("PROXY") || t.includes("代理")) return "PROXY_UNAVAILABLE";
   if (t.includes("WORKER_DEAD") || t.includes("WORKER_CRASH") || t.includes("执行器掉线")) return "WORKER_CRASH";

@@ -97,32 +97,83 @@ def socks_https_ok(proxy):
         return False
 
 def tunnel_down_error():
-    return "PROXY_TUNNEL_DOWN: Shadowsocks 隧道暂时无法出网，正在使用本机可用 SOCKS。请稍后重试。"
+    return "PROXY_UNAVAILABLE: assigned proxy cannot egress"
+
+def production_runtime():
+    return (os.environ.get("NODE_ENV") or "").strip().lower() == "production"
+
+def proxy_fallback_allowed():
+    if production_runtime():
+        return False
+    return os.environ.get("RELAY_ALLOW_PROXY_FALLBACK") == "1"
+
+def assigned_proxy(body):
+    p = (body or {}).get("proxy") or {}
+    if isinstance(p, dict) and p.get("server"):
+        return p
+    return None
+
+def proxy_fingerprint(proxy):
+    if not isinstance(proxy, dict):
+        return ""
+    return str(proxy.get("server") or "").strip()
+
+def proxy_healthy(c):
+    if not isinstance(c, dict):
+        return False
+    server = str(c.get("server") or "")
+    if not server:
+        return False
+    if server.startswith("socks5"):
+        try:
+            sp = int(server.rsplit(":", 1)[-1])
+        except Exception:
+            sp = 0
+        if sp and not port_open(sp):
+            return False
+        return socks_https_ok(c)
+    return True
 
 def job_proxy(body):
-    candidates = []
-    p = body.get("proxy") or {}
-    if isinstance(p, dict) and p.get("server"):
-        candidates.append(p)
-    alt = pick_proxy()
-    if alt:
-        server = alt.get("server")
-        if not any((c.get("server") if isinstance(c, dict) else "") == server for c in candidates):
-            candidates.append(alt)
-    for c in candidates:
-        server = (c.get("server") if isinstance(c, dict) else "") or ""
-        if server.startswith("socks5"):
-            try:
-                sp = int(server.rsplit(":", 1)[-1])
-            except Exception:
-                sp = 0
-            if sp and not port_open(sp):
-                continue
-            if socks_https_ok(c):
-                return {"server": server}
-            continue
-        return c
-    return pick_proxy()
+    assigned = assigned_proxy(body)
+    pid = str((body or {}).get("proxyId") or (assigned or {}).get("id") or "")
+    if assigned:
+        if proxy_healthy(assigned):
+            out = dict(assigned)
+            if pid:
+                out["id"] = pid
+            out["fingerprint"] = proxy_fingerprint(assigned)
+            return out
+        print("job_proxy assigned down", assigned.get("server"), "id", pid, flush=True)
+        return None
+    if proxy_fallback_allowed():
+        alt = pick_proxy()
+        if alt and proxy_healthy(alt):
+            alt = dict(alt)
+            alt["fingerprint"] = proxy_fingerprint(alt)
+            return alt
+        return None
+    return None
+
+def proxy_fail_error(body, leonardo=False):
+    prefix = "LEONARDO_PROXY_UNAVAILABLE" if leonardo else "PROXY_UNAVAILABLE"
+    if assigned_proxy(body):
+        return prefix + ": assigned proxy unreachable"
+    return prefix + ": job missing account-bound proxy"
+
+def proxy_identity_error(body, used):
+    assigned = assigned_proxy(body)
+    if not assigned or not isinstance(used, dict):
+        return None
+    want = str(assigned.get("server") or "").strip()
+    got = str(used.get("server") or "").strip()
+    if want and got and want != got:
+        return "PROXY_IDENTITY_MISMATCH: expected %s got %s" % (want, got)
+    pid = str((body or {}).get("proxyId") or assigned.get("id") or "")
+    used_id = str(used.get("id") or "")
+    if pid and used_id and pid != used_id:
+        return "PROXY_IDENTITY_MISMATCH: expected_proxy_id %s got %s" % (pid, used_id)
+    return None
 
 def account_lock(aid):
     ACCOUNT_LOCKS.setdefault(aid or "_", threading.Lock())
@@ -1407,8 +1458,11 @@ def run_chat(body):
     timeout_ms = int(body.get("timeoutMs") or 90000)
     model = (body.get("model") or "gpt-5.6").strip()
     proxy = job_proxy(body)
+    ident = proxy_identity_error(body, proxy)
+    if ident:
+        return {"ok": False, "error": ident, "fault": "proxy"}
     if not proxy:
-        return {"ok": False, "error": "PROXY_UNAVAILABLE: job missing account-bound proxy", "fault": "proxy"}
+        return {"ok": False, "error": proxy_fail_error(body), "fault": "proxy"}
     if not TEST_URL and not socks_https_ok(proxy):
         return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
 
@@ -1784,8 +1838,11 @@ def run_image(body):
         return {"ok": False, "error": "SESSION_INVALID: missing gemini cookies", "fault": "account"}
     from playwright.sync_api import sync_playwright
     proxy = job_proxy(body)
+    ident = proxy_identity_error(body, proxy)
+    if ident:
+        return {"ok": False, "error": ident, "fault": "proxy"}
     if not proxy:
-        return {"ok": False, "error": "PROXY_UNAVAILABLE: job missing account-bound proxy", "fault": "proxy"}
+        return {"ok": False, "error": proxy_fail_error(body), "fault": "proxy"}
     if not TEST_URL and not socks_https_ok(proxy):
         return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
     sel = body.get("selectors") or {}
@@ -2324,8 +2381,11 @@ def run_leonardo(body):
     gpt = is_gpt_image_model(model)
     labels = ["GPT Image 2", "GPT Image", "gpt-image-2"] if gpt else ["Nano Banana 2", "Nano Banana", "Gemini Image 2", "Gemini 2.5 Flash Image", "gemini-image-2", "Gemini 2.5"]
     proxy = job_proxy(body)
+    ident = proxy_identity_error(body, proxy)
+    if ident:
+        return {"ok": False, "error": ident, "fault": "proxy", "backendMode": "web_account"}
     if not proxy:
-        return {"ok": False, "error": "LEONARDO_PROXY_UNAVAILABLE: job missing account-bound proxy", "fault": "proxy", "backendMode": "web_account"}
+        return {"ok": False, "error": proxy_fail_error(body, True), "fault": "proxy", "backendMode": "web_account"}
     if not socks_https_ok(proxy):
         return {"ok": False, "error": tunnel_down_error(), "fault": "proxy", "backendMode": "web_account"}
     target = os.environ.get("LEONARDO_URL") or "https://app.leonardo.ai/ai-creation"
@@ -2886,6 +2946,7 @@ def poll_gateway():
                 "images": job.get("images") or [],
                 "storageState": data.get("storageState"),
                 "proxy": data.get("proxy"),
+                "proxyId": job.get("proxyId") or (data.get("proxy") or {}).get("id"),
                 "timeoutMs": job.get("timeoutMs") or 90000,
                 "model": job.get("model"),
                 "sessionVersion": data.get("sessionVersion") or 0,
