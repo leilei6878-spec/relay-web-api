@@ -280,3 +280,95 @@ print("ok")
   assert.equal(out.status, 0, out.stderr || out.stdout);
   assert.match(out.stdout, /ok/);
 });
+
+test("playwright shards run distinct accounts in parallel and serialize the same account", () => {
+  const s = localWorkerScript();
+  assert.match(s, /class PlaywrightShard/);
+  assert.match(s, /RELAY_PLAYWRIGHT_SHARDS/);
+  assert.match(s, /def shard_for_account/);
+  assert.match(s, /start_shards\(\)/);
+  assert.match(s, /def _run\(payload=payload\)/);
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker.py", s);
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      `
+import importlib.util, os, threading, time
+os.environ["RELAY_ALLOW_MOCK"] = "1"
+os.environ["RELAY_SKIP_WARM"] = "1"
+os.environ["RELAY_PLAYWRIGHT_SHARDS"] = "3"
+os.environ["RELAY_CAPACITY"] = "3"
+spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+assert m.SHARD_COUNT == 3
+assert m.shard_for_account("acc-1") == m.shard_for_account("acc-1")
+assert m.shard_for_account("") == 0
+by_shard = {}
+i = 0
+while len(by_shard) < 3 and i < 5000:
+    aid = "acc-%d" % i
+    sid = m.shard_for_account(aid)
+    by_shard.setdefault(sid, aid)
+    i += 1
+assert len(by_shard) == 3, by_shard
+orig = m.run_image
+overlap = {"n": 0, "max": 0, "lock": threading.Lock(), "accounts": []}
+def slow_image(body, ctx=None):
+    aid = str((body or {}).get("accountId") or "")
+    with overlap["lock"]:
+        overlap["n"] += 1
+        overlap["max"] = max(overlap["max"], overlap["n"])
+        overlap["accounts"].append((aid, overlap["n"]))
+    time.sleep(0.25)
+    try:
+        return orig(body, ctx)
+    finally:
+        with overlap["lock"]:
+            overlap["n"] -= 1
+m.run_image = slow_image
+m.start_shards()
+time.sleep(0.05)
+ids = [by_shard[k] for k in sorted(by_shard)]
+results = [None, None, None]
+def run_one(i):
+    results[i] = m.exec_job({"id":"par-%d"%i,"accountId":ids[i],"platform":"gemini","kind":"image","prompt":"cat","leaseId":"L%d"%i,"attemptId":"A%d"%i})
+threads = [threading.Thread(target=run_one, args=(i,)) for i in range(3)]
+t0 = time.time()
+for t in threads: t.start()
+for t in threads: t.join()
+elapsed = time.time() - t0
+assert overlap["max"] >= 2, overlap
+assert elapsed < 0.7, elapsed
+for row in results:
+    assert row and row.get("ok") is True, row
+same = {"n": 0, "max": 0, "lock": threading.Lock()}
+def slow_same(body, ctx=None):
+    with same["lock"]:
+        same["n"] += 1
+        same["max"] = max(same["max"], same["n"])
+    time.sleep(0.12)
+    try:
+        return orig(body, ctx)
+    finally:
+        with same["lock"]:
+            same["n"] -= 1
+m.run_image = slow_same
+same_results = [None, None, None]
+def run_same(i):
+    same_results[i] = m.exec_job({"id":"ser-%d"%i,"accountId":ids[0],"platform":"gemini","kind":"image","prompt":"cat"})
+threads = [threading.Thread(target=run_same, args=(i,)) for i in range(3)]
+for t in threads: t.start()
+for t in threads: t.join()
+assert same["max"] == 1, same
+for s in m.SHARDS:
+    s.q.put(None)
+print("ok")
+`,
+    ],
+    { encoding: "utf8", timeout: 20000 },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /ok/);
+});

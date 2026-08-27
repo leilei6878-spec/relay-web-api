@@ -1202,50 +1202,157 @@ def format_turns(turns):
         blocks.append("<relay:%s%s>\n%s%s\n</relay:%s>" % (role, cur, text, note, role))
     return "\n\n".join(blocks).strip()
 
-PW = None
-PW_THREAD = None
-PW_Q = queue.Queue()
-BROWSER_POOL = {}
-CTX_POOL = {}
-POOL_LOCK = threading.Lock()
 MAX_BROWSERS = int(os.environ.get("RELAY_MAX_BROWSERS") or "4")
 MAX_CTX = int(os.environ.get("RELAY_MAX_CTX_PER_BROWSER") or "8")
 CTX_IDLE = int(os.environ.get("RELAY_CTX_IDLE") or "600")
 CTX_MAX_REQ = int(os.environ.get("RELAY_CTX_MAX_REQ") or "20")
+SHARD_COUNT = max(1, int(os.environ.get("RELAY_PLAYWRIGHT_SHARDS") or "3"))
+SHARDS = []
+SHARD_LOCAL = threading.local()
+DISPATCHED = 0
+DISPATCH_LOCK = threading.Lock()
+
+def shard_for_account(aid):
+    n = max(1, SHARD_COUNT)
+    text = str(aid or "")
+    if not text:
+        return 0
+    h = 2166136261
+    for ch in text:
+        h ^= ord(ch)
+        h = (h * 16777619) & 0xffffffff
+    return h % n
+
+class PlaywrightShard:
+    def __init__(self, idx):
+        self.idx = idx
+        self.pw = None
+        self.q = queue.Queue()
+        self.browser_pool = {}
+        self.ctx_pool = {}
+        self.lock = threading.Lock()
+        self.thread = None
+        self.started = False
+
+    def start(self):
+        if self.thread is not None and self.thread.is_alive():
+            return
+        self.thread = threading.Thread(target=self.loop, name="pw-shard-%d" % self.idx, daemon=True)
+        self.thread.start()
+        self.started = True
+
+    def loop(self):
+        SHARD_LOCAL.shard = self
+        try:
+            if os.environ.get("RELAY_SKIP_WARM") != "1":
+                warm_sessions()
+        except Exception as e:
+            print("warmup fail shard", self.idx, e, flush=True)
+        while True:
+            item = self.q.get()
+            if item is None:
+                break
+            body, box = item
+            try:
+                SHARD_LOCAL.shard = self
+                result = exec_job_run(body)
+            except Exception as e:
+                msg = str(e)
+                if "cannot switch to a different thread" in msg or "has exited" in msg:
+                    reset_playwright()
+                    try:
+                        playwright_inst()
+                        result = exec_job_run(body)
+                    except Exception as e2:
+                        result = {"ok": False, "error": "WORKER_CRASH: %s" % str(e2)[:240], "fault": "worker"}
+                else:
+                    result = {"ok": False, "error": "WORKER_CRASH: %s" % msg[:240], "fault": "worker"}
+            box["result"] = result
+            box["ev"].set()
+
+def ensure_shards():
+    global SHARDS
+    if not SHARDS:
+        SHARDS = [PlaywrightShard(i) for i in range(SHARD_COUNT)]
+    return SHARDS
+
+def start_shards():
+    for s in ensure_shards():
+        s.start()
+    print("playwright shards", SHARD_COUNT, flush=True)
+    return SHARDS
+
+def current_shard():
+    s = getattr(SHARD_LOCAL, "shard", None)
+    if s is not None:
+        return s
+    ensure_shards()
+    return SHARDS[0] if SHARDS else None
+
+def pick_shard(body):
+    ensure_shards()
+    aid = ""
+    if isinstance(body, dict):
+        aid = str(body.get("accountId") or "")
+    return SHARDS[shard_for_account(aid)]
+
+def shard_queue_depths():
+    return [s.q.qsize() for s in SHARDS] if SHARDS else []
+
+def shard_browser_count():
+    return sum(len(s.browser_pool) for s in SHARDS) if SHARDS else 0
+
+def shard_context_count():
+    return sum(len(s.ctx_pool) for s in SHARDS) if SHARDS else 0
+
+def remember_page(ctx_key, page):
+    shard = current_shard()
+    if shard is None:
+        return
+    with shard.lock:
+        row = shard.ctx_pool.get(ctx_key)
+        if row:
+            row["page"] = page
 
 def reset_playwright():
-    global PW, BROWSER_POOL, CTX_POOL
-    for row in list(CTX_POOL.values()):
+    shard = current_shard()
+    if shard is None:
+        return
+    with shard.lock:
+        for row in list(shard.ctx_pool.values()):
+            try:
+                if row.get("page"):
+                    row["page"].close()
+            except Exception:
+                pass
+            try:
+                if row.get("ctx"):
+                    row["ctx"].close()
+            except Exception:
+                pass
+        shard.ctx_pool.clear()
+        for b in list(shard.browser_pool.values()):
+            try:
+                b.close()
+            except Exception:
+                pass
+        shard.browser_pool.clear()
         try:
-            if row.get("page"):
-                row["page"].close()
+            if shard.pw:
+                shard.pw.stop()
         except Exception:
             pass
-        try:
-            if row.get("ctx"):
-                row["ctx"].close()
-        except Exception:
-            pass
-    CTX_POOL.clear()
-    for b in list(BROWSER_POOL.values()):
-        try:
-            b.close()
-        except Exception:
-            pass
-    BROWSER_POOL.clear()
-    try:
-        if PW:
-            PW.stop()
-    except Exception:
-        pass
-    PW = None
+        shard.pw = None
 
 def playwright_inst():
-    global PW
-    if PW is None:
+    shard = current_shard()
+    if shard is None:
+        ensure_shards()
+        shard = current_shard()
+    if shard.pw is None:
         from playwright.sync_api import sync_playwright
-        PW = sync_playwright().start()
-    return PW
+        shard.pw = sync_playwright().start()
+    return shard.pw
 
 def noise_route(route):
     return route.continue_()
@@ -1282,41 +1389,13 @@ def warm_sessions():
                 arm_page(page)
                 page.goto("https://chatgpt.com/?temporary-chat=true", wait_until="domcontentloaded", timeout=25000)
                 page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea", timeout=15000)
-            with POOL_LOCK:
-                row = CTX_POOL.get(key)
-                if row:
-                    row["page"] = page
+            remember_page(key, page)
             print("session warm", aid[:8], flush=True)
         except Exception as e:
             print("session warm fail", aid[:8], e, flush=True)
 
 def pw_loop():
-    global PW_THREAD
-    PW_THREAD = threading.current_thread()
-    try:
-        warm_sessions()
-    except Exception as e:
-        print("warmup fail", e, flush=True)
-    while True:
-        item = PW_Q.get()
-        if item is None:
-            break
-        body, box = item
-        try:
-            result = exec_job_run(body)
-        except Exception as e:
-            msg = str(e)
-            if "cannot switch to a different thread" in msg or "has exited" in msg:
-                reset_playwright()
-                try:
-                    playwright_inst()
-                    result = exec_job_run(body)
-                except Exception as e2:
-                    result = {"ok": False, "error": "WORKER_CRASH: %s" % str(e2)[:240], "fault": "worker"}
-            else:
-                result = {"ok": False, "error": "WORKER_CRASH: %s" % msg[:240], "fault": "worker"}
-        box["result"] = result
-        box["ev"].set()
+    start_shards()
 
 def pool_enabled():
     if os.environ.get("RELAY_TEST_URL"):
@@ -1324,13 +1403,16 @@ def pool_enabled():
     return os.environ.get("RELAY_BROWSER_POOL", "1") != "0"
 
 def recycle_idle_contexts():
+    shard = current_shard()
+    if shard is None:
+        return
     now = time.time()
     dead = []
-    for key, row in list(CTX_POOL.items()):
+    for key, row in list(shard.ctx_pool.items()):
         if now - row.get("last", now) > CTX_IDLE or row.get("n", 0) >= CTX_MAX_REQ:
             dead.append(key)
     for key in dead:
-        row = CTX_POOL.pop(key, None)
+        row = shard.ctx_pool.pop(key, None)
         try:
             if row and row.get("ctx"):
                 row["ctx"].close()
@@ -1338,29 +1420,30 @@ def recycle_idle_contexts():
             pass
 
 def get_pooled_context(proxy, storage_state, account_id):
+    shard = current_shard()
     p = playwright_inst()
     proxy_key = ((proxy or {}).get("server") if isinstance(proxy, dict) else "") or "direct"
-    with POOL_LOCK:
+    with shard.lock:
         recycle_idle_contexts()
-        browser = BROWSER_POOL.get(proxy_key)
+        browser = shard.browser_pool.get(proxy_key)
         if browser is None or not getattr(browser, "is_connected", lambda: True)():
-            if len(BROWSER_POOL) >= MAX_BROWSERS:
-                old_key = next(iter(BROWSER_POOL))
+            if len(shard.browser_pool) >= MAX_BROWSERS:
+                old_key = next(iter(shard.browser_pool))
                 try:
-                    BROWSER_POOL[old_key].close()
+                    shard.browser_pool[old_key].close()
                 except Exception:
                     pass
-                BROWSER_POOL.pop(old_key, None)
-                for k in [k for k in CTX_POOL if k.startswith(old_key + "|")]:
+                shard.browser_pool.pop(old_key, None)
+                for k in [k for k in shard.ctx_pool if k.startswith(old_key + "|")]:
                     try:
-                        CTX_POOL[k]["ctx"].close()
+                        shard.ctx_pool[k]["ctx"].close()
                     except Exception:
                         pass
-                    CTX_POOL.pop(k, None)
+                    shard.ctx_pool.pop(k, None)
             browser = open_browser(p, proxy)
-            BROWSER_POOL[proxy_key] = browser
+            shard.browser_pool[proxy_key] = browser
         ctx_key = "%s|%s" % (proxy_key, account_id or "_")
-        row = CTX_POOL.get(ctx_key)
+        row = shard.ctx_pool.get(ctx_key)
         if row and row.get("ctx") and row.get("n", 0) < CTX_MAX_REQ:
             row["last"] = time.time()
             row["n"] = row.get("n", 0) + 1
@@ -1375,20 +1458,20 @@ def get_pooled_context(proxy, storage_state, account_id):
                 row["ctx"].close()
             except Exception:
                 pass
-            CTX_POOL.pop(ctx_key, None)
-        same = [k for k in CTX_POOL if k.startswith(proxy_key + "|")]
+            shard.ctx_pool.pop(ctx_key, None)
+        same = [k for k in shard.ctx_pool if k.startswith(proxy_key + "|")]
         if len(same) >= MAX_CTX:
             old = same[0]
             try:
-                if CTX_POOL[old].get("page"):
-                    CTX_POOL[old]["page"].close()
+                if shard.ctx_pool[old].get("page"):
+                    shard.ctx_pool[old]["page"].close()
             except Exception:
                 pass
             try:
-                CTX_POOL[old]["ctx"].close()
+                shard.ctx_pool[old]["ctx"].close()
             except Exception:
                 pass
-            CTX_POOL.pop(old, None)
+            shard.ctx_pool.pop(old, None)
         kw = {
             "storage_state": storage_state if (storage_state and (storage_state.get("cookies") or storage_state.get("origins"))) else None,
             "locale": "en-US",
@@ -1405,7 +1488,7 @@ def get_pooled_context(proxy, storage_state, account_id):
             ctx.set_default_navigation_timeout(25000)
         except Exception:
             pass
-        CTX_POOL[ctx_key] = {"ctx": ctx, "last": time.time(), "n": 1, "page": None, "born": time.time()}
+        shard.ctx_pool[ctx_key] = {"ctx": ctx, "last": time.time(), "n": 1, "page": None, "born": time.time()}
         return browser, ctx, None, ctx_key
 
 
@@ -1818,10 +1901,7 @@ def run_chat(body, ctx=None):
             page = context.new_page()
         try:
             result = run_on(page, context, False)
-            with POOL_LOCK:
-                row = CTX_POOL.get(ctx_key)
-                if row:
-                    row["page"] = page
+            remember_page(ctx_key, page)
             return result
         except Exception as e:
             return {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"}
@@ -1903,11 +1983,12 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
 
 def exec_job(body):
-    if PW_THREAD is not None and threading.current_thread() is PW_THREAD:
+    shard = pick_shard(body)
+    if shard.thread is None or threading.current_thread() is shard.thread:
         return exec_job_run(body)
     ev = threading.Event()
     box = {"ev": ev, "result": None}
-    PW_Q.put((body, box))
+    shard.q.put((body, box))
     timeout = int(body.get("timeoutMs") or 90000) / 1000.0 + 30
     if not ev.wait(timeout):
         return {"ok": False, "error": "WORKER_CRASH: playwright queue timeout", "fault": "worker"}
@@ -2059,10 +2140,7 @@ def run_image(body, ctx=None):
             page = context.new_page()
         try:
             result = run_image_on(page, context)
-            with POOL_LOCK:
-                row = CTX_POOL.get(ctx_key)
-                if row:
-                    row["page"] = page
+            remember_page(ctx_key, page)
             return result
         except Exception as e:
             return {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"}
@@ -2984,10 +3062,7 @@ def run_leonardo(body, ctx=None):
             page = context.new_page()
         try:
             result = run_on(page, context)
-            with POOL_LOCK:
-                row = CTX_POOL.get(ctx_key)
-                if row:
-                    row["page"] = page
+            remember_page(ctx_key, page)
             return result
         except Exception as e:
             return {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker", "backendMode": "web_account"}
@@ -3012,7 +3087,7 @@ def beat_loop():
     if not gw:
         return
     while True:
-        if DRAINING and ACTIVE <= 0:
+        if DRAINING and ACTIVE <= 0 and DISPATCHED <= 0:
             break
         try:
             jobs = snapshot_active_jobs()
@@ -3022,12 +3097,16 @@ def beat_loop():
                     "Authorization": "Bearer " + token,
                     "X-Worker-Name": os.environ.get("RELAY_WORKER_NAME") or "pc-1",
                     "X-Worker-Capacity": str(CAPACITY),
-                    "X-Worker-Active": str(ACTIVE),
+                    "X-Worker-Active": str(max(ACTIVE, DISPATCHED)),
                     "X-Worker-Beat-Only": "1",
                     "X-Job-Id": jobs[0][0] if jobs else "",
                     "X-Account-Id": jobs[0][1] if jobs else "",
                     "X-Active-Jobs": json.dumps([{"jobId": jid, "accountId": aid} for jid, aid in jobs]),
                     "X-Worker-Drain": "1" if DRAINING else "0",
+                    "X-Worker-Shards": str(SHARD_COUNT),
+                    "X-Worker-Shard-Queues": ",".join(str(n) for n in shard_queue_depths()),
+                    "X-Worker-Browsers": str(shard_browser_count() or ACTIVE),
+                    "X-Worker-Contexts": str(shard_context_count()),
                 },
             )
             urllib.request.urlopen(req, timeout=8).read()
@@ -3036,6 +3115,7 @@ def beat_loop():
         time.sleep(4)
 
 def poll_gateway():
+    global DISPATCHED
     import urllib.request
     gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
     token = os.environ.get("RELAY_TOKEN") or ""
@@ -3045,9 +3125,14 @@ def poll_gateway():
     print("拉取网关任务", gw, flush=True)
     fail = 0
     while True:
-        if DRAINING and ACTIVE <= 0:
-            print("drain complete", flush=True)
-            break
+        if DRAINING:
+            with DISPATCH_LOCK:
+                busy = DISPATCHED
+            if busy <= 0 and ACTIVE <= 0:
+                print("drain complete", flush=True)
+                break
+            time.sleep(0.4)
+            continue
         try:
             req = urllib.request.Request(
                 gw + "/api/worker/next",
@@ -3055,8 +3140,11 @@ def poll_gateway():
                     "Authorization": "Bearer " + token,
                     "X-Worker-Name": os.environ.get("RELAY_WORKER_NAME") or "pc-1",
                     "X-Worker-Capacity": str(CAPACITY),
-                    "X-Worker-Active": str(ACTIVE),
-                    "X-Worker-Browsers": str(ACTIVE),
+                    "X-Worker-Active": str(max(ACTIVE, DISPATCHED)),
+                    "X-Worker-Browsers": str(shard_browser_count() or ACTIVE),
+                    "X-Worker-Shards": str(SHARD_COUNT),
+                    "X-Worker-Shard-Queues": ",".join(str(n) for n in shard_queue_depths()),
+                    "X-Worker-Contexts": str(shard_context_count()),
                     "X-Worker-Drain": "1" if DRAINING else "0",
                 },
             )
@@ -3105,11 +3193,20 @@ def poll_gateway():
                 payload["tier"] = job.get("tier") or ""
             else:
                 payload["model"] = job.get("model") or "gpt-5.6"
-            try:
-                result = exec_job(payload)
-            except Exception as e:
-                result = {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"}
-            post_result(JobRuntimeContext(payload), result)
+            def _run(payload=payload):
+                global DISPATCHED
+                try:
+                    result = exec_job(payload)
+                except Exception as e:
+                    result = {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"}
+                try:
+                    post_result(JobRuntimeContext(payload), result)
+                finally:
+                    with DISPATCH_LOCK:
+                        DISPATCHED -= 1
+            with DISPATCH_LOCK:
+                DISPATCHED += 1
+            threading.Thread(target=_run, daemon=True, name="job-%s" % str(payload.get("id") or "")[:8]).start()
         except Exception as e:
             fail += 1
             wait = min(8, 1.2 * fail)
@@ -3160,7 +3257,7 @@ if __name__ == "__main__":
     print("Relay Worker  http://127.0.0.1:%d" % PORT)
     if pick_proxy():
         print("已检测到本机代理")
-    threading.Thread(target=pw_loop, daemon=True).start()
+    start_shards()
     threading.Thread(target=beat_loop, daemon=True).start()
     threading.Thread(target=poll_gateway, daemon=True).start()
     Server(("127.0.0.1", PORT), H).serve_forever()
