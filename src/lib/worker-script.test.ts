@@ -4,17 +4,19 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { localWorkerScript } from "./local-worker-script.ts";
 
+const PYTHON = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
+
 test("worker python compiles and gemini has no fake success", () => {
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
-  const compiled = spawnSync("python3", ["-m", "py_compile", "/tmp/relay-qa/worker.py"], { encoding: "utf8" });
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
+  const compiled = spawnSync(PYTHON, ["-m", "py_compile", "storage/relay-qa/worker.py"], { encoding: "utf8" });
   assert.equal(compiled.status, 0, compiled.stderr || compiled.stdout);
 
   const live = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
-      "import importlib.util, os, json; os.environ.pop('RELAY_ALLOW_MOCK', None); os.environ.pop('RELAY_TEST_URL', None); spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(json.dumps(m.run_image({'prompt':'cat'})))",
+      "import importlib.util, os, json; os.environ.pop('RELAY_ALLOW_MOCK', None); os.environ.pop('RELAY_TEST_URL', None); spec=importlib.util.spec_from_file_location('w','storage/relay-qa/worker.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(json.dumps(m.run_image({'prompt':'cat'})))",
     ],
     { encoding: "utf8" },
   );
@@ -24,10 +26,10 @@ test("worker python compiles and gemini has no fake success", () => {
   assert.match(body.error || "", /SESSION_INVALID/);
 
   const mock = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
-      "import importlib.util, os, json; os.environ['RELAY_ALLOW_MOCK']='1'; spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(json.dumps(m.run_image({'prompt':'cat'})))",
+      "import importlib.util, os, json; os.environ['RELAY_ALLOW_MOCK']='1'; spec=importlib.util.spec_from_file_location('w','storage/relay-qa/worker.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(json.dumps(m.run_image({'prompt':'cat'})))",
     ],
     { encoding: "utf8" },
   );
@@ -38,13 +40,13 @@ test("worker python compiles and gemini has no fake success", () => {
 });
 
 test("page state error mapping and image false-positive rejection", () => {
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
-      "import importlib.util, os\nos.environ.pop('RELAY_ALLOW_MOCK', None)\nspec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py')\nm=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\nerr, fault = m.page_state_error('AUTHENTICATED', True)\nassert 'PROVIDER_DOM_CHANGED' in err, err\nassert fault == 'provider'\nerr2, fault2 = m.page_state_error('LOGIN_REQUIRED', True)\nassert 'LOGIN_REQUIRED' in err2\nassert fault2 == 'account'\nassert m.accept_result_image('https://x/favicon.ico', []) is False\nassert m.accept_result_image('https://lh3.googleusercontent.com/old', ['https://lh3.googleusercontent.com/old']) is False\nassert m.accept_result_image('https://lh3.googleusercontent.com/new', ['https://lh3.googleusercontent.com/old']) is True\nassert m.accept_result_image('data:image/svg+xml;base64,AAA', []) is False\nassert m.usable_assistant_text('Analyzing image') is False\nassert m.usable_assistant_text('这张海报构图清楚，主体突出。') is True\nprint('ok')\n",
+      "import importlib.util, os\nos.environ.pop('RELAY_ALLOW_MOCK', None)\nspec=importlib.util.spec_from_file_location('w','storage/relay-qa/worker.py')\nm=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\nerr, fault = m.page_state_error('AUTHENTICATED', True)\nassert 'PROVIDER_DOM_CHANGED' in err, err\nassert fault == 'provider'\nerr2, fault2 = m.page_state_error('LOGIN_REQUIRED', True)\nassert 'LOGIN_REQUIRED' in err2\nassert fault2 == 'account'\nassert m.accept_result_image('https://x/favicon.ico', []) is False\nassert m.accept_result_image('https://lh3.googleusercontent.com/old', ['https://lh3.googleusercontent.com/old']) is False\nassert m.accept_result_image('https://lh3.googleusercontent.com/new', ['https://lh3.googleusercontent.com/old']) is True\nassert m.accept_result_image('data:image/svg+xml;base64,AAA', []) is False\nassert m.usable_assistant_text('Analyzing image') is False\nassert m.usable_assistant_text('这张海报构图清楚，主体突出。') is True\nprint('ok')\n",
     ],
     { encoding: "utf8" },
   );
@@ -53,13 +55,13 @@ test("page state error mapping and image false-positive rejection", () => {
 });
 
 test("run_leonardo without session is LOGIN_REQUIRED and never fake-success", () => {
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
   const live = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
-      "import importlib.util, os, json; os.environ.pop('RELAY_ALLOW_MOCK', None); os.environ.pop('RELAY_TEST_URL', None); spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(json.dumps(m.run_leonardo({'prompt':'cat','model':'leonardo-gemini'})))",
+      "import importlib.util, os, json; os.environ.pop('RELAY_ALLOW_MOCK', None); os.environ.pop('RELAY_TEST_URL', None); spec=importlib.util.spec_from_file_location('w','storage/relay-qa/worker.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(json.dumps(m.run_leonardo({'prompt':'cat','model':'leonardo-gemini'})))",
     ],
     { encoding: "utf8" },
   );
@@ -71,13 +73,13 @@ test("run_leonardo without session is LOGIN_REQUIRED and never fake-success", ()
 });
 
 test("leonardo accept_result_image rejects history and icons", () => {
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
-      "import importlib.util, os\nspec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py')\nm=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\nassert m.accept_result_image('https://cdn.leonardo.ai/favicon.ico', []) is False\nassert m.accept_result_image('https://cdn.leonardo.ai/old.png', ['https://cdn.leonardo.ai/old.png']) is False\nassert m.accept_result_image('https://cdn.leonardo.ai/users/new.png', ['https://cdn.leonardo.ai/old.png']) is True\nassert m.accept_result_image('data:image/svg+xml;base64,AAA', []) is False\nprint('ok')\n",
+      "import importlib.util, os\nspec=importlib.util.spec_from_file_location('w','storage/relay-qa/worker.py')\nm=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\nassert m.accept_result_image('https://cdn.leonardo.ai/favicon.ico', []) is False\nassert m.accept_result_image('https://cdn.leonardo.ai/old.png', ['https://cdn.leonardo.ai/old.png']) is False\nassert m.accept_result_image('https://cdn.leonardo.ai/users/new.png', ['https://cdn.leonardo.ai/old.png']) is True\nassert m.accept_result_image('data:image/svg+xml;base64,AAA', []) is False\nprint('ok')\n",
     ],
     { encoding: "utf8" },
   );
@@ -101,13 +103,13 @@ test("apply_image_size clicks Image Dimensions chips then Small/Medium/Large", (
 });
 
 test("worker maps 1264x848 to 3:2 and 16:9 size token to 1376x768", () => {
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
-      "import importlib.util\nspec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py')\nm=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\nassert m.size_to_aspect('1264x848')=='3:2', m.size_to_aspect('1264x848')\nassert m.size_to_aspect('1376x768')=='16:9'\nassert m.size_to_aspect('16:9')=='16:9'\nassert m.size_to_aspect('5504x3072')=='16:9'\nassert m.parse_size_wh('16:9')==(1376,768)\nassert m.parse_size_wh('1536x1024')==(1536,1024)\nassert m.parse_size_wh('5504x3072')==(5504,3072)\nprint('ok')\n",
+      "import importlib.util\nspec=importlib.util.spec_from_file_location('w','storage/relay-qa/worker.py')\nm=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\nassert m.size_to_aspect('1264x848')=='3:2', m.size_to_aspect('1264x848')\nassert m.size_to_aspect('1376x768')=='16:9'\nassert m.size_to_aspect('16:9')=='16:9'\nassert m.size_to_aspect('5504x3072')=='16:9'\nassert m.parse_size_wh('16:9')==(1376,768)\nassert m.parse_size_wh('1536x1024')==(1536,1024)\nassert m.parse_size_wh('5504x3072')==(5504,3072)\nprint('ok')\n",
     ],
     { encoding: "utf8" },
   );
@@ -134,19 +136,19 @@ test("leonardo img2img attaches refs before generate and fail-fasts", () => {
 });
 
 test("ref_body_sizes and extract_prompt_images keep leonardo refs", () => {
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
     "base64",
   );
   const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
       `import importlib.util
-spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker.py')
+spec=importlib.util.spec_from_file_location('w','storage/relay-qa/worker.py')
 m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 url=${JSON.stringify(dataUrl)}
 prompt, imgs = m.extract_prompt_images({"model":"nano-banana-2","prompt":"edit me","images":[url]})
@@ -164,17 +166,17 @@ print("ok")
 });
 
 test("production job_proxy never falls back to a different local SOCKS", () => {
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
       `
 import importlib.util, os
 os.environ["NODE_ENV"] = "production"
 os.environ.pop("RELAY_ALLOW_PROXY_FALLBACK", None)
-spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+spec = importlib.util.spec_from_file_location("w", "storage/relay-qa/worker.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 m.pick_proxy = lambda: {"server": "socks5://127.0.0.1:10808", "id": "B"}
 m.port_open = lambda port: int(port) == 10808
@@ -217,10 +219,10 @@ test("worker script has no current-job os.environ and JobRuntimeContext isolates
   assert.equal(s.includes('os.environ["RELAY_FENCE"]'), false);
   assert.equal(s.includes('os.environ["RELAY_ACCOUNT_ID"]'), false);
   assert.equal(s.includes('os.environ.get("RELAY_JOB_ID")'), false);
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", s);
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", s);
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
       `
@@ -233,7 +235,7 @@ os.environ["RELAY_ATTEMPT_ID"] = "ENV-ATT"
 os.environ["RELAY_FENCE"] = "99"
 os.environ["RELAY_ACCOUNT_ID"] = "ENV-ACC"
 os.environ["RELAY_ALLOW_MOCK"] = "1"
-spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+spec = importlib.util.spec_from_file_location("w", "storage/relay-qa/worker.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 captured = []
 class FakeResp:
@@ -288,10 +290,10 @@ test("playwright shards run distinct accounts in parallel and serialize the same
   assert.match(s, /def shard_for_account/);
   assert.match(s, /start_shards\(\)/);
   assert.match(s, /def _run\(payload=payload\)/);
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", s);
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", s);
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
       `
@@ -300,7 +302,7 @@ os.environ["RELAY_ALLOW_MOCK"] = "1"
 os.environ["RELAY_SKIP_WARM"] = "1"
 os.environ["RELAY_PLAYWRIGHT_SHARDS"] = "3"
 os.environ["RELAY_CAPACITY"] = "3"
-spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+spec = importlib.util.spec_from_file_location("w", "storage/relay-qa/worker.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 assert m.SHARD_COUNT == 3
 assert m.shard_for_account("acc-1") == m.shard_for_account("acc-1")
@@ -380,15 +382,15 @@ test("submission state machine marks post-submit retry unsafe", () => {
   assert.match(s, /SUBMISSION_UNCERTAIN/);
   assert.match(s, /RESULT_UNCERTAIN/);
   assert.match(s, /retrySafety/);
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", s);
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", s);
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
       `
 import importlib.util
-spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+spec = importlib.util.spec_from_file_location("w", "storage/relay-qa/worker.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 ctx = m.JobRuntimeContext({"id":"j1","accountId":"a1"})
 assert ctx.retry_safety == "SAFE"
@@ -414,15 +416,15 @@ print("ok")
 });
 
 test("warmup_respects_account_proxy and shard owner", () => {
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
       `
 import importlib.util
-spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+spec = importlib.util.spec_from_file_location("w", "storage/relay-qa/worker.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 found = [("acc-A", "/s/acc-A.json"), ("acc-B", "/s/acc-B.json"), ("acc-C", "/s/acc-C.json")]
 proxies = {
@@ -466,15 +468,15 @@ test("generation boundary locators prefer new containers over page-wide img", ()
   const start = s.indexOf("def run_image_on");
   const geminiFn = s.slice(start, s.indexOf("if pool_enabled():", start));
   assert.equal(geminiFn.includes('page.locator("img")'), false, "gemini wait must not scan all img first");
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", s);
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", s);
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
       `
 import importlib.util
-spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+spec = importlib.util.spec_from_file_location("w", "storage/relay-qa/worker.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 new = {"src":"https://lh3.googleusercontent.com/gen-NEW","containerId":"resp-new","createdAfterSubmit":True,"isNewContainer":True,"isNewSrc":True,"domainMatch":True,"width":1376,"height":768,"bytes":180000,"mime":"image/png","sha256":"n","referenceDuplicate":False,"historicalDuplicate":False}
 hist = dict(new, src="https://lh3.googleusercontent.com/history-0", containerId="hist", createdAfterSubmit=False, isNewContainer=False, isNewSrc=False, historicalDuplicate=True)
@@ -509,20 +511,20 @@ test("exact reference count 1/2/4/6 and sha256 isolation", () => {
   const geminiFn = s.slice(start, s.indexOf("if pool_enabled():", start));
   assert.ok(geminiFn.includes("attachment_incomplete"), "gemini exact-count gate");
   assert.ok(geminiFn.indexOf("attachment_incomplete") < geminiFn.indexOf("click_send"), "gemini count before send");
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker.py", s);
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", s);
   const png = Buffer.from(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
     "base64",
   );
   const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
       `
 import importlib.util, hashlib, base64
-spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+spec = importlib.util.spec_from_file_location("w", "storage/relay-qa/worker.py")
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 url = ${JSON.stringify(dataUrl)}
 raw = base64.b64decode(url.split(",",1)[1])
@@ -582,15 +584,15 @@ test("chatgpt completion detector does not finish on 350ms pause", () => {
   assert.match(s, /RELAY_CHAT_CONFIRM_MS/);
   assert.equal(s.includes("idle >= (0.6 if has_images else 0.35)"), false);
   assert.equal(s.includes("idle >= (2.2 if has_images else 1.2)"), false);
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker-pause.py", s);
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker-pause.py", s);
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
       `
 import importlib.util
-spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker-pause.py')
+spec=importlib.util.spec_from_file_location('w','storage/relay-qa/worker-pause.py')
 m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 d=m.AssistantCompletionDetector(stable_ms=1500, confirm_ms=600, stop_stable_ms=400)
 d.on_submit(0)
@@ -617,15 +619,15 @@ print('pause-350-ok')
 });
 
 test("chatgpt completion waits through five chunks without stop button", () => {
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker-nostop.py", localWorkerScript());
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker-nostop.py", localWorkerScript());
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
       `
 import importlib.util
-spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker-nostop.py')
+spec=importlib.util.spec_from_file_location('w','storage/relay-qa/worker-nostop.py')
 m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 d=m.AssistantCompletionDetector(stable_ms=1500, confirm_ms=600, stop_stable_ms=400)
 d.on_submit(0)
@@ -653,15 +655,15 @@ print('no-stop-five-ok')
 });
 
 test("chatgpt completion confirms after stop seen then gone", () => {
-  mkdirSync("/tmp/relay-qa", { recursive: true });
-  writeFileSync("/tmp/relay-qa/worker-stop.py", localWorkerScript());
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker-stop.py", localWorkerScript());
   const out = spawnSync(
-    "python3",
+    PYTHON,
     [
       "-c",
       `
 import importlib.util
-spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker-stop.py')
+spec=importlib.util.spec_from_file_location('w','storage/relay-qa/worker-stop.py')
 m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 d=m.AssistantCompletionDetector(stable_ms=1500, confirm_ms=600, stop_stable_ms=400)
 d.on_submit(0)

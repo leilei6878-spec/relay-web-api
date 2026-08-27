@@ -1,15 +1,21 @@
-import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import { createConnection } from "node:net";
+import { resolve } from "node:path";
 import { startFakeRedis } from "./fake-redis.mjs";
 
-const ROOT = "/workspace";
-const PG_PORT = Number(process.env.PG_HTTP_PORT || 19010);
-const GW_A = Number(process.env.GW_A_PORT || 19001);
-const GW_B = Number(process.env.GW_B_PORT || 19002);
+const ROOT = process.env.RELAY_PROJECT_ROOT || process.cwd();
+const RUN_ID = process.env.RELAY_CHAOS_RUN_ID || `${process.pid}-${Date.now()}`;
+const CHAOS_DIR = resolve(ROOT, "storage", `chaos-runtime-${RUN_ID}`);
+const PG_DATA = resolve(CHAOS_DIR, "pgdata");
+const PORT_BASE = 20_000 + (process.pid % 10_000) * 3;
+const PG_PORT = Number(process.env.PG_HTTP_PORT || PORT_BASE);
+const GW_A = Number(process.env.GW_A_PORT || PORT_BASE + 1);
+const GW_B = Number(process.env.GW_B_PORT || PORT_BASE + 2);
 const DEAD_MS = Number(process.env.RELAY_WORKER_DEAD_MS || 250);
 const REPORT = [];
+const ACTIVE_CHILDREN = new Set();
+const ACTIVE_REDIS = new Set();
 
 function waitPort(port, ms = 8000) {
   const start = Date.now();
@@ -34,6 +40,8 @@ function spawnLogged(cmd, args, env, logName) {
     env: { ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  ACTIVE_CHILDREN.add(child);
+  child.once("exit", () => ACTIVE_CHILDREN.delete(child));
   child._buf = "";
   child.stdout.on("data", (d) => {
     child._buf += d;
@@ -43,6 +51,22 @@ function spawnLogged(cmd, args, env, logName) {
   });
   child.logName = logName;
   return child;
+}
+
+async function cleanup() {
+  for (const child of ACTIVE_CHILDREN) {
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already stopped */
+    }
+  }
+  await Promise.allSettled([...ACTIVE_REDIS].map((server) => server.close()));
+  ACTIVE_REDIS.clear();
+  await new Promise((resolveCleanup) => setTimeout(resolveCleanup, 150));
+  if (CHAOS_DIR.startsWith(resolve(ROOT, "storage"))) {
+    await rm(CHAOS_DIR, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 async function jsonFetch(url, opts = {}) {
@@ -73,20 +97,22 @@ function record(id, result, evidence) {
 }
 
 async function main() {
-  await mkdir("/tmp/relay-resilience", { recursive: true });
-  await rm("/tmp/relay-pgdata", { recursive: true, force: true }).catch(() => undefined);
+  if (!CHAOS_DIR.startsWith(resolve(ROOT, "storage"))) throw new Error("unsafe chaos temp path");
+  await mkdir(CHAOS_DIR, { recursive: true });
+  await rm(PG_DATA, { recursive: true, force: true }).catch(() => undefined);
 
-  const redisPersist = "/tmp/relay-resilience/redis.json";
+  const redisPersist = resolve(CHAOS_DIR, "redis.json");
   await writeFile(redisPersist, "{}", "utf8").catch(() => undefined);
-  const redis = await startFakeRedis({ persistPath: redisPersist, port: 0 });
+  let redis = await startFakeRedis({ persistPath: redisPersist, port: 0 });
+  ACTIVE_REDIS.add(redis);
   console.log("redis", redis.url);
 
-  const pg = spawnLogged(
+  let pg = spawnLogged(
     process.execPath,
     ["scripts/shared-pg.mjs"],
     {
       PG_HTTP_PORT: String(PG_PORT),
-      RELAY_PGLITE_DIR: "/tmp/relay-pgdata",
+      RELAY_PGLITE_DIR: PG_DATA,
       RELAY_PG_RESET: "1",
     },
     "pg",
@@ -171,6 +197,7 @@ async function main() {
       fromA: enq.data.job?.id,
       fromB: seen.data.job?.id,
     });
+    await drain();
   }
 
   // Two workers claim — only one wins
@@ -218,7 +245,7 @@ async function main() {
     const unique = new Set(accounts);
     const pass = unique.size === accounts.length && accounts.length > 0;
     record("P4.no-double-account-lease", pass ? "PASS" : "FAIL", { leased: accounts.length, unique: unique.size });
-    for (const e of ok) {
+    for (const _entry of ok) {
       const c = await jsonFetch(`${A}/v1/claim`, { method: "POST", body: { workerName: "drain" } });
       if (c.data.job) {
         await jsonFetch(`${A}/v1/finish`, {
@@ -288,6 +315,10 @@ async function main() {
     await drain();
     const enq = await jsonFetch(`${A}/v1/enqueue`, { method: "POST", body: { prompt: "dup-finish" } });
     const c = await jsonFetch(`${A}/v1/claim`, { method: "POST", body: { workerName: "w-dup" } });
+    if (!enq.data.ok || !c.data.job) {
+      const snapshot = await jsonFetch(`${A}/v1/jobs`);
+      throw new Error(`duplicate-finish setup failed ${JSON.stringify({ enqueue: enq.data, claim: c.data, jobs: snapshot.data.jobs })}`);
+    }
     const proof = {
       jobId: c.data.job.id,
       ok: true,
@@ -425,7 +456,7 @@ async function main() {
   // Phase 6 provider DOM isolation
   {
     await drain();
-    const enq = await jsonFetch(`${A}/v1/enqueue`, { method: "POST", body: { prompt: "dom" } });
+    await jsonFetch(`${A}/v1/enqueue`, { method: "POST", body: { prompt: "dom" } });
     const c = await jsonFetch(`${A}/v1/claim`, { method: "POST", body: { workerName: "w-dom" } });
     await jsonFetch(`${A}/v1/finish`, {
       method: "POST",
@@ -502,8 +533,10 @@ async function main() {
     const persist = redis.persistPath;
     const port = redis.port;
     await redis.close();
+    ACTIVE_REDIS.delete(redis);
     await new Promise((r) => setTimeout(r, 150));
     const redis2 = await startFakeRedis({ persistPath: persist, port });
+    ACTIVE_REDIS.add(redis2);
     await restartGwA();
     await restartGwB();
     const enq = await jsonFetch(`${B}/v1/enqueue`, { method: "POST", body: { prompt: "after-redis" } });
@@ -533,7 +566,7 @@ async function main() {
         },
       });
     }
-    Object.assign(redis, redis2);
+    redis = redis2;
   }
 
   // C5 Postgres restart
@@ -545,11 +578,12 @@ async function main() {
       ["scripts/shared-pg.mjs"],
       {
         PG_HTTP_PORT: String(PG_PORT),
-        RELAY_PGLITE_DIR: "/tmp/relay-pgdata",
+        RELAY_PGLITE_DIR: PG_DATA,
       },
       "pg2",
     );
     await waitPort(PG_PORT, 15000);
+    pg = pg2;
     const jobs = await jsonFetch(`${B}/v1/jobs`);
     const pass = Array.isArray(jobs.data.jobs);
     record("C5.postgres-restart", pass ? "PASS" : "FAIL", {
@@ -599,18 +633,12 @@ async function main() {
   await writeFile(`${ROOT}/storage/chaos-harness-report.json`, JSON.stringify(summary, null, 2));
   console.log(JSON.stringify({ pass, fail, total: REPORT.length }));
 
-  try {
-    gwA.kill("SIGKILL");
-    gwB.kill("SIGKILL");
-    pg.kill("SIGKILL");
-    await redis.close();
-  } catch {
-    /* */
-  }
+  await cleanup();
   if (fail) process.exitCode = 1;
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error(err);
-  process.exit(1);
+  await cleanup();
+  process.exitCode = 1;
 });

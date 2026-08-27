@@ -88,7 +88,7 @@ test("child process NODE_ENV=production without DATABASE_URL exits fail-closed",
        try { assertProductionFailClosed(); process.exit(2); }
        catch (e) { console.log(String(e)); process.exit(0); }`,
     ],
-    { encoding: "utf8", cwd: "/workspace" },
+    { encoding: "utf8", cwd: process.cwd() },
   );
   assert.equal(r.status, 0, r.stderr + r.stdout);
   assert.match(r.stdout, /PRODUCTION_FAIL_CLOSED/);

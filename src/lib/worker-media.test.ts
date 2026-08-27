@@ -107,7 +107,7 @@ async function seed() {
 
 test("worker media 1MB/5MB stays out of job JSON; stale fence rejected", async () => {
   await seed();
-  const queued = await enqueueChat("media", "gpt-5.6", 8000, [], { idempotencyKey: `media-${Date.now()}` });
+  const queued = await enqueueChat("media", "chatgpt-web-auto", 8000, [], { idempotencyKey: `media-${Date.now()}` });
   assert.equal(queued.ok, true);
   if (!queued.ok) return;
   const next = await claimNext("qa-worker");
@@ -155,7 +155,7 @@ test("worker media 1MB/5MB stays out of job JSON; stale fence rejected", async (
 
 test("5MB media payload does not inflate job JSON", async () => {
   await seed();
-  const queued = await enqueueChat("media5", "gpt-5.6", 8000, [], { idempotencyKey: `media5-${Date.now()}` });
+  const queued = await enqueueChat("media5", "chatgpt-web-auto", 8000, [], { idempotencyKey: `media5-${Date.now()}` });
   assert.equal(queued.ok, true);
   if (!queued.ok) return;
   const next = await claimNext("qa-worker");

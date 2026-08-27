@@ -124,6 +124,9 @@ export function startFakeRedis(opts = {}) {
   const sockets = new Set();
   const server = net.createServer((sock) => {
     sockets.add(sock);
+    // Child-process contention tests intentionally exit without QUIT; a reset
+    // during teardown is expected and must not become an uncaught test error.
+    sock.on("error", () => {});
     sock.on("close", () => sockets.delete(sock));
     let buf = Buffer.alloc(0);
     sock.on("data", (chunk) => {

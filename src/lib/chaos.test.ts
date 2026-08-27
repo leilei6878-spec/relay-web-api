@@ -35,7 +35,7 @@ async function finishOk(claimed: Awaited<ReturnType<typeof claimNext>>, text = "
 
 test("chaos 1+13: kill / slow worker requeues, no lost request", async () => {
   await seedPool(2);
-  const queued = await enqueueChat("slow", "gpt-5.6", 200, [], { requestId: "R-slow" });
+  const queued = await enqueueChat("slow", "chatgpt-web-auto", 200, [], { requestId: "R-slow" });
   assert.equal(queued.ok, true);
   if (!queued.ok) return;
   const claimed = await claimNext("w-slow");
@@ -50,7 +50,7 @@ test("chaos 1+13: kill / slow worker requeues, no lost request", async () => {
 
 test("chaos 2+14: recovered worker stale result rejected; duplicate callback rejected", async () => {
   await seedPool(2);
-  const queued = await enqueueChat("dup", "gpt-5.6", 8000, []);
+  const queued = await enqueueChat("dup", "chatgpt-web-auto", 8000, []);
   assert.equal(queued.ok, true);
   if (!queued.ok) return;
   const first = await claimNext("w1");
@@ -74,7 +74,7 @@ test("chaos 6: same Idempotency-Key x20 collapses to one job", async () => {
   await seedPool(5);
   const key = `idem-${Date.now()}`;
   const results = await Promise.all(
-    Array.from({ length: 20 }, () => enqueueChat("same", "gpt-5.6", 8000, [], { idempotencyKey: key })),
+    Array.from({ length: 20 }, () => enqueueChat("same", "chatgpt-web-auto", 8000, [], { idempotencyKey: key })),
   );
   assert.ok(results.every((r) => r.ok));
   const ids = new Set(results.map((r) => (r.ok ? r.job.id : "")));
@@ -84,7 +84,7 @@ test("chaos 6: same Idempotency-Key x20 collapses to one job", async () => {
 test("chaos 7: 20 requests compete for 5 accounts — no double lease", async () => {
   await seedPool(5);
   const results = await Promise.all(
-    Array.from({ length: 20 }, (_, i) => enqueueChat(`p${i}`, "gpt-5.6", 8000, [], { requestId: `R-${i}` })),
+    Array.from({ length: 20 }, (_, i) => enqueueChat(`p${i}`, "chatgpt-web-auto", 8000, [], { requestId: `R-${i}` })),
   );
   const ok = results.filter((r) => r.ok);
   const fail = results.filter((r) => !r.ok);
@@ -96,7 +96,7 @@ test("chaos 7: 20 requests compete for 5 accounts — no double lease", async ()
 
 test("chaos 8+9: two workers claim the same queued job — only one wins", async () => {
   await seedPool(1);
-  const queued = await enqueueChat("race", "gpt-5.6", 8000, []);
+  const queued = await enqueueChat("race", "chatgpt-web-auto", 8000, []);
   assert.equal(queued.ok, true);
   const [a, b] = await Promise.all([claimNext("gw-a"), claimNext("gw-b")]);
   const winners = [a, b].filter((x) => x.job);
@@ -108,7 +108,7 @@ test("chaos 8+9: two workers claim the same queued job — only one wins", async
 test("chaos 10: PROVIDER_DOM_CHANGED does not bump failCount or walk the pool", async () => {
   const accounts = await seedPool(2);
   await resetCircuit("chatgpt");
-  const queued = await enqueueChat("dom", "gpt-5.6", 8000, []);
+  const queued = await enqueueChat("dom", "chatgpt-web-auto", 8000, []);
   assert.equal(queued.ok, true);
   if (!queued.ok) return;
   const claimed = await claimNext("w-dom");
@@ -134,7 +134,7 @@ test("chaos 10: PROVIDER_DOM_CHANGED does not bump failCount or walk the pool", 
 
 test("chaos 11: proxy failure does not pollute account health", async () => {
   await seedPool(2);
-  const queued = await enqueueChat("proxy", "gpt-5.6", 8000, []);
+  const queued = await enqueueChat("proxy", "chatgpt-web-auto", 8000, []);
   if (!queued.ok) return;
   const claimed = await claimNext("w-px");
   const before = (await readControlPlane()).accounts.find((a) => a.id === claimed.job!.accountId)?.failCount || 0;
@@ -151,7 +151,7 @@ test("chaos 11: proxy failure does not pollute account health", async () => {
 
 test("chaos 12: session expiration marks invalid and increments failCount", async () => {
   await seedPool(2);
-  const queued = await enqueueChat("sess", "gpt-5.6", 8000, []);
+  const queued = await enqueueChat("sess", "chatgpt-web-auto", 8000, []);
   if (!queued.ok) return;
   const claimed = await claimNext("w-sess");
   await finishJob(claimed.job!.id, {
@@ -168,7 +168,7 @@ test("chaos 12: session expiration marks invalid and increments failCount", asyn
 
 test("chaos 15: cancel during execution", async () => {
   await seedPool(1);
-  const queued = await enqueueChat("cancel", "gpt-5.6", 8000, []);
+  const queued = await enqueueChat("cancel", "chatgpt-web-auto", 8000, []);
   if (!queued.ok) return;
   const claimed = await claimNext("w-c");
   assert.ok(claimed.job);
@@ -179,7 +179,7 @@ test("chaos 15: cancel during execution", async () => {
 
 test("chaos 3: file persistence keeps queued jobs across load (gateway restart sim)", async () => {
   await seedPool(1);
-  const queued = await enqueueChat("persist", "gpt-5.6", 8000, []);
+  const queued = await enqueueChat("persist", "chatgpt-web-auto", 8000, []);
   assert.equal(queued.ok, true);
   if (!queued.ok) return;
   const raw = JSON.parse(await readFile(resolve(process.env.RELAY_STORAGE_DIR || "storage", "jobs.json"), "utf8")) as { jobs: { id: string }[] };
@@ -194,7 +194,7 @@ test("postgres SoT does not write jobs.json for scheduling", async () => {
   resetCoordForTests();
   assert.equal(persistenceMode(), "postgres");
   const before = fileWriteCount();
-  const queued = await enqueueChat("sot", "gpt-5.6", 8000, []);
+  const queued = await enqueueChat("sot", "chatgpt-web-auto", 8000, []);
   assert.equal(queued.ok, true);
   assert.equal(fileWriteCount(), before);
   delete process.env.RELAY_SOT;

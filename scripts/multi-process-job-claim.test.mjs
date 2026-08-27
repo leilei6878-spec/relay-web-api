@@ -25,7 +25,7 @@ function runChild(url, jobId, worker) {
         process.exit(0);
         `,
       ],
-      { cwd: "/workspace", encoding: "utf8" },
+      { cwd: process.cwd(), encoding: "utf8" },
     );
     let out = "";
     child.stdout.on("data", (d) => (out += d));

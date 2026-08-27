@@ -2590,7 +2590,7 @@ def run_chat(body, ctx=None):
         real = bool(names & {"oai-did", "__Secure-next-auth.session-token", "oai-h-sc", "__cflb"})
     except Exception:
         real = False
-    if TEST_URL and not real:
+    if TEST_URL and not real and os.environ.get("RELAY_TEST_BROWSER") != "1":
         return {"ok": True, "text": "MOCK:" + prompt}
     if not state:
         return {"ok": False, "error": "没有登录态。把 state.json 放到本目录，或从平台下发 Session"}
@@ -2602,14 +2602,15 @@ def run_chat(body, ctx=None):
     pack_version = body.get("selectorPackVersion") or sel.get("version") or "chatgpt-v1"
     timeout_ms = int(body.get("timeoutMs") or 90000)
     model = (body.get("model") or "chatgpt-web-auto").strip()
-    proxy = job_proxy(body)
-    ident = proxy_identity_error(body, proxy)
-    if ident:
-        return {"ok": False, "error": ident, "fault": "proxy"}
-    if not proxy:
-        return {"ok": False, "error": proxy_fail_error(body), "fault": "proxy"}
-    if not TEST_URL and not socks_https_ok(proxy):
-        return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
+    proxy = None if TEST_URL else job_proxy(body)
+    if not TEST_URL:
+        ident = proxy_identity_error(body, proxy)
+        if ident:
+            return {"ok": False, "error": ident, "fault": "proxy"}
+        if not proxy:
+            return {"ok": False, "error": proxy_fail_error(body), "fault": "proxy"}
+        if not socks_https_ok(proxy):
+            return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
 
     def first_visible(page, names):
         loc, _sel = pick_locator(page, names, 4)
@@ -2676,7 +2677,7 @@ def run_chat(body, ctx=None):
                         err, fault = page_state_error(pst, True)
                         return {"ok": False, "error": err, "fault": fault, "pageState": pst, "recoveryLevel": recovery_level, "timing": marks}
         else:
-            target = CHAT_URL if not real else "https://chatgpt.com/?temporary-chat=true"
+            target = CHAT_URL if TEST_URL or not real else "https://chatgpt.com/?temporary-chat=true"
             try:
                 page.goto(target, wait_until="domcontentloaded", timeout=25000)
             except Exception as e:
@@ -2982,7 +2983,17 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             proxy = bool(pick_proxy())
-            self.wfile.write(json.dumps({"ok": True, "proxy": proxy, "mode": "test" if TEST_URL else "live", "draining": DRAINING, "active": ACTIVE}).encode("utf-8"))
+            self.wfile.write(json.dumps({
+                "ok": True,
+                "proxy": proxy,
+                "mode": "test" if TEST_URL else "live",
+                "draining": DRAINING,
+                "active": ACTIVE,
+                "browsers": shard_browser_count(),
+                "contexts": shard_context_count(),
+                "shards": len(SHARDS),
+                "shardQueues": shard_queue_depths(),
+            }).encode("utf-8"))
             return
         self.send_response(404)
         self.end_headers()

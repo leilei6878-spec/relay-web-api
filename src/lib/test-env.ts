@@ -5,7 +5,7 @@ process.env.RELAY_TEST = "1";
 if (!process.env.RELAY_STORAGE_DIR) {
   process.env.RELAY_STORAGE_DIR =
     process.platform === "win32"
-      ? resolve("storage", "relay-qa-storage")
-      : "/tmp/relay-qa-storage";
+      ? resolve("storage", `relay-qa-storage-${process.pid}`)
+      : `/tmp/relay-qa-storage-${process.pid}`;
 }
 

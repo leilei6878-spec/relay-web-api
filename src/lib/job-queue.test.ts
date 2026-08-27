@@ -216,8 +216,8 @@ test("post-submit cancellation retains the running attempt and never requeues", 
 test("dead-worker reclaim requeues SAFE work but terminalizes submitted work", async () => {
   const oldDead = process.env.RELAY_WORKER_DEAD_MS;
   const oldGrace = process.env.RELAY_CLAIM_GRACE_MS;
-  process.env.RELAY_WORKER_DEAD_MS = "1";
-  process.env.RELAY_CLAIM_GRACE_MS = "1";
+  process.env.RELAY_WORKER_DEAD_MS = "200";
+  process.env.RELAY_CLAIM_GRACE_MS = "200";
   try {
     await seed();
     const safe = await enqueueChat("safe", "gpt-5.6", 8000, [], {
@@ -226,7 +226,7 @@ test("dead-worker reclaim requeues SAFE work but terminalizes submitted work", a
     assert.equal(safe.ok, true);
     if (!safe.ok) return;
     await claimNext("dead-safe-worker");
-    await new Promise((resolve) => setTimeout(resolve, 8));
+    await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal((await getJob(safe.job.id))?.status, "queued");
 
     await seed();
@@ -237,7 +237,7 @@ test("dead-worker reclaim requeues SAFE work but terminalizes submitted work", a
     if (!unsafe.ok) return;
     const claimed = await claimNext("dead-unsafe-worker");
     const job = claimed.job!;
-    await checkpointJob(job.id, {
+    const checkpoint = await checkpointJob(job.id, {
       leaseId: job.leaseId,
       fencingToken: job.fencingToken,
       attemptId: job.attemptId,
@@ -245,7 +245,8 @@ test("dead-worker reclaim requeues SAFE work but terminalizes submitted work", a
       submissionState: "SUBMITTED",
       retrySafety: "UNSAFE",
     });
-    await new Promise((resolve) => setTimeout(resolve, 8));
+    assert.equal(checkpoint.ok, true);
+    await new Promise((resolve) => setTimeout(resolve, 300));
     const recovered = await getJob(job.id);
     assert.equal(recovered?.status, "error");
     assert.match(recovered?.error || "", /RESULT_UNCERTAIN/);

@@ -2,7 +2,7 @@
 
 Started: 2026-08-27  
 Takeover HEAD: `b30a9f7d52653344d8512f5479b8f882c88500d0`  
-Current phase: Phase 5/6 — provider self-healing and backpressure
+Current phase: Phase 7 — local automated campaign complete; release operations next
 
 ## Rules for this log
 
@@ -43,9 +43,9 @@ At takeover:
 | 3B | Model truth + operational default | COMPLETE | Commit `06cca41`; honest web-auto default, exact-model fail closed, full truth metadata. |
 | 3C | Chat attachment/disconnect closure | COMPLETE | Commit `06cca41`; exact vision attachment and cancellation/uncertainty closure. |
 | 4 | Image provenance/validator/media closure | COMPLETE | Commit `ac0ae39`; frozen refs, strict confidence/assets/history, DOM correlation, WebP, WARM_IDLE fail-closed. |
-| 5 | Canary + selector self-healing closure | READY_FOR_COMMIT | Distributed dispatch lease, real paid canary, shared selector state, real finish-path fingerprint/promotion. Focused tests 6/6 + integration tests pass. |
-| 6 | Provider/capability/key backpressure | READY_FOR_COMMIT | Global/provider/chat/image/key caps; file + distributed PG admission; 429/Retry-After. Focused tests pass. |
-| 7 | Full local automated campaign | PENDING | unit, typecheck, build, contract, concurrency, chaos, runtime, leak. |
+| 5 | Canary + selector self-healing closure | COMPLETE | Commit `71fd1f1`; distributed dispatch lease, real paid canary, shared selector state, finish-path fingerprint/promotion. |
+| 6 | Provider/capability/key backpressure | COMPLETE | Commit `71fd1f1`; global/provider/chat/image/key caps, file + distributed PG admission, 429/Retry-After. |
+| 7 | Full local automated campaign | COMPLETE | Relay 207/207; core 96 pass + 1 environment skip; CI 16 pass + 1 environment skip; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
 | 8 | Real providers + soak | BLOCKED_BY_ENVIRONMENT | Needs healthy sessions/accounts and reachable production worker/infrastructure. |
 | 9 | Final acceptance | PENDING | `CODEX_FINAL_ACCEPTANCE.md`, requirement-by-requirement completion audit. |
 
@@ -80,5 +80,26 @@ runs. No zero is inferred from unit tests:
 - `1ff9844` — durable submission checkpoints, safe reclaim, proxy pool isolation
 - `06cca41` — truthful chat model contract, exact vision attach, abort recovery
 - `ac0ae39` — frozen references, strict image provenance, warm runtime closure
+- `71fd1f1` — distributed provider self-healing and bounded admission
+
+## Phase 7 evidence (2026-08-28)
+
+- `npm run test:relay`: **207/207 PASS**.
+- `npm test`: **96 PASS**, 1 environment skip (`worker.py` bootstrap-only
+  template gate), 0 failures.
+- `npm run test:ci`: Relay **207/207 PASS** plus multi-process/contract suite
+  **16 PASS**, 1 environment skip, 0 failures.
+- `npm run test:chaos`: **18/18 PASS** across two gateways with shared PGlite
+  and Redis, including process/database restarts and fenced stale results.
+- `npm run test:reliability`: 120,415 ms, **228/228**, lost requests 0,
+  duplicate executions 0, five gateway restarts, P50/P95/P99
+  516/581/605 ms. This is scheduler/mock-completion evidence, not live DOM
+  evidence.
+- `RELAY_LEAK_CONCURRENCY=4 npm run test:leak`: **500/500 PASS** against the
+  real local Python Worker and headless Chromium self-test page. Final active,
+  browser, context, and queue counts were all 0; process-tree RSS grew by
+  5,021,696 bytes after warmup. No live provider account was used.
+- `npm run typecheck`: PASS. `npm run lint`: 0 errors (remaining warnings are
+  tracked pre-existing cleanup). `npm run build:app`: PASS.
 
 Temporary dependency cache content is never committed.

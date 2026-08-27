@@ -12,9 +12,19 @@ const FORBIDDEN = [
 ];
 
 test("HEAD source does not contain live proxy share-links or PATs", () => {
-  const r = spawnSync("git", ["grep", "-n", "-E", "ss://[A-Za-z0-9+/=_-]{16,}@|ghp_[A-Za-z0-9]{20}|BEGIN RSA PRIVATE KEY"], {
-    encoding: "utf8",
-  });
+  const r = spawnSync(
+    "git",
+    [
+      "grep",
+      "-n",
+      "-E",
+      "ss://[A-Za-z0-9+/=_-]{16,}@|ghp_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|BEGIN (RSA |OPENSSH )?PRIVATE KEY",
+      "--",
+      ".",
+      ":(exclude)scripts/secret-scan.test.mjs",
+    ],
+    { encoding: "utf8" },
+  );
   const out = `${r.stdout || ""}\n${r.stderr || ""}`;
   for (const re of FORBIDDEN) {
     assert.equal(re.test(out), false, `forbidden pattern ${re} in git grep:\n${out}`);

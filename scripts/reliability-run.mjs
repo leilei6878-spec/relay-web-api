@@ -1,12 +1,20 @@
 import { spawn } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
+import { resolve } from "node:path";
 import { startFakeRedis } from "./fake-redis.mjs";
 
+const ROOT = process.env.RELAY_PROJECT_ROOT || process.cwd();
 const DURATION_MS = Number(process.env.RELAY_RELIABILITY_MS || 120_000);
-const PG_PORT = 19010;
-const GW_A = 19001;
-const GW_B = 19002;
+const RUN_ID = process.env.RELAY_RELIABILITY_RUN_ID || `${process.pid}-${Date.now()}`;
+const RUN_DIR = resolve(ROOT, "storage", `reliability-runtime-${RUN_ID}`);
+const PG_DATA = resolve(RUN_DIR, "pgdata");
+const PORT_BASE = 20_000 + (process.pid % 10_000) * 3;
+const PG_PORT = Number(process.env.PG_HTTP_PORT || PORT_BASE);
+const GW_A = Number(process.env.GW_A_PORT || PORT_BASE + 1);
+const GW_B = Number(process.env.GW_B_PORT || PORT_BASE + 2);
+const ACTIVE_CHILDREN = new Set();
+const ACTIVE_REDIS = new Set();
 
 function waitPort(port, ms = 12000) {
   const start = Date.now();
@@ -26,16 +34,45 @@ function waitPort(port, ms = 12000) {
 }
 
 function spawnLogged(args, env) {
-  return spawn(process.execPath, args, { cwd: "/workspace", env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, args, { cwd: ROOT, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+  child._buf = "";
+  for (const stream of [child.stdout, child.stderr]) {
+    stream.on("data", (chunk) => {
+      child._buf = `${child._buf}${chunk}`.slice(-4_000);
+    });
+  }
+  ACTIVE_CHILDREN.add(child);
+  child.once("exit", () => ACTIVE_CHILDREN.delete(child));
+  return child;
+}
+
+async function stopChild(child) {
+  if (!child || child.exitCode !== null) return;
+  const stopped = new Promise((resolveStop) => child.once("exit", resolveStop));
+  try {
+    child.kill("SIGKILL");
+  } catch {
+    return;
+  }
+  await Promise.race([stopped, new Promise((resolveStop) => setTimeout(resolveStop, 2_000))]);
+}
+
+async function cleanup() {
+  await Promise.allSettled([...ACTIVE_CHILDREN].map((child) => stopChild(child)));
+  await Promise.allSettled([...ACTIVE_REDIS].map((server) => server.close()));
+  ACTIVE_REDIS.clear();
+  if (RUN_DIR.startsWith(resolve(ROOT, "storage"))) {
+    await rm(RUN_DIR, { recursive: true, force: true }).catch(() => undefined);
+  }
 }
 
 async function call(url, body) {
-  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
-  return res.json();
-}
-
-async function get(url) {
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body || {}),
+    signal: AbortSignal.timeout(10_000),
+  });
   return res.json();
 }
 
@@ -53,11 +90,13 @@ async function finishIf(gw, claimed) {
 }
 
 async function main() {
-  await mkdir("/tmp/relay-resilience", { recursive: true });
-  const redis = await startFakeRedis({ persistPath: "/tmp/relay-resilience/redis.json", port: 0 });
-  const pg = spawnLogged(["scripts/shared-pg.mjs"], {
+  if (!RUN_DIR.startsWith(resolve(ROOT, "storage"))) throw new Error("unsafe reliability temp path");
+  await mkdir(RUN_DIR, { recursive: true });
+  const redis = await startFakeRedis({ persistPath: resolve(RUN_DIR, "redis.json"), port: 0 });
+  ACTIVE_REDIS.add(redis);
+  spawnLogged(["scripts/shared-pg.mjs"], {
     PG_HTTP_PORT: String(PG_PORT),
-    RELAY_PGLITE_DIR: "/tmp/relay-pgdata-rel",
+    RELAY_PGLITE_DIR: PG_DATA,
     RELAY_PG_RESET: "1",
   });
   await waitPort(PG_PORT, 15000);
@@ -78,7 +117,7 @@ async function main() {
       GATEWAY_PORT: String(port),
     });
   let gwA = startGw("gw-a", GW_A);
-  let gwB = startGw("gw-b", GW_B);
+  startGw("gw-b", GW_B);
   await waitPort(GW_A);
   await waitPort(GW_B);
   const A = `http://127.0.0.1:${GW_A}`;
@@ -145,14 +184,9 @@ async function main() {
     } else metrics.lost_requests += 1;
 
     if (i && i % 40 === 0) {
-      try {
-        gwA.kill("SIGKILL");
-      } catch {
-        /* */
-      }
-      await new Promise((r) => setTimeout(r, 150));
+      await stopChild(gwA);
       gwA = startGw("gw-a", GW_A);
-      await waitPort(GW_A).catch(() => undefined);
+      await waitPort(GW_A);
       metrics.worker_restart += 1;
     }
   }
@@ -169,21 +203,15 @@ async function main() {
     at: new Date().toISOString(),
   };
   delete out.latencies;
-  await mkdir("/workspace/storage", { recursive: true });
-  await writeFile("/workspace/storage/reliability-run.json", JSON.stringify({ ...out, sample: lat.slice(-20) }, null, 2));
+  await mkdir(resolve(ROOT, "storage"), { recursive: true });
+  await writeFile(resolve(ROOT, "storage", "reliability-run.json"), JSON.stringify({ ...out, sample: lat.slice(-20) }, null, 2));
   console.log(JSON.stringify(out));
-  try {
-    gwA.kill("SIGKILL");
-    gwB.kill("SIGKILL");
-    pg.kill("SIGKILL");
-    await redis.close();
-  } catch {
-    /* */
-  }
+  await cleanup();
   if (out.success_rate < 0.8 || out.duplicate_execution > 0) process.exitCode = 1;
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error(err);
-  process.exit(1);
+  await cleanup();
+  process.exitCode = 1;
 });
