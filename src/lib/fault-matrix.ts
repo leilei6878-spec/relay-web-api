@@ -34,6 +34,11 @@ export const ErrorCode = {
   LEONARDO_RESULT_NOT_FOUND: "LEONARDO_RESULT_NOT_FOUND",
   LEONARDO_DOWNLOAD_FAILED: "LEONARDO_DOWNLOAD_FAILED",
   LEONARDO_PROXY_UNAVAILABLE: "LEONARDO_PROXY_UNAVAILABLE",
+  REFERENCE_ATTACH_INCOMPLETE: "REFERENCE_ATTACH_INCOMPLETE",
+  RESULT_IS_REFERENCE_IMAGE: "RESULT_IS_REFERENCE_IMAGE",
+  OUTPUT_SIZE_MISMATCH: "OUTPUT_SIZE_MISMATCH",
+  RESULT_COUNT_MISMATCH: "RESULT_COUNT_MISMATCH",
+  IMAGE_CONFIDENCE_TOO_LOW: "IMAGE_CONFIDENCE_TOO_LOW",
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -275,6 +280,52 @@ export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
     provider_circuit_effect: "none",
     account_health_effect: "none",
   },
+  // Pre-submit: SAFE, so retrySafety still allows failover. Never click Generate.
+  REFERENCE_ATTACH_INCOMPLETE: {
+    code: "REFERENCE_ATTACH_INCOMPLETE",
+    fault_domain: "provider",
+    retry_same_account: true,
+    switch_account: true,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
+  RESULT_IS_REFERENCE_IMAGE: {
+    code: "RESULT_IS_REFERENCE_IMAGE",
+    fault_domain: "provider",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
+  OUTPUT_SIZE_MISMATCH: {
+    code: "OUTPUT_SIZE_MISMATCH",
+    fault_domain: "provider",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
+  RESULT_COUNT_MISMATCH: {
+    code: "RESULT_COUNT_MISMATCH",
+    fault_domain: "provider",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
+  IMAGE_CONFIDENCE_TOO_LOW: {
+    code: "IMAGE_CONFIDENCE_TOO_LOW",
+    fault_domain: "provider",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
 };
 
 export function normalizeError(error?: string, faultHint?: string): ErrorCode {
@@ -282,6 +333,11 @@ export function normalizeError(error?: string, faultHint?: string): ErrorCode {
   if (t.includes("STALE_LEASE")) return "STALE_LEASE";
   if (t.includes("SUBMISSION_UNCERTAIN")) return "SUBMISSION_UNCERTAIN";
   if (t.includes("RESULT_UNCERTAIN")) return "RESULT_UNCERTAIN";
+  if (t.includes("REFERENCE_ATTACH_INCOMPLETE")) return "REFERENCE_ATTACH_INCOMPLETE";
+  if (t.includes("RESULT_IS_REFERENCE_IMAGE")) return "RESULT_IS_REFERENCE_IMAGE";
+  if (t.includes("OUTPUT_SIZE_MISMATCH") || t.includes("RESULT_ASPECT_MISMATCH")) return "OUTPUT_SIZE_MISMATCH";
+  if (t.includes("RESULT_COUNT_MISMATCH")) return "RESULT_COUNT_MISMATCH";
+  if (t.includes("IMAGE_CONFIDENCE_TOO_LOW")) return "IMAGE_CONFIDENCE_TOO_LOW";
   if (t.includes("LEONARDO_LOGIN_REQUIRED")) return "LEONARDO_LOGIN_REQUIRED";
   if (t.includes("LEONARDO_SESSION_EXPIRED")) return "LEONARDO_SESSION_EXPIRED";
   if (t.includes("LEONARDO_CHALLENGE")) return "LEONARDO_CHALLENGE";

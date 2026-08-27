@@ -492,3 +492,56 @@ print("ok")
   assert.equal(out.status, 0, out.stderr || out.stdout);
   assert.match(out.stdout, /ok/);
 });
+
+test("exact reference count 1/2/4/6 and sha256 isolation", () => {
+  const s = localWorkerScript();
+  assert.match(s, /def describe_references/);
+  assert.match(s, /def count_leonardo_refs/);
+  assert.match(s, /def count_gemini_refs/);
+  assert.match(s, /def attachment_incomplete/);
+  assert.match(s, /def result_is_reference/);
+  assert.match(s, /REFERENCE_ATTACH_INCOMPLETE/);
+  assert.match(s, /RESULT_IS_REFERENCE_IMAGE/);
+  const leoClick = s.indexOf('print("leonardo clicking generate"');
+  const lastIncomplete = s.lastIndexOf("attachment_incomplete(requested");
+  assert.ok(lastIncomplete > 0 && lastIncomplete < leoClick, "leonardo exact-count gate before Generate");
+  const start = s.indexOf("def run_image_on");
+  const geminiFn = s.slice(start, s.indexOf("if pool_enabled():", start));
+  assert.ok(geminiFn.includes("attachment_incomplete"), "gemini exact-count gate");
+  assert.ok(geminiFn.indexOf("attachment_incomplete") < geminiFn.indexOf("click_send"), "gemini count before send");
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker.py", s);
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      `
+import importlib.util, hashlib, base64
+spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+url = ${JSON.stringify(dataUrl)}
+raw = base64.b64decode(url.split(",",1)[1])
+digest = hashlib.sha256(raw).hexdigest()
+for n in (1, 2, 4, 6):
+    imgs = [url] * n
+    requested, hashes, descs = m.bind_reference_hashes(m.JobRuntimeContext({}), imgs)
+    assert requested == n, (requested, n)
+    assert digest in hashes
+    assert m.attachment_incomplete(n, n) is None
+    assert "REFERENCE_ATTACH_INCOMPLETE" in (m.attachment_incomplete(n, n - 1) or "")
+assert m.result_is_reference(raw, [digest]) is True
+assert m.result_is_reference(raw + b"x", [digest]) is False
+assert m.result_is_reference(raw, []) is False
+print("reference-verify-ok")
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /reference-verify-ok/);
+});

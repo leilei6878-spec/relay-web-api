@@ -22,6 +22,11 @@ test("every required error code has a decision", () => {
     "MODEL_SELECTION_UNCONFIRMED",
     "SUBMISSION_UNCERTAIN",
     "RESULT_UNCERTAIN",
+    "REFERENCE_ATTACH_INCOMPLETE",
+    "RESULT_IS_REFERENCE_IMAGE",
+    "OUTPUT_SIZE_MISMATCH",
+    "RESULT_COUNT_MISMATCH",
+    "IMAGE_CONFIDENCE_TOO_LOW",
   ];
   for (const code of required) {
     assert.ok(FAILURE_MATRIX[code as keyof typeof FAILURE_MATRIX], code);
@@ -121,4 +126,20 @@ test("retry_safety_precedes_fault_code", () => {
   const imageUnsafe = decideWithSafety("IMAGE_NOT_FOUND", undefined, "UNSAFE", "GENERATING");
   assert.equal(imageUnsafe.switch_account, false);
   assert.equal(imageUnsafe.retry_same_account, false);
+});
+
+test("reference and result isolation codes", () => {
+  const incomplete = decide("REFERENCE_ATTACH_INCOMPLETE: attached 3 requested 4");
+  assert.equal(incomplete.code, "REFERENCE_ATTACH_INCOMPLETE");
+  assert.equal(incomplete.retry_same_account, true);
+  assert.equal(incomplete.switch_account, true);
+  const pre = decideWithSafety("REFERENCE_ATTACH_INCOMPLETE: attached 0 requested 1", undefined, "SAFE", "PREPARING");
+  assert.equal(pre.retry_same_account, true);
+  const post = decideWithSafety("RESULT_IS_REFERENCE_IMAGE", undefined, "UNSAFE", "GENERATING");
+  assert.equal(post.switch_account, false);
+  assert.equal(post.retry_same_account, false);
+  assert.equal(normalizeError("RESULT_IS_REFERENCE_IMAGE: sha256 match"), "RESULT_IS_REFERENCE_IMAGE");
+  assert.equal(normalizeError("OUTPUT_SIZE_MISMATCH: want 16:9 got 1024x1024"), "OUTPUT_SIZE_MISMATCH");
+  assert.equal(normalizeError("RESULT_COUNT_MISMATCH: want 4 got 1"), "RESULT_COUNT_MISMATCH");
+  assert.equal(normalizeError("IMAGE_CONFIDENCE_TOO_LOW no HIGH/VERIFIED result"), "IMAGE_CONFIDENCE_TOO_LOW");
 });

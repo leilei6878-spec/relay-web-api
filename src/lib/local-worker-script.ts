@@ -49,6 +49,7 @@ class JobRuntimeContext:
         self.submitted_at = 0
         self.click_attempted = False
         self.reference_hashes = []
+        self.requested_reference_count = 0
 
     def as_meta(self):
         return {
@@ -454,17 +455,127 @@ def materialize_images(images):
 
 def ref_body_sizes(images):
     out = set()
-    for item in images or []:
-        url = item if isinstance(item, str) else ((item or {}).get("url") if isinstance(item, dict) else "")
-        if not isinstance(url, str) or not url.startswith("data:") or "," not in url:
-            continue
-        try:
-            raw = base64.b64decode(url.split(",", 1)[1])
-            if raw:
-                out.add(len(raw))
-        except Exception:
-            pass
+    for item in describe_references(images):
+        n = int(item.get("byte_size") or 0)
+        if n:
+            out.add(n)
     return out
+
+def sha256_hex(raw):
+    if not raw:
+        return ""
+    try:
+        return hashlib.sha256(raw).hexdigest()
+    except Exception:
+        return ""
+
+def _image_url(item):
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        return item.get("url") or ""
+    return ""
+
+def describe_references(images):
+    out = []
+    seen = []
+    for item in images or []:
+        if item in seen:
+            continue
+        seen.append(item)
+        url = _image_url(item)
+        if not isinstance(url, str) or not url:
+            continue
+        raw = None
+        mime = "image/png"
+        if url.startswith("data:") and "," in url:
+            header, b64 = url.split(",", 1)
+            mime = (header[5:].split(";")[0] if header.startswith("data:") else "image/png") or "image/png"
+            try:
+                raw = base64.b64decode(b64)
+            except Exception:
+                continue
+        elif url.startswith("http://") or url.startswith("https://"):
+            try:
+                import urllib.request
+                raw = urllib.request.urlopen(url, timeout=15).read()
+            except Exception:
+                continue
+        if not raw:
+            continue
+        w, h = image_wh(raw)
+        out.append({
+            "sha256": sha256_hex(raw),
+            "mime": mime.split(";")[0].strip().lower() or "image/png",
+            "width": w,
+            "height": h,
+            "byte_size": len(raw),
+        })
+    return out
+
+def bind_reference_hashes(ctx, images):
+    requested = len([x for x in (images or []) if x])
+    descs = describe_references(images)
+    hashes = [d["sha256"] for d in descs if d.get("sha256")]
+    if ctx is not None:
+        ctx.requested_reference_count = requested
+        ctx.reference_hashes = hashes
+    return requested, hashes, descs
+
+def attachment_incomplete(requested, attached):
+    try:
+        requested = int(requested or 0)
+        attached = int(attached or 0)
+    except Exception:
+        return "REFERENCE_ATTACH_INCOMPLETE: attached 0 requested 0"
+    if requested <= 0:
+        return None
+    if attached == requested:
+        return None
+    return "REFERENCE_ATTACH_INCOMPLETE: attached %d requested %d" % (attached, requested)
+
+def result_is_reference(raw, hashes):
+    if not raw or not hashes:
+        return False
+    return sha256_hex(raw) in set(hashes)
+
+def count_gemini_refs(page):
+    try:
+        n = page.evaluate("""() => {
+          const imgs = [...document.querySelectorAll('form img, [data-testid*="attachment"] img')];
+          const remove = [...document.querySelectorAll('button[aria-label*="Remove" i], button[aria-label*="移除"]')];
+          if (remove.length) return remove.length;
+          return imgs.length;
+        }""")
+        return int(n or 0)
+    except Exception:
+        return 0
+
+def count_leonardo_refs(page):
+    try:
+        n = page.evaluate("""() => {
+          const remove = [...document.querySelectorAll('button')].filter((b) => {
+            const a = (b.getAttribute('aria-label') || '').toLowerCase();
+            const t = (b.innerText || '').trim().toLowerCase();
+            return /remove|delete|clear reference|remove image/.test(a) || t === '×' || t === 'x';
+          });
+          const ta = document.querySelector('#home-prompt-textarea, textarea, div[contenteditable="true"]');
+          let root = ta ? ta.parentElement : document.body;
+          for (let i = 0; i < 6 && root && root !== document.body; i++) root = root.parentElement;
+          root = root || document.body;
+          const thumbs = [...root.querySelectorAll('img')].filter((im) => {
+            const r = im.getBoundingClientRect();
+            const w = im.naturalWidth || im.width || r.width || 0;
+            const h = im.naturalHeight || im.height || r.height || 0;
+            return w >= 24 && w <= 320 && h >= 24 && h <= 320 && r.width >= 24 && r.height >= 24 && r.bottom > 0 && r.top < window.innerHeight;
+          });
+          const nRemove = remove.length;
+          const nThumbs = thumbs.length;
+          return nRemove > 0 ? nRemove : nThumbs;
+        }""")
+        return int(n or 0)
+    except Exception:
+        return 0
 
 def attach_images(page, images):
     paths = materialize_images(images)
@@ -515,30 +626,7 @@ def wait_composer_files(page, timeout_ms=8000):
     return False
 
 def leonardo_refs_attached(page):
-    try:
-        n = page.evaluate("""() => {
-          const remove = [...document.querySelectorAll('button')].filter((b) => {
-            const a = (b.getAttribute('aria-label') || '').toLowerCase();
-            const t = (b.innerText || '').trim().toLowerCase();
-            return /remove|delete|clear reference|remove image/.test(a) || t === '×' || t === 'x';
-          });
-          const ta = document.querySelector('#home-prompt-textarea, textarea, div[contenteditable="true"]');
-          let root = ta ? ta.parentElement : document.body;
-          for (let i = 0; i < 6 && root && root !== document.body; i++) root = root.parentElement;
-          root = root || document.body;
-          const thumbs = [...root.querySelectorAll('img')].filter((im) => {
-            const r = im.getBoundingClientRect();
-            const w = im.naturalWidth || im.width || r.width || 0;
-            const h = im.naturalHeight || im.height || r.height || 0;
-            return w >= 24 && w <= 320 && h >= 24 && h <= 320 && r.width >= 24 && r.height >= 24 && r.bottom > 0 && r.top < window.innerHeight;
-          });
-          return { remove: remove.length, thumbs: thumbs.length };
-        }""")
-        if int((n or {}).get("remove") or 0) > 0 or int((n or {}).get("thumbs") or 0) > 0:
-            return True
-    except Exception:
-        pass
-    return False
+    return count_leonardo_refs(page) > 0
 
 def attach_leonardo_refs(page, images):
     seen = []
@@ -762,14 +850,16 @@ def wait_leonardo_generate_ready(page, timeout_ms=20000):
 
 def wait_leonardo_refs(page, timeout_ms=8000):
     deadline = time.time() + timeout_ms / 1000.0
+    n = 0
     while time.time() < deadline:
-        if leonardo_refs_attached(page):
-            return True
+        n = count_leonardo_refs(page)
+        if n > 0:
+            return n
         try:
             page.wait_for_timeout(250)
         except Exception:
             time.sleep(0.25)
-    return leonardo_refs_attached(page)
+    return count_leonardo_refs(page)
 
 
 # Ignore ChatGPT placeholders such as "Analyzing image" so vision waits for the real answer.
@@ -1371,6 +1461,14 @@ def collect_result_candidates(page, boundary, provider=""):
             continue
         if row.get("ui"):
             continue
+        src = row.get("src") or ""
+        if src.startswith("data:image") and "," in src:
+            try:
+                raw = base64.b64decode(src.split(",", 1)[1])
+                row["sha256"] = sha256_hex(raw)
+                row["bytes"] = len(raw)
+            except Exception:
+                pass
         if ref_hashes and row.get("sha256") in ref_hashes:
             row["referenceDuplicate"] = True
         cands.append(row)
@@ -2389,6 +2487,12 @@ def run_image(body, ctx=None):
             err, fault = page_state_error(pst, False)
             return {"ok": False, "error": err, "fault": fault, "pageState": pst}
         attach_images(page, images)
+        requested, ref_hashes, _descs = bind_reference_hashes(ctx, images)
+        if requested:
+            attached = count_gemini_refs(page)
+            miss = attachment_incomplete(requested, attached)
+            if miss:
+                return fail_job(ctx, miss, "provider", {"pageState": detect_page_state(page, "gemini"), "attachedReferenceCount": attached, "requestedReferenceCount": requested})
         box, _ = pick_locator(page, inp, 4)
         if box is None:
             pst = detect_page_state(page, "gemini")
@@ -2435,11 +2539,20 @@ def run_image(body, ctx=None):
                     return {"ok": False, "error": "IMAGE_NOT_FOUND: svg placeholder rejected", "fault": "provider"}
                 if not raw or len(raw) < 2048:
                     return {"ok": False, "error": "IMAGE_NOT_FOUND: image too small", "fault": "provider"}
+                if result_is_reference(raw, ref_hashes):
+                    return fail_job(ctx, "RESULT_IS_REFERENCE_IMAGE", "provider", {"pageState": detect_page_state(page, "gemini")})
                 url = "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode())
             except Exception:
                 return {"ok": False, "error": "IMAGE_NOT_FOUND: download failed", "fault": "provider"}
         if url.startswith("data:image/svg"):
             return {"ok": False, "error": "IMAGE_NOT_FOUND: svg placeholder rejected", "fault": "provider"}
+        if url.startswith("data:image") and "," in url:
+            try:
+                raw = base64.b64decode(url.split(",", 1)[1])
+                if result_is_reference(raw, ref_hashes):
+                    return fail_job(ctx, "RESULT_IS_REFERENCE_IMAGE", "provider", {"pageState": detect_page_state(page, "gemini")})
+            except Exception:
+                pass
         try:
             state_out = context.storage_state()
         except Exception:
@@ -3179,17 +3292,19 @@ def run_leonardo(body, ctx=None):
                 )
             except Exception:
                 pass
-        ref_sizes = ref_body_sizes(images)
+        requested, ref_hashes, _descs = bind_reference_hashes(ctx, images)
+        ref_sizes = set(int(d.get("byte_size") or 0) for d in _descs if d.get("byte_size"))
         if images:
             print("leonardo filling prompt before refs", flush=True)
             leonardo_js_fill(page, prompt)
             up_err = attach_leonardo_refs(page, images)
             if up_err:
                 return {"ok": False, "error": up_err + " url=" + (page.url or ""), "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
-            thumbs = wait_leonardo_refs(page, 10000)
-            print("leonardo refs attached thumbs=%s sizes=%s" % (thumbs, sorted(ref_sizes)[:6]), flush=True)
-            if not thumbs:
-                return {"ok": False, "error": "LEONARDO_DOM_CHANGED: reference image did not attach url=" + (page.url or ""), "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
+            attached = wait_leonardo_refs(page, 10000)
+            print("leonardo refs attached count=%s requested=%s hashes=%d" % (attached, requested, len(ref_hashes)), flush=True)
+            miss = attachment_incomplete(requested, attached if isinstance(attached, int) else (1 if attached else 0))
+            if miss:
+                return fail_job(ctx, miss, "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": picked, "attachedReferenceCount": attached, "requestedReferenceCount": requested})
             filled = leonardo_js_fill(page, prompt)
             print("leonardo fill js", filled, flush=True)
             if not filled:
@@ -3234,7 +3349,7 @@ def run_leonardo(body, ctx=None):
                 raw = resp.body()
                 if not raw or len(raw) < 4096:
                     return
-                if len(raw) in ref_sizes:
+                if result_is_reference(raw, ref_hashes):
                     return
                 w, h = image_wh(raw)
                 captures.append((len(raw), w, h, url, raw, ct.split(";")[0]))
@@ -3308,7 +3423,7 @@ def run_leonardo(body, ctx=None):
                     raw = base64.b64decode(data_url.split(",", 1)[-1])
                 except Exception:
                     continue
-                if len(raw) in ref_sizes:
+                if result_is_reference(raw, ref_hashes):
                     continue
                 w, h = image_wh(raw)
                 captures.append((len(raw), w, h, src, raw, "image/jpeg", cand.get("confidence") or "HIGH"))
@@ -3356,6 +3471,9 @@ def run_leonardo(body, ctx=None):
         if not best:
             set_submission_state(ctx, "RESULT_UNCERTAIN")
             return fail_job(ctx, "RESULT_UNCERTAIN: LEONARDO_RESULT_NOT_FOUND", "provider", {"pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked})
+        for row in best:
+            if result_is_reference(row[4], ref_hashes):
+                return fail_job(ctx, "RESULT_IS_REFERENCE_IMAGE", "provider", {"pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked})
         data_urls = []
         for row in best:
             du = raw_to_data_url(row[4], row[5])
