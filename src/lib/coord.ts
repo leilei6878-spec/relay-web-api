@@ -237,11 +237,41 @@ function looksLikeJobId(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-/** Heartbeat must extend TTL without changing the owner token. */
-export async function renewJobLeases(jobId: string, accountId?: string, ttlMs = 120_000) {
+/** Heartbeat must extend TTL without changing the owner token.
+ *  job-claim is stored as workerName at claim time; account-lease is jobId.
+ *  Accept jobId as a fallback claim token for tests and older workers. */
+export async function renewJobLeases(jobId: string, accountId?: string, ttlMs = 120_000, workerName?: string) {
   if (!jobId) return;
-  await coordCompareExpire(`job-claim:${jobId}`, jobId, ttlMs);
+  const claimTokens = workerName ? [workerName, jobId] : [jobId];
+  for (const tok of claimTokens) {
+    if (await coordCompareExpire(`job-claim:${jobId}`, tok, ttlMs)) break;
+  }
   if (accountId) await coordCompareExpire(`account-lease:${accountId}`, jobId, ttlMs);
+}
+
+export function parseActiveJobsHeader(
+  raw: string | null | undefined,
+  fallbackJobId = "",
+  fallbackAccountId = "",
+): { jobId: string; accountId: string }[] {
+  const out: { jobId: string; accountId: string }[] = [];
+  const text = (raw || "").trim();
+  if (text.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(text) as { jobId?: string; accountId?: string }[];
+      if (Array.isArray(parsed)) {
+        for (const row of parsed) {
+          if (row && row.jobId) out.push({ jobId: String(row.jobId), accountId: String(row.accountId || "") });
+        }
+      }
+    } catch {
+      /* ignore malformed JSON */
+    }
+  }
+  if (!out.length && fallbackJobId) {
+    out.push({ jobId: fallbackJobId, accountId: fallbackAccountId });
+  }
+  return out;
 }
 
 /** Drop this job's account lock. Never steal a newer job's uuid lease. */

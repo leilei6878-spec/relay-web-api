@@ -204,3 +204,79 @@ print("ok")
   assert.equal(out.status, 0, out.stderr || out.stdout);
   assert.match(out.stdout, /ok/);
 });
+
+test("worker script has no current-job os.environ and JobRuntimeContext isolates chunks", () => {
+  const s = localWorkerScript();
+  assert.match(s, /class JobRuntimeContext/);
+  assert.match(s, /def post_chunk\(text, phase="", ctx=None\)/);
+  assert.match(s, /def post_result\(ctx, result\)/);
+  assert.match(s, /register_job\(ctx\)/);
+  assert.equal(s.includes('os.environ["RELAY_JOB_ID"]'), false);
+  assert.equal(s.includes('os.environ["RELAY_LEASE_ID"]'), false);
+  assert.equal(s.includes('os.environ["RELAY_ATTEMPT_ID"]'), false);
+  assert.equal(s.includes('os.environ["RELAY_FENCE"]'), false);
+  assert.equal(s.includes('os.environ["RELAY_ACCOUNT_ID"]'), false);
+  assert.equal(s.includes('os.environ.get("RELAY_JOB_ID")'), false);
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker.py", s);
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      `
+import importlib.util, os, json, threading
+os.environ["RELAY_GATEWAY"] = "http://gw.test"
+os.environ["RELAY_TOKEN"] = "tok"
+os.environ["RELAY_JOB_ID"] = "ENV-SHOULD-NOT-BE-USED"
+os.environ["RELAY_LEASE_ID"] = "ENV-LEASE"
+os.environ["RELAY_ATTEMPT_ID"] = "ENV-ATT"
+os.environ["RELAY_FENCE"] = "99"
+os.environ["RELAY_ACCOUNT_ID"] = "ENV-ACC"
+os.environ["RELAY_ALLOW_MOCK"] = "1"
+spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+captured = []
+class FakeResp:
+    def read(self):
+        return b"{}"
+def fake_urlopen(req, timeout=8):
+    captured.append(json.loads(req.data.decode()))
+    return FakeResp()
+import urllib.request
+urllib.request.urlopen = fake_urlopen
+a = m.JobRuntimeContext({"id":"job-a","leaseId":"la","attemptId":"aa","fencingToken":1,"accountId":"acc-a","requestId":"req-a"})
+b = m.JobRuntimeContext({"id":"job-b","leaseId":"lb","attemptId":"ab","fencingToken":2,"accountId":"acc-b","requestId":"req-b"})
+m.post_chunk("hello-a", "", a)
+m.post_chunk("hello-b", "", b)
+m.post_chunk("from-env")
+m.post_phase("generating")
+assert [p["id"] for p in captured] == ["job-a", "job-b"], captured
+assert captured[0]["text"] == "hello-a" and captured[0]["leaseId"] == "la"
+assert captured[1]["text"] == "hello-b" and captured[1]["attemptId"] == "ab"
+before = os.environ.get("RELAY_JOB_ID")
+r = m.exec_job_run({"id":"job-x","leaseId":"lease-x","attemptId":"att-x","fencingToken":7,"accountId":"acc-x","platform":"gemini","kind":"image","prompt":"cat"})
+assert os.environ.get("RELAY_JOB_ID") == before, os.environ.get("RELAY_JOB_ID")
+assert r.get("leaseId") == "lease-x"
+assert r.get("attemptId") == "att-x"
+assert r.get("accountId") == "acc-x"
+assert m.snapshot_active_jobs() == []
+results = [None, None, None]
+def run_one(i):
+    results[i] = m.exec_job_run({"id":"job%d"%i,"leaseId":"lease-%d"%i,"attemptId":"att-%d"%i,"fencingToken":i+1,"accountId":"acc-%d"%i,"platform":"gemini","kind":"image","prompt":"cat"})
+threads = [threading.Thread(target=run_one, args=(i,)) for i in range(3)]
+for t in threads: t.start()
+for t in threads: t.join()
+for i, row in enumerate(results):
+    assert row["ok"] is True, row
+    assert row["leaseId"] == "lease-%d" % i, row
+    assert row["attemptId"] == "att-%d" % i, row
+    assert row["accountId"] == "acc-%d" % i, row
+    assert row.get("traceId") == "job%d" % i
+print("ok")
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /ok/);
+});

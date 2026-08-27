@@ -16,6 +16,86 @@ BROWSERS = 0
 ACCOUNT_LOCKS = {}
 CAPACITY = int(os.environ.get("RELAY_CAPACITY") or os.environ.get("RELAY_CONCURRENCY") or "3")
 SEM = threading.Semaphore(max(1, CAPACITY))
+ACTIVE_JOBS = {}
+ACTIVE_JOBS_LOCK = threading.Lock()
+_JOB_SEQ = 0
+
+class JobRuntimeContext:
+    def __init__(self, body=None):
+        body = body if isinstance(body, dict) else {}
+        lease = body.get("lease") if isinstance(body.get("lease"), dict) else {}
+        proxy = body.get("proxy") if isinstance(body.get("proxy"), dict) else {}
+        worker = os.environ.get("RELAY_WORKER_NAME") or "pc-1"
+        job_id = str(body.get("id") or body.get("jobId") or "")
+        self.job_id = job_id
+        self.request_id = str(body.get("requestId") or job_id)
+        self.attempt_id = str(body.get("attemptId") or lease.get("attemptId") or "")
+        self.lease_id = str(body.get("leaseId") or lease.get("leaseId") or "")
+        try:
+            self.fencing_token = int(body.get("fencingToken") if body.get("fencingToken") is not None else (lease.get("fencingToken") or 0) or 0)
+        except Exception:
+            self.fencing_token = 0
+        self.account_id = str(body.get("accountId") or "")
+        self.proxy_id = str(body.get("proxyId") or proxy.get("id") or "")
+        self.worker_id = str(body.get("workerId") or worker)
+        self.trace_id = str(body.get("traceId") or job_id)
+        self.platform = str(body.get("platform") or "")
+        self.model = str(body.get("model") or "")
+
+    def as_meta(self):
+        return {
+            "id": self.job_id,
+            "leaseId": self.lease_id,
+            "fencingToken": self.fencing_token or None,
+            "attemptId": self.attempt_id,
+            "workerId": self.worker_id,
+            "accountId": self.account_id,
+            "proxyId": self.proxy_id,
+            "requestId": self.request_id,
+            "traceId": self.trace_id,
+        }
+
+def job_runtime_from_body(body):
+    return JobRuntimeContext(body)
+
+def register_job(ctx):
+    global _JOB_SEQ
+    if ctx is None:
+        return
+    with ACTIVE_JOBS_LOCK:
+        if not ctx.job_id:
+            _JOB_SEQ += 1
+            ctx.job_id = "local-%d" % _JOB_SEQ
+        ACTIVE_JOBS[ctx.job_id] = ctx
+
+def unregister_job(ctx):
+    if ctx is None:
+        return
+    with ACTIVE_JOBS_LOCK:
+        cur = ACTIVE_JOBS.get(ctx.job_id)
+        if cur is ctx:
+            ACTIVE_JOBS.pop(ctx.job_id, None)
+
+def snapshot_active_jobs():
+    with ACTIVE_JOBS_LOCK:
+        return [(c.job_id, c.account_id) for c in list(ACTIVE_JOBS.values()) if c.job_id]
+
+def attach_runtime(ctx, result):
+    if not isinstance(result, dict):
+        result = {"ok": False, "error": "WORKER_CRASH: empty result", "fault": "worker"}
+    if ctx is None:
+        return result
+    result.setdefault("leaseId", ctx.lease_id)
+    if result.get("fencingToken") is None:
+        result["fencingToken"] = ctx.fencing_token or None
+    result.setdefault("attemptId", ctx.attempt_id)
+    result.setdefault("workerId", ctx.worker_id)
+    result.setdefault("accountId", ctx.account_id)
+    result.setdefault("traceId", ctx.trace_id)
+    result.setdefault("proxyId", ctx.proxy_id)
+    result.setdefault("requestId", ctx.request_id)
+    return result
+
 MOCK_HTML = """<!doctype html><meta charset="utf-8"><title>mock</title>
 <textarea id="prompt-textarea"></textarea>
 <button data-testid="send-button">Send</button>
@@ -176,21 +256,25 @@ def account_lock(aid):
     ACCOUNT_LOCKS.setdefault(aid or "_", threading.Lock())
     return ACCOUNT_LOCKS[aid or "_"]
 
-def post_chunk(text, phase=""):
+def post_chunk(text, phase="", ctx=None):
     if os.environ.get("RELAY_STREAM_CHUNKS") == "0" and text and not phase:
+        return
+    if ctx is None:
         return
     gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
     token = os.environ.get("RELAY_TOKEN") or ""
-    jid = os.environ.get("RELAY_JOB_ID") or ""
+    jid = ctx.job_id
     if not (gw and token and jid and (text or phase)):
         return
     try:
         import urllib.request
         payload = {
             "id": jid,
-            "leaseId": os.environ.get("RELAY_LEASE_ID") or "",
-            "fencingToken": int(os.environ.get("RELAY_FENCE") or "0") or None,
-            "attemptId": os.environ.get("RELAY_ATTEMPT_ID") or "",
+            "leaseId": ctx.lease_id or "",
+            "fencingToken": ctx.fencing_token or None,
+            "attemptId": ctx.attempt_id or "",
+            "traceId": ctx.trace_id or "",
+            "accountId": ctx.account_id or "",
         }
         if text:
             payload["text"] = text
@@ -206,8 +290,54 @@ def post_chunk(text, phase=""):
     except Exception:
         pass
 
-def post_phase(phase):
-    post_chunk("", phase)
+def post_phase(phase, ctx=None):
+    post_chunk("", phase, ctx)
+
+def post_result(ctx, result):
+    gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
+    token = os.environ.get("RELAY_TOKEN") or ""
+    if not (gw and token and ctx and ctx.job_id):
+        return False
+    result = attach_runtime(ctx, result if isinstance(result, dict) else {})
+    payload = {
+        "id": ctx.job_id,
+        "ok": result.get("ok"),
+        "text": result.get("text"),
+        "url": result.get("url"),
+        "error": result.get("error"),
+        "fault": result.get("fault"),
+        "leaseId": result.get("leaseId") or ctx.lease_id,
+        "fencingToken": result.get("fencingToken") if result.get("fencingToken") is not None else (ctx.fencing_token or None),
+        "attemptId": result.get("attemptId") or ctx.attempt_id,
+        "workerId": result.get("workerId") or ctx.worker_id,
+        "sessionState": result.get("sessionState"),
+        "sessionVersion": result.get("sessionVersion"),
+        "sessionBaseVersion": result.get("sessionBaseVersion"),
+        "modelActual": result.get("modelActual"),
+        "pageState": result.get("pageState"),
+        "fingerprint": result.get("fingerprint"),
+        "selectorPackVersion": result.get("selectorPackVersion"),
+        "availableModels": result.get("availableModels"),
+        "tokenState": result.get("tokenState"),
+        "backendMode": result.get("backendMode") or "web_account",
+        "queueDepth": result.get("queueDepth"),
+        "traceId": ctx.trace_id,
+        "accountId": ctx.account_id,
+        "proxyId": ctx.proxy_id,
+        "requestId": ctx.request_id,
+    }
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            gw + "/api/worker/result",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=20).read()
+        return True
+    except Exception:
+        return False
 
 def exit_ip(context):
     try:
@@ -1410,7 +1540,8 @@ def select_model(page, model):
     ok = any(lab.lower() in actual.lower() for lab in labels) if actual else False
     return ok, actual
 
-def run_chat(body):
+def run_chat(body, ctx=None):
+    ctx = ctx or JobRuntimeContext(body)
     from playwright.sync_api import sync_playwright
     prompt, images = extract_prompt_images(body)
     turns = body.get("turns") or []
@@ -1495,7 +1626,7 @@ def run_chat(body):
         except Exception:
             pass
         mark("T2")
-        post_phase("opening_chatgpt")
+        post_phase("opening_chatgpt", ctx)
         already = False
         try:
             already = "chatgpt.com" in (page.url or "") and page.locator("#prompt-textarea, textarea#prompt-textarea").count() > 0
@@ -1532,7 +1663,7 @@ def run_chat(body):
                     err, fault = page_state_error(pst, True)
                     return {"ok": False, "error": err, "fault": fault, "pageState": pst, "recoveryLevel": recovery_level, "timing": marks}
         mark("T3")
-        post_phase("page_ready")
+        post_phase("page_ready", ctx)
         profile = detect_profile(page)
         switched, actual = select_model(page, model)
         if not switched and not TEST_URL:
@@ -1550,7 +1681,7 @@ def run_chat(body):
             err, fault = page_state_error(pst, True)
             return {"ok": False, "error": err, "fault": fault, "pageState": pst, "selectorPackVersion": pack_version, "fingerprint": page_fingerprint(page, sel), "recoveryLevel": recovery_level, "timing": marks}
         mark("T4")
-        post_phase("composer_ready")
+        post_phase("composer_ready", ctx)
         if body.get("kind") == "canary":
             fp = page_fingerprint(page, sel)
             pst = detect_page_state(page, "chatgpt")
@@ -1584,7 +1715,7 @@ def run_chat(body):
                 pass
             return {"ok": False, "error": "SEND_NOT_ACKED: message did not enter conversation", "fault": "provider", "recoveryLevel": recovery_level, "timing": marks}
         mark("T7")
-        post_phase("generating")
+        post_phase("generating", ctx)
         stop_sel = ",".join(stop)
         want_fast = "thinking" not in (model or "").lower()
         has_images = bool(images)
@@ -1613,12 +1744,12 @@ def run_chat(body):
                     if not first_delta:
                         first_delta = True
                         mark("T8")
-                    post_chunk(piece)
+                    post_chunk(piece, "", ctx)
                 elif not text:
                     if not first_delta:
                         first_delta = True
                         mark("T8")
-                    post_chunk(full)
+                    post_chunk(full, "", ctx)
                 text = full
             idle = time.time() - last_change
             if text and not generating and idle >= (0.6 if has_images else 0.35):
@@ -1788,33 +1919,31 @@ def exec_job_run(body):
     body = dict(body)
     body["prompt"] = prompt
     body["images"] = images
-    os.environ["RELAY_JOB_ID"] = str(body.get("id") or os.environ.get("RELAY_JOB_ID") or "")
-    os.environ["RELAY_LEASE_ID"] = str(body.get("leaseId") or "")
-    os.environ["RELAY_ATTEMPT_ID"] = str(body.get("attemptId") or "")
-    os.environ["RELAY_FENCE"] = str(body.get("fencingToken") or "0")
-    os.environ["RELAY_ACCOUNT_ID"] = str(body.get("accountId") or "")
-    aid = str(body.get("accountId") or "")
+    ctx = JobRuntimeContext(body)
+    register_job(ctx)
+    aid = ctx.account_id
     SEM.acquire()
     account_lock(aid).acquire()
     ACTIVE += 1
     try:
         if body.get("platform") in ("gemini", "image", "leonardo") or body.get("kind") in ("image", "edit"):
             if body.get("platform") == "leonardo" or is_leonardo_model(body.get("model")):
-                return run_leonardo(body)
-            return run_image(body)
-        return run_chat(body)
+                result = run_leonardo(body, ctx)
+            else:
+                result = run_image(body, ctx)
+        else:
+            result = run_chat(body, ctx)
+        return attach_runtime(ctx, result)
     except Exception as e:
-        return {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"}
+        return attach_runtime(ctx, {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"})
     finally:
         ACTIVE -= 1
         account_lock(aid).release()
         SEM.release()
-        os.environ["RELAY_JOB_ID"] = ""
-        os.environ["RELAY_ACCOUNT_ID"] = ""
-        os.environ["RELAY_LEASE_ID"] = ""
-        os.environ["RELAY_ATTEMPT_ID"] = ""
+        unregister_job(ctx)
 
-def run_image(body):
+def run_image(body, ctx=None):
+    ctx = ctx or JobRuntimeContext(body)
     prompt, images = extract_prompt_images(body)
     if not prompt and images:
         prompt = "根据参考图生成一张新图"
@@ -2362,7 +2491,8 @@ def download_result_image(context, url):
         return None, last_err
     return None, "LEONARDO_RESULT_NOT_FOUND"
 
-def run_leonardo(body):
+def run_leonardo(body, ctx=None):
+    ctx = ctx or JobRuntimeContext(body)
     from playwright.sync_api import sync_playwright
     prompt, images = extract_prompt_images(body)
     if not prompt and images:
@@ -2885,6 +3015,7 @@ def beat_loop():
         if DRAINING and ACTIVE <= 0:
             break
         try:
+            jobs = snapshot_active_jobs()
             req = urllib.request.Request(
                 gw + "/api/worker/next",
                 headers={
@@ -2893,8 +3024,9 @@ def beat_loop():
                     "X-Worker-Capacity": str(CAPACITY),
                     "X-Worker-Active": str(ACTIVE),
                     "X-Worker-Beat-Only": "1",
-                    "X-Job-Id": os.environ.get("RELAY_JOB_ID") or "",
-                    "X-Account-Id": os.environ.get("RELAY_ACCOUNT_ID") or "",
+                    "X-Job-Id": jobs[0][0] if jobs else "",
+                    "X-Account-Id": jobs[0][1] if jobs else "",
+                    "X-Active-Jobs": json.dumps([{"jobId": jid, "accountId": aid} for jid, aid in jobs]),
                     "X-Worker-Drain": "1" if DRAINING else "0",
                 },
             )
@@ -2954,6 +3086,8 @@ def poll_gateway():
                 "leaseId": (data.get("lease") or {}).get("leaseId") or job.get("leaseId"),
                 "fencingToken": (data.get("lease") or {}).get("fencingToken") or job.get("fencingToken"),
                 "attemptId": (data.get("lease") or {}).get("attemptId") or job.get("attemptId"),
+                "requestId": job.get("requestId") or data.get("requestId") or job.get("id"),
+                "traceId": job.get("traceId") or data.get("traceId") or job.get("id"),
             }
             if job.get("platform") == "gemini":
                 payload["platform"] = "gemini"
@@ -2975,35 +3109,7 @@ def poll_gateway():
                 result = exec_job(payload)
             except Exception as e:
                 result = {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"}
-            req2 = urllib.request.Request(
-                gw + "/api/worker/result",
-                data=json.dumps({
-                    "id": job.get("id"),
-                    "ok": result.get("ok"),
-                    "text": result.get("text"),
-                    "url": result.get("url"),
-                    "error": result.get("error"),
-                    "fault": result.get("fault"),
-                    "leaseId": result.get("leaseId") or job.get("leaseId") or (data.get("lease") or {}).get("leaseId"),
-                    "fencingToken": result.get("fencingToken") if result.get("fencingToken") is not None else job.get("fencingToken") or (data.get("lease") or {}).get("fencingToken"),
-                    "attemptId": result.get("attemptId") or job.get("attemptId") or (data.get("lease") or {}).get("attemptId"),
-                    "workerId": os.environ.get("RELAY_WORKER_NAME") or "server-1",
-                    "sessionState": result.get("sessionState"),
-                    "sessionVersion": result.get("sessionVersion"),
-                    "sessionBaseVersion": result.get("sessionBaseVersion"),
-                    "modelActual": result.get("modelActual"),
-                    "pageState": result.get("pageState"),
-                    "fingerprint": result.get("fingerprint"),
-                    "selectorPackVersion": result.get("selectorPackVersion"),
-                    "availableModels": result.get("availableModels"),
-                    "tokenState": result.get("tokenState"),
-                    "backendMode": result.get("backendMode") or "web_account",
-                    "queueDepth": result.get("queueDepth"),
-                }, ensure_ascii=False).encode("utf-8"),
-                headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
-                method="POST",
-            )
-            urllib.request.urlopen(req2, timeout=20).read()
+            post_result(JobRuntimeContext(payload), result)
         except Exception as e:
             fail += 1
             wait = min(8, 1.2 * fail)

@@ -21,11 +21,12 @@ export const Route = createFileRoute("/api/worker/next")({
         if (request.headers.get("x-worker-beat-only") === "1") {
           const jobId = request.headers.get("x-job-id") || "";
           const accountId = request.headers.get("x-account-id") || "";
-          if (jobId) {
-            const { renewJobLeases } = await import("@/lib/coord");
-            await renewJobLeases(jobId, accountId);
+          const { renewJobLeases, parseActiveJobsHeader } = await import("@/lib/coord");
+          const pairs = parseActiveJobsHeader(request.headers.get("x-active-jobs"), jobId, accountId);
+          for (const p of pairs) {
+            await renewJobLeases(p.jobId, p.accountId, 120_000, name);
           }
-          return Response.json({ ok: true, beat: true, name });
+          return Response.json({ ok: true, beat: true, name, renewed: pairs.length });
         }
         const next = await claimNext(name, stats);
         return Response.json(next);

@@ -27,7 +27,7 @@ test("worker streams deltas and records T0-T10", () => {
   assert.match(s, /actual_profile/);
   assert.match(s, /fast_capable/);
   assert.equal(/if text and not phase:\s+return/.test(s), false);
-  assert.match(s, /post_chunk\(piece\)/);
+  assert.match(s, /post_chunk\(piece/);
 });
 
 test("worker script on disk matches template", () => {

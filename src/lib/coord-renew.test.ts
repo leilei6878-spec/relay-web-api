@@ -40,3 +40,37 @@ test("worker heartbeat must not steal a finished job's account lease", async () 
   await releaseJobLeases(jobId, "acc1", "worker-1");
   assert.equal(await coordGet("account-lease:acc1"), nextJob);
 });
+
+test("renewJobLeases extends job-claim stored as workerName", async () => {
+  const { resetCoordForTests, coordSet, coordGet, renewJobLeases } = await import("./coord.ts");
+  resetCoordForTests();
+  const jobId = "11111111-1111-4111-8111-111111111111";
+  await coordSet(`job-claim:${jobId}`, "pc-1", 400);
+  await coordSet("account-lease:acc-a", jobId, 400);
+  await new Promise((r) => setTimeout(r, 200));
+  await renewJobLeases(jobId, "acc-a", 2000, "pc-1");
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(await coordGet(`job-claim:${jobId}`), "pc-1");
+  assert.equal(await coordGet("account-lease:acc-a"), jobId);
+});
+
+test("renewJobLeases does not steal a claim owned by another worker", async () => {
+  const { resetCoordForTests, coordSet, coordGet, renewJobLeases } = await import("./coord.ts");
+  resetCoordForTests();
+  const jobId = "11111111-1111-4111-8111-111111111111";
+  await coordSet(`job-claim:${jobId}`, "pc-1", 400);
+  await renewJobLeases(jobId, undefined, 2000, "pc-other");
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(await coordGet(`job-claim:${jobId}`), null);
+});
+
+test("parseActiveJobsHeader reads JSON list and falls back to single ids", async () => {
+  const { parseActiveJobsHeader } = await import("./coord.ts");
+  assert.deepEqual(parseActiveJobsHeader('[{"jobId":"j1","accountId":"a1"},{"jobId":"j2","accountId":"a2"}]'), [
+    { jobId: "j1", accountId: "a1" },
+    { jobId: "j2", accountId: "a2" },
+  ]);
+  assert.deepEqual(parseActiveJobsHeader("", "j9", "a9"), [{ jobId: "j9", accountId: "a9" }]);
+  assert.deepEqual(parseActiveJobsHeader("not-json", "j9", "a9"), [{ jobId: "j9", accountId: "a9" }]);
+  assert.deepEqual(parseActiveJobsHeader("[]"), []);
+});
