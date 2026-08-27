@@ -31,13 +31,37 @@ Claimed jobs are dispatched on helper threads; each helper blocks on
 its shard queue. The gateway `runningHere >= capacity` check remains
 the admission cap.
 
-## Not this commit
+Warmup uses the same routing: `warmup_plan` only warms accounts whose
+`shard_for_account(id) == current_shard`, and only through that
+account's bound proxy. Missing proxy → skip warmup (never pick_proxy).
+
+## Live 5 × 20 (Commit 12)
+
+Target:
+
+```
+5 healthy accounts
+20 simultaneous requests
+3 shards
+max_active_playwright_jobs >= 2
+max_active_per_account == 1
+```
+
+**NOT_EXECUTED.** This environment does not have five healthy live
+provider sessions to drive. If fewer than five healthy accounts are
+present at run time the gate is **BLOCKED_BY_ACCOUNT_COUNT**, not PASS.
+
+Unit tests with synthetic accounts prove shard overlap ≥ 2 and
+per-account serial = 1. That is not the live 5×20 matrix.
+
+## Not this campaign
 
 - `async_playwright` rewrite (V3 if data requires it)
-- Live 5×20 concurrent Chat/Image matrix — **NOT_EXECUTED**
 
 ## Unit coverage
 
 - `shard_for_account` is deterministic
 - three distinct accounts overlap (`max_active_playwright_jobs >= 2`)
 - the same account stays serial (`max_active_per_account = 1`)
+- warmup respects shard owner and bound proxy
+- same account is not warmed in multiple shards

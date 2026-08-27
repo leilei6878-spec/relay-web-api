@@ -1,5 +1,25 @@
 # Chaos Test Report
 
+## Web Runtime V2 live campaign (2026-08-27)
+
+Live Chat / Image / proxy-down / post-submit-crash against **real provider accounts**: **NOT_EXECUTED**.
+
+The 18/18 table below is the **in-process chaos harness** (shared-pg + Redis + two gateways). It is not live provider traffic, not post-submit paid-generation chaos, and not Proxy-A-down on a real SOCKS node.
+
+| Gate | Target | Status |
+|---|---|---|
+| F. Generate clicked → worker crash / gateway timeout | duplicate_paid_generation=0; SUCCESS / RESULT_RECOVERED / RESULT_UNCERTAIN only | **NOT_EXECUTED** |
+| G. Account A Proxy A down, Proxy B healthy | PROXY_UNAVAILABLE, proxy_drift=0 | **NOT_EXECUTED** |
+| H. 3 live accounts, shard metadata | cross_request_metadata=0 from chunk to result | **NOT_EXECUTED** |
+
+Unit coverage that exists and is **not** a substitute for live:
+
+- F: `retrySafety=UNSAFE` folds retry/switch off; post-submit `SUBMISSION_UNCERTAIN` / `RESULT_UNCERTAIN`
+- G: `job_proxy()` fail-closed; `PROXY_IDENTITY_MISMATCH`; claim uses `job.proxyId`
+- H: `JobRuntimeContext` isolation; no process-global `RELAY_JOB_ID`
+
+---
+
 Date: 2026-08-25T17:39:52Z
 
 Runner: `node scripts/chaos-harness.mjs`
@@ -13,7 +33,7 @@ Topology actually started:
 
 Raw JSON: `storage/chaos-harness-report.json`
 
-**18 / 18 PASS. 0 FAIL.**
+**18 / 18 PASS. 0 FAIL.** (in-process harness, not live V2 gates F/G/H)
 
 | # | Scenario | Result | Evidence |
 |---|---|---|---|

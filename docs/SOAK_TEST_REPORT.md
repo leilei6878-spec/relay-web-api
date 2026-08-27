@@ -1,5 +1,15 @@
 # Soak Test Report
 
+## Web Runtime V2 (2026-08-27)
+
+1 hour mixed Chat / Gemini / Leonardo / canary / recycle / fault injection: **NOT_EXECUTED**.
+
+Do not treat unit tests or the 8s smoke as a 1h soak.
+
+Correctness counters (lost_request, duplicate_execution, duplicate_paid_generation, false_positive_image, proxy_drift, cross_request_chunk, stale_result) are **unmeasured** on live traffic.
+
+---
+
 Harness: `node scripts/soak.mjs`
 
 **Release Candidate (2026-08-26): 1h / 12h / 24h / 48h are NOT_EXECUTED.**
