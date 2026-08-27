@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { listEligible } from "@/lib/eligibility";
 import { getApiKey } from "@/lib/gateway";
 import { isCallable, nextStep, whyBlocked } from "@/lib/readiness";
+import { onlineWorkerCount } from "@/lib/runtime-view";
 import { useGateway } from "@/lib/store";
 import { formatTime } from "@/lib/utils";
 
@@ -69,7 +70,11 @@ function Dashboard() {
         {[
           { label: "ChatGPT 可调用", value: gpt, hint: "已登录且绑了代理" },
           { label: "网页执行器", value: runtime?.workerOnline ? "在线" : "离线", hint: runtime?.workerOnline ? "返回网页原文" : "接口将 503" },
-          { label: "队列中", value: runtime?.queued ?? 0, hint: `${runtime?.workers.filter((w) => w.online).length ?? 0} 台 Worker` },
+          {
+            label: "队列中",
+            value: runtime?.queued ?? 0,
+            hint: `${onlineWorkerCount(runtime)} 台 Worker`,
+          },
         ].map((s) => (
           <div key={s.label} className="rounded-xl border border-border bg-surface p-5">
             <p className="text-xs text-muted">{s.label}</p>

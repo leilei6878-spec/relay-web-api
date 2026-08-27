@@ -45,9 +45,10 @@ At takeover:
 | 4 | Image provenance/validator/media closure | COMPLETE | Commit `ac0ae39`; frozen refs, strict confidence/assets/history, DOM correlation, WebP, WARM_IDLE fail-closed. |
 | 5 | Canary + selector self-healing closure | COMPLETE | Commit `71fd1f1`; distributed dispatch lease, real paid canary, shared selector state, finish-path fingerprint/promotion. |
 | 6 | Provider/capability/key backpressure | COMPLETE | Commit `71fd1f1`; global/provider/chat/image/key caps, file + distributed PG admission, 429/Retry-After. |
-| 7 | Full local automated campaign | COMPLETE | Relay 210/210; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
+| 7 | Full local automated campaign | COMPLETE | Relay 211/211; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
 | 7B | Production recovery + Compose contract | COMPLETE | Versioned/checksummed backup includes secrets/sessions; DB backup/restore fail closed; Compose has no required-secret defaults and host health port is consistently 8088. CLI/contract tests 6/6 pass. |
 | 7C | Release identity | COMPLETE | `0.9.0-rc2`; health/readiness/runtime expose exact commit and build time; production readiness rejects an unknown commit. |
+| 7D | Dev + production browser render | COMPLETE | Desktop and 390×844 mobile render with visible content, no horizontal overflow, and zero browser-console warnings/errors. Production-only partial runtime response crash was found, fixed, rebuilt, and retested. |
 | 8 | Real providers + soak | BLOCKED_BY_ENVIRONMENT | Needs healthy sessions/accounts and reachable production worker/infrastructure. |
 | 9 | Final acceptance | PENDING | `CODEX_FINAL_ACCEPTANCE.md`, requirement-by-requirement completion audit. |
 
@@ -86,9 +87,9 @@ runs. No zero is inferred from unit tests:
 
 ## Phase 7 evidence (2026-08-28)
 
-- `npm run test:relay`: **210/210 PASS**.
+- `npm run test:relay`: **211/211 PASS**.
 - `npm test`: **101/101 PASS**.
-- `npm run test:ci`: Relay **210/210 PASS** plus multi-process/contract suite
+- `npm run test:ci`: Relay **211/211 PASS** plus multi-process/contract suite
   **21/21 PASS**.
 - `npm run test:chaos`: **18/18 PASS** across two gateways with shared PGlite
   and Redis, including process/database restarts and fenced stale results.
