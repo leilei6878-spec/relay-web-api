@@ -26,6 +26,10 @@ const VERSION_TOKEN: Record<string, RegExp> = {
 const PRODUCT_ONLY = /^(chatgpt|auto|instant|fast|chatgpt\s*auto|chatgpt\s*instant)$/i;
 const WEB_ALIAS = new Set(["chatgpt-web-auto", "chatgpt-web-fast", "chatgpt-web"]);
 
+export function isWebModelAlias(model?: string) {
+  return WEB_ALIAS.has(String(model || "").trim().toLowerCase());
+}
+
 function profileOf(actual: string) {
   const g = actual.toLowerCase();
   if (g.includes("thinking")) return "thinking";
@@ -44,7 +48,7 @@ export const chatgptAdapter: ProviderAdapter = {
       imageEdit: false,
       streaming: true,
       multiTurn: true,
-      models: ["gpt-5.6", "gpt-5", "gpt-5-thinking", "gpt-4o", "chatgpt-web-auto", "chatgpt-web-fast"],
+      models: ["chatgpt-web-auto", "gpt-5.6", "gpt-5", "gpt-5-thinking", "gpt-4o"],
       maxOutputs: 1,
     };
   },
@@ -77,7 +81,7 @@ export const chatgptAdapter: ProviderAdapter = {
     const gotRaw = actual || "";
     const got = gotRaw.toLowerCase();
     const profile = profileOf(gotRaw);
-    if (WEB_ALIAS.has(req.toLowerCase())) {
+    if (isWebModelAlias(req)) {
       return {
         ok: false,
         requested: req,

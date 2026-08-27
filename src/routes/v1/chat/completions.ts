@@ -36,6 +36,13 @@ type ChatOk = {
   workerId?: string;
   accountId?: string;
   proxyId?: string;
+  requestedModel?: string;
+  actualModel?: string;
+  actualModelLabel?: string;
+  modelVerified?: boolean;
+  requestedProfile?: string;
+  actualProfile?: string;
+  profileVerified?: boolean;
 };
 type ChatFail = { ok: false; status: number; error: string };
 
@@ -73,7 +80,7 @@ export async function handleChat(request: Request): Promise<Response> {
         const parsed = parseMessageContent(last?.content);
         const prepared = prepareChatRequest("chatgpt", {
           messages: body.messages,
-          model: body.model || "gpt-5.6",
+          model: body.model || "chatgpt-web-auto",
           images: parsed.images,
         });
         const prompt = prepared.webPrompt;
@@ -196,6 +203,13 @@ export async function runChat(
       traceId,
       accountId: account.id,
       proxyId: account.proxyId || undefined,
+      requestedModel: model,
+      actualModel: "unknown",
+      actualModelLabel: "preview",
+      modelVerified: false,
+      requestedProfile: model === "chatgpt-web-fast" ? "fast" : model === "chatgpt-web-auto" ? "auto" : "exact",
+      actualProfile: "unknown",
+      profileVerified: false,
     };
   }
   const circuit = await getCircuit("chatgpt");
@@ -244,6 +258,13 @@ export async function runChat(
         workerId: fresh.workerId,
         accountId: fresh.accountId || undefined,
         proxyId: fresh.proxyId,
+        requestedModel: fresh.requestedModel || queued.job.model,
+        actualModel: fresh.actualModel || "unknown",
+        actualModelLabel: fresh.actualModelLabel,
+        modelVerified: fresh.modelVerified ?? false,
+        requestedProfile: queued.job.model === "chatgpt-web-fast" ? "fast" : queued.job.model === "chatgpt-web-auto" ? "auto" : "exact",
+        actualProfile: fresh.actualProfile || "unknown",
+        profileVerified: fresh.profileVerified ?? false,
       };
     }
     const err = done.ok ? "执行器未返回模型原文" : done.error;
@@ -281,13 +302,17 @@ export function streamChat(
       const started = Date.now();
       const id = uid();
       let jobId: string | undefined;
+      let upstreamReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+      let wakeAbort: () => void = () => undefined;
+      const aborted = new Promise<void>((resolve) => {
+        wakeAbort = resolve;
+      });
       const life = attachSseLifecycle({
         signal: abortSignal,
         timeoutMs: 210_000,
-        onAbort: (reason) => {
-          if (reason === "disconnect" && jobId) {
-            void cancelJob(jobId, "REQUEST_CANCELLED: disconnect");
-          }
+        onAbort: () => {
+          wakeAbort();
+          void upstreamReader?.cancel().catch(() => undefined);
         },
       });
       try {
@@ -310,6 +335,7 @@ export function streamChat(
           if (up.ok) {
             const decoder = new TextDecoder();
             const reader = up.body.getReader();
+            upstreamReader = reader;
             let buf = "";
             let text = "";
             while (true) {
@@ -342,12 +368,38 @@ export function streamChat(
                 }
               }
             }
+            if (life.aborted()) {
+              const why = `REQUEST_CANCELLED: ${life.reason()}`;
+              await send({ error: { message: why }, relay: { phase: "error", logicalStatus: "cancelled", partialText: text } });
+              await logUsage(key, model, { images }, prompt, started, { ok: false, status: 499, error: why });
+              await finish();
+              return;
+            }
             await send({
               id: `chatcmpl-${id}`,
               object: "chat.completion.chunk",
               model,
               choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-              relay: { phase: "done", mode: "preview" },
+              relay: {
+                phase: "done",
+                logicalStatus: "success",
+                mode: "preview",
+                requestedModel: model,
+                actualModel: "unknown",
+                actualModelLabel: "preview",
+                modelVerified: false,
+                requested_model: model,
+                actual_model: "unknown",
+                actual_model_label: "preview",
+                model_verified: false,
+                requestedProfile: model === "chatgpt-web-fast" ? "fast" : model === "chatgpt-web-auto" ? "auto" : "exact",
+                actualProfile: "unknown",
+                profileVerified: false,
+                requested_profile: model === "chatgpt-web-fast" ? "fast" : model === "chatgpt-web-auto" ? "auto" : "exact",
+                actual_profile: "unknown",
+                profile_verified: false,
+                finalText: text,
+              },
             });
             await send(sseUsageChunk(model, id, estimateTokens(prompt), estimateTokens(text)));
             await logUsage(key, model, { images }, prompt, started, {
@@ -363,6 +415,13 @@ export function streamChat(
             return;
           }
         }
+        if (life.aborted()) {
+          const why = `REQUEST_CANCELLED: ${life.reason()}`;
+          await send({ error: { message: why }, relay: { phase: "error", logicalStatus: "cancelled" } });
+          await logUsage(key, model, { images }, prompt, started, { ok: false, status: 499, error: why });
+          await finish();
+          return;
+        }
         const queued = await enqueueChat(prompt, model, chatJobTimeoutMs(model, images), images, {
           idempotencyKey: idem,
           requestId,
@@ -376,6 +435,25 @@ export function streamChat(
           return;
         }
         jobId = queued.job.id;
+        if (life.aborted()) {
+          const cancelReason = life.reason() === "timeout" ? "TIMEOUT: SSE lifecycle deadline" : `REQUEST_CANCELLED: ${life.reason()}`;
+          const cancelled = await cancelJob(jobId, cancelReason);
+          const retained = "retained" in cancelled && cancelled.retained;
+          const why = retained
+            ? "RESULT_UNCERTAIN: stream ended after provider submission; attempt retained for recovery"
+            : cancelReason;
+          await send({
+            error: { message: why },
+            relay: {
+              phase: "error",
+              logicalStatus: retained ? "uncertain" : life.reason() === "disconnect" ? "cancelled" : "error",
+              jobId,
+            },
+          });
+          await logUsage(key, model, { images }, prompt, started, { ok: false, status: 499, error: why });
+          await finish();
+          return;
+        }
         await send({
           id: `chatcmpl-${queued.job.id}`,
           object: "chat.completion.chunk",
@@ -394,7 +472,8 @@ export function streamChat(
             relay: { phase: "waiting_worker", jobId: queued.job.id, accountEmail: queued.job.accountEmail },
           });
         }, 8000);
-        await new Promise<void>((resolve) => {
+        let unsubscribeJob: () => void = () => undefined;
+        const jobSettled = new Promise<void>((resolve) => {
           const unsub = subscribeJob(queued.job.id, (ev) => {
             if (ev.type === "phase") {
               void send({
@@ -428,14 +507,28 @@ export function streamChat(
             unsub();
             resolve();
           });
+          unsubscribeJob = unsub;
         });
+        await Promise.race([jobSettled, aborted]);
         clearInterval(ping);
         if (life.aborted()) {
-          const why =
-            life.reason() === "timeout"
-              ? "网页执行超时。ChatGPT 页面加载或模型思考超过等待时间。请确认代理能打开 chatgpt.com，或改用 GPT-4o 再试。"
-              : `REQUEST_CANCELLED: ${life.reason()}`;
-          await send({ error: { message: why }, relay: { phase: "error" } });
+          unsubscribeJob();
+          const cancelReason =
+            life.reason() === "timeout" ? "TIMEOUT: SSE lifecycle deadline" : `REQUEST_CANCELLED: ${life.reason()}`;
+          const cancelled = jobId ? await cancelJob(jobId, cancelReason) : { ok: true as const };
+          const retained = "retained" in cancelled && cancelled.retained;
+          const why = retained
+            ? "RESULT_UNCERTAIN: stream ended after provider submission; attempt retained for recovery"
+            : cancelReason;
+          await send({
+            error: { message: why },
+            relay: {
+              phase: "error",
+              logicalStatus: retained ? "uncertain" : life.reason() === "disconnect" ? "cancelled" : "error",
+              partialText: assembled,
+              jobId,
+            },
+          });
           await logUsage(key, model, { images }, prompt, started, { ok: false, status: 499, error: why });
           await finish();
           return;
@@ -489,9 +582,19 @@ export function streamChat(
             firstSseDeltaMs: firstSse ? firstSse - started : null,
             timing: done.timing || null,
             actualModel: done.actualModel || null,
+            actualModelLabel: done.actualModelLabel || null,
+            modelVerified: done.modelVerified ?? false,
+            requested_model: model,
+            actual_model: done.actualModel || "unknown",
+            actual_model_label: done.actualModelLabel || null,
+            model_verified: done.modelVerified ?? false,
             actualProfile: done.actualProfile || null,
             profileVerified: done.profileVerified ?? false,
-            requestedProfile: model === "chatgpt-web-fast" ? "fast" : "auto",
+            requestedModel: model,
+            requestedProfile: model === "chatgpt-web-fast" ? "fast" : model === "chatgpt-web-auto" ? "auto" : "exact",
+            requested_profile: model === "chatgpt-web-fast" ? "fast" : model === "chatgpt-web-auto" ? "auto" : "exact",
+            actual_profile: done.actualProfile || "unknown",
+            profile_verified: done.profileVerified ?? false,
             finalText: text,
           },
         });
@@ -553,6 +656,13 @@ function completion(result: ChatOk, imageCount: number, promptTokens: number, co
       workerId: result.workerId,
       accountId: result.accountId,
       proxyId: result.proxyId,
+      requested_model: result.requestedModel || result.model,
+      actual_model: result.actualModel || "unknown",
+      actual_model_label: result.actualModelLabel,
+      model_verified: result.modelVerified ?? false,
+      requested_profile: result.requestedProfile || "exact",
+      actual_profile: result.actualProfile || "unknown",
+      profile_verified: result.profileVerified ?? false,
     },
   };
 }

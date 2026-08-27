@@ -16,7 +16,7 @@ import { addAttempt, finishAttempt } from "./requests";
 import { getSecret, proxySecretKey } from "./secrets";
 import { proxyServer } from "./session-file";
 import { uid } from "./utils";
-import { applySessionUpdate, getAdapter } from "./provider/index";
+import { applySessionUpdate, getAdapter, isWebModelAlias } from "./provider/index";
 import { isLeonardoModel } from "./provider/leonardo-models";
 import { validateJobImageUrls } from "./provider/image-result-validator";
 import { describeDataUrl } from "./provider/reference-verify";
@@ -69,6 +69,8 @@ export type Job = {
   pageState?: string;
   requestedModel?: string;
   actualModel?: string;
+  actualModelLabel?: string;
+  modelVerified?: boolean;
   timing?: JobTiming;
   actualProfile?: string;
   profileVerified?: boolean;
@@ -444,7 +446,7 @@ async function enqueue(
 
 export function enqueueChat(
   prompt: string,
-  model = "gpt-5.6",
+  model = "chatgpt-web-auto",
   timeoutMs = 90_000,
   images: string[] = [],
   opts?: EnqueueOpts,
@@ -679,20 +681,28 @@ export function finishJob(
     if (typeof result.recoveryLevel === "number") job.recoveryLevel = result.recoveryLevel;
     if (result.retrySafety) job.retrySafety = result.retrySafety;
     if (result.submissionState) job.submissionState = result.submissionState;
-    if (typeof result.modelActual === "string") {
-      const verdict = getAdapter(job.platform).verifyModel(job.model, result.modelActual);
-      job.actualModel = result.modelActual;
+    if (result.ok && (job.platform === "chatgpt" || typeof result.modelActual === "string")) {
+      const modelLabel = typeof result.modelActual === "string" ? result.modelActual : "";
+      const verdict = getAdapter(job.platform).verifyModel(job.model, modelLabel);
+      job.actualModelLabel = modelLabel || undefined;
+      job.actualModel = verdict.ok ? verdict.actual : "unknown";
+      job.modelVerified = verdict.ok;
       job.requestedModel = job.model;
       if (!verdict.ok) {
         const allowUnconfirmed =
-          verdict.code === "MODEL_SELECTION_UNCONFIRMED" && process.env.RELAY_MODEL_UNCONFIRMED === "allow";
+          verdict.code === "MODEL_SELECTION_UNCONFIRMED" &&
+          (isWebModelAlias(job.model) || process.env.RELAY_MODEL_UNCONFIRMED === "allow");
         if (!allowUnconfirmed) {
           job.status = "error";
-          job.error = `${verdict.code}: requested ${job.model} got ${result.modelActual || "(none)"}`;
+          job.error = `${verdict.code}: requested ${job.model} got ${modelLabel || "(none)"}`;
           job.fault = "provider";
           job.errorCode = verdict.code;
-          if (job.accountId) await coordDel(`account-lease:${job.accountId}`);
-          await coordDel(`job-claim:${job.id}`);
+          if (job.accountId) {
+            await releaseJobLeases(job.id, job.accountId, job.workerName || job.workerId);
+            await patchAccount(job.accountId, { lockedUntil: null }).catch(() => undefined);
+          } else {
+            await coordDel(`job-claim:${job.id}`);
+          }
           await save(store);
           publishJobEvent(id, { type: "error", error: job.error });
           return { ok: false as const, error: job.error };

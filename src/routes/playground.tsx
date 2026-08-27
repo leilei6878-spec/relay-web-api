@@ -25,7 +25,8 @@ function Page() {
 type Step = { label: string; state: "run" | "ok" | "fail" | "skip" };
 
 const CHAT_MODELS = [
-  { id: "gpt-5.6", label: "GPT-5.6 Instant（快）" },
+  { id: "chatgpt-web-auto", label: "ChatGPT 网页默认（实际模型未验证）" },
+  { id: "gpt-5.6", label: "GPT-5.6（网页明确显示版本时）" },
   { id: "gpt-5", label: "GPT-5 Auto" },
   { id: "gpt-5-thinking", label: "GPT-5 Thinking" },
   { id: "gpt-4o", label: "GPT-4o" },
@@ -48,7 +49,7 @@ function Playground() {
   const [steps, setSteps] = useState<Step[]>([]);
   const [forceFailFirst, setForceFailFirst] = useState(false);
   const [liveWeb, setLiveWeb] = useState(true);
-  const [chatModel, setChatModel] = useState("gpt-5.6");
+  const [chatModel, setChatModel] = useState("chatgpt-web-auto");
   const [imageModel, setImageModel] = useState("gemini-image");
   const [switched, setSwitched] = useState(0);
   const [workerOn, setWorkerOn] = useState<boolean | null>(null);

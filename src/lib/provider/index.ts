@@ -3,7 +3,7 @@ import { geminiAdapter } from "./gemini";
 import { leonardoAdapter } from "./leonardo";
 import type { ProviderAdapter, ProviderId } from "./types";
 
-export { chatgptAdapter } from "./chatgpt";
+export { chatgptAdapter, isWebModelAlias } from "./chatgpt";
 export { geminiAdapter } from "./gemini";
 export { leonardoAdapter } from "./leonardo";
 export { detectPageState, errorForPageState } from "./page-state";

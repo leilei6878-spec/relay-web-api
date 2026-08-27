@@ -30,6 +30,7 @@ import { getSecret, proxySecretKey } from "./secrets";
 import { proxyServer } from "./session-file";
 import { uid } from "./utils";
 import { markResilience } from "./resilience-metrics";
+import { isWebModelAlias } from "./provider/chatgpt";
 import {
   applySubmissionCheckpoint,
   recoveryDisposition,
@@ -342,14 +343,22 @@ export async function finishJobPg(
   if (result.retrySafety) current.retrySafety = result.retrySafety;
   if (result.submissionState) current.submissionState = result.submissionState;
 
-  if (result.ok && typeof result.modelActual === "string") {
+  if (result.ok && (current.platform === "chatgpt" || typeof result.modelActual === "string")) {
     const { getAdapter } = await import("./provider/index");
-    const verdict = getAdapter(current.platform).verifyModel(current.model, result.modelActual);
-    if (!verdict.ok && !(verdict.code === "MODEL_SELECTION_UNCONFIRMED" && process.env.RELAY_MODEL_UNCONFIRMED === "allow")) {
+    const modelLabel = typeof result.modelActual === "string" ? result.modelActual : "";
+    const verdict = getAdapter(current.platform).verifyModel(current.model, modelLabel);
+    current.actualModelLabel = modelLabel || undefined;
+    current.actualModel = verdict.ok ? verdict.actual : "unknown";
+    current.modelVerified = verdict.ok;
+    const allowUnconfirmed =
+      !verdict.ok &&
+      verdict.code === "MODEL_SELECTION_UNCONFIRMED" &&
+      (isWebModelAlias(current.model) || process.env.RELAY_MODEL_UNCONFIRMED === "allow");
+    if (!verdict.ok && !allowUnconfirmed) {
       const extra = {
         ...current,
         status: "error",
-        error: `${verdict.code}: requested ${current.model} got ${result.modelActual || "(none)"}`,
+        error: `${verdict.code}: requested ${current.model} got ${modelLabel || "(none)"}`,
         fault: "provider",
         errorCode: verdict.code,
         lease: undefined,

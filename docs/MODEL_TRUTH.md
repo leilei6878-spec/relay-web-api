@@ -12,12 +12,15 @@ Web UI labels are not model versions.
 
 `model_verified=true` only when the actual string contains version evidence (`5.6`). Otherwise `MODEL_SELECTION_UNCONFIRMED`.
 
-Public aliases that opt into this honesty:
+The default public model is `chatgpt-web-auto`. It opts into the webpage's
+default without claiming an exact model. `chatgpt-web-fast` is recognized for
+compatibility but is not advertised until a live selector verifies the profile.
 
-- `chatgpt-web-auto`
-- `chatgpt-web-fast`
-
-`actual_model="ChatGPT"`, `model_verified=false` is correct.
+For a product-only label, the correct result metadata is
+`actual_model="unknown"`, `actual_model_label="ChatGPT"`, and
+`model_verified=false`. Exact IDs (`gpt-5.6`, `gpt-5`, `gpt-4o`) fail before
+submission if the UI cannot select them and fail at result validation if the UI
+does not confirm them.
 
 ## Selector pack (Leonardo refs)
 

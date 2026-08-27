@@ -704,14 +704,18 @@ def count_leonardo_refs(page):
 
 def attach_images(page, images):
     paths = materialize_images(images)
+    requested = len([item for item in (images or []) if item])
+    if requested <= 0:
+        return 0
     if not paths:
-        return
+        return 0
+    if len(paths) != requested:
+        return len(paths)
     try:
         loc = page.locator("input[type=file]")
         if loc.count() > 0:
             loc.first.set_input_files(paths)
-            wait_composer_files(page)
-            return
+            return wait_composer_files(page, requested)
     except Exception:
         pass
     try:
@@ -737,18 +741,26 @@ def attach_images(page, images):
             page.locator("input[type=file]").first.set_input_files(paths)
         except Exception:
             pass
-    wait_composer_files(page)
+    return wait_composer_files(page, requested)
 
-def wait_composer_files(page, timeout_ms=8000):
+def count_chat_refs(page):
+    try:
+        return int(page.evaluate("""() => {
+          const remove = [...document.querySelectorAll('button[aria-label*="Remove" i], button[aria-label*="移除"]')];
+          if (remove.length) return remove.length;
+          return document.querySelectorAll('form img, [data-testid*="attachment"] img').length;
+        }""") or 0)
+    except Exception:
+        return 0
+
+def wait_composer_files(page, expected=1, timeout_ms=8000):
     deadline = time.time() + timeout_ms / 1000.0
     while time.time() < deadline:
-        try:
-            if page.locator('form img, [data-testid*="attachment"] img, button[aria-label*="Remove"], button[aria-label*="移除"]').count() > 0:
-                return True
-        except Exception:
-            pass
+        attached = count_chat_refs(page)
+        if attached >= max(1, int(expected or 1)):
+            return attached
         time.sleep(0.12)
-    return False
+    return count_chat_refs(page)
 
 def leonardo_refs_attached(page):
     return count_leonardo_refs(page) > 0
@@ -2409,11 +2421,14 @@ def click_named(page, names, timeout=900):
     return False
 
 def select_model(page, model):
-    want_think = "thinking" in (model or "").lower() or model in ("o1", "o3")
-    if not want_think:
-        if click_named(page, ["Instant", "Fast", "快速响应", "快速"]):
+    requested = str(model or "").strip().lower()
+    web_auto = requested in ("chatgpt-web-auto", "chatgpt-web")
+    web_fast = requested == "chatgpt-web-fast"
+    if web_auto or web_fast:
+        preferred = ["Instant", "Fast", "快速响应", "快速"] if web_fast else ["Auto", "ChatGPT"]
+        if click_named(page, preferred):
             time.sleep(0.12)
-            return True, "Instant"
+            return True, "Instant" if web_fast else "Auto"
         switchers = [
             '[data-testid="model-switcher-dropdown-button"]',
             'button:has-text("ChatGPT 5")',
@@ -2428,9 +2443,9 @@ def select_model(page, model):
                 if loc.count() > 0 and loc.is_visible():
                     loc.click(timeout=1200)
                     time.sleep(0.2)
-                    if click_named(page, ["Instant", "Fast", "Auto", "GPT-5.6", "快速响应"]):
+                    if click_named(page, preferred):
                         time.sleep(0.12)
-                        return True, "Instant"
+                        return True, "Instant" if web_fast else "Auto"
                     try:
                         page.keyboard.press("Escape")
                     except Exception:
@@ -2445,12 +2460,12 @@ def select_model(page, model):
             pass
         return True, "ChatGPT"
     labels = {
-        "gpt-5.6": ["GPT-5.6", "5.6", "Instant", "ChatGPT", "Auto", "GPT-5"],
-        "latest": ["GPT-5.6", "GPT-5", "Instant", "ChatGPT", "Auto"],
-        "gpt-5": ["GPT-5 Auto", "Auto", "GPT-5", "ChatGPT", "Instant"],
+        "gpt-5.6": ["GPT-5.6", "5.6"],
+        "latest": ["GPT-5.6", "5.6"],
+        "gpt-5": ["GPT-5 Auto", "GPT-5"],
         "gpt-5-thinking": ["GPT-5 Thinking", "Thinking", "Sol"],
         "gpt-4o": ["GPT-4o", "4o"],
-    }.get(model, [model])
+    }.get(requested, [model])
     switchers = [
         '[data-testid="model-switcher-dropdown-button"]',
         'button:has-text("ChatGPT 5")',
@@ -2500,10 +2515,6 @@ def select_model(page, model):
                     break
         except Exception:
             actual = actual or ""
-    if page.locator("#prompt-textarea, textarea#prompt-textarea").count() > 0:
-        if not actual:
-            actual = "ChatGPT"
-        return True, actual
     ok = any(lab.lower() in actual.lower() for lab in labels) if actual else False
     return ok, actual
 
@@ -2551,7 +2562,7 @@ def run_chat(body, ctx=None):
     stop = (sel.get("streamingStop") or ["button[aria-label='Stop streaming']", "button[aria-label='Stop generating']", "button[data-testid='stop-button']"])[:4]
     pack_version = body.get("selectorPackVersion") or sel.get("version") or "chatgpt-v1"
     timeout_ms = int(body.get("timeoutMs") or 90000)
-    model = (body.get("model") or "gpt-5.6").strip()
+    model = (body.get("model") or "chatgpt-web-auto").strip()
     proxy = job_proxy(body)
     ident = proxy_identity_error(body, proxy)
     if ident:
@@ -2652,7 +2663,10 @@ def run_chat(body, ctx=None):
             code = "MODEL_SELECTION_UNCONFIRMED" if not actual else "MODEL_MISMATCH"
             return {"ok": False, "error": code + ": failed to select " + model, "fault": "provider", "modelActual": actual or "", "timing": marks, "profile": profile}
         if images:
-            attach_images(page, images)
+            attached = attach_images(page, images)
+            miss = attachment_incomplete(len(images), attached)
+            if miss:
+                return fail_job(ctx, miss, "provider", {"attachedReferenceCount": attached, "requestedReferenceCount": len(images), "modelActual": actual or ""})
         box = first_visible(page, inp)
         if box is None:
             page, recovery_level = recover_page(page, context, 2, real)
@@ -4205,7 +4219,7 @@ def poll_gateway():
                 payload["aspect"] = job.get("aspect") or ""
                 payload["tier"] = job.get("tier") or ""
             else:
-                payload["model"] = job.get("model") or "gpt-5.6"
+                payload["model"] = job.get("model") or "chatgpt-web-auto"
             def _run(payload=payload):
                 global DISPATCHED
                 try:

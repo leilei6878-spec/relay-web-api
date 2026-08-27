@@ -705,3 +705,26 @@ test("browser pool key includes proxy identity and credentials", () => {
   assert.doesNotMatch(s, /kw\["proxy"\] = proxy\s*$/m);
 });
 
+test("exact model selection never falls back to Instant or generic ChatGPT", () => {
+  const s = localWorkerScript();
+  const start = s.indexOf("def select_model");
+  const end = s.indexOf("def run_chat", start);
+  const fn = s.slice(start, end);
+  assert.match(fn, /web_auto = requested in/);
+  assert.match(fn, /web_fast = requested == "chatgpt-web-fast"/);
+  assert.match(fn, /"gpt-5\.6": \["GPT-5\.6", "5\.6"\]/);
+  assert.doesNotMatch(fn, /"gpt-5\.6": \[[^\]]*Instant/);
+  assert.doesNotMatch(fn, /"gpt-5": \[[^\]]*ChatGPT/);
+});
+
+test("chat vision requires every requested image to attach before submit", () => {
+  const s = localWorkerScript();
+  assert.match(s, /def count_chat_refs/);
+  assert.match(s, /return wait_composer_files\(page, requested\)/);
+  const start = s.indexOf("def run_chat");
+  const end = s.indexOf("class H", start);
+  const fn = s.slice(start, end);
+  assert.match(fn, /miss = attachment_incomplete\(len\(images\), attached\)/);
+  assert.match(fn, /requestedReferenceCount/);
+});
+

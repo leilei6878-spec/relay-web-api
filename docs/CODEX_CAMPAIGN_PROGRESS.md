@@ -38,8 +38,10 @@ At takeover:
 | 1A | Public admin auto-login fail-closed | COMPLETE | Commit `5e2bb60`; production-shaped GET + cookie tests 9/9 pass. |
 | 1B | Existing typecheck/lint/build blockers | COMPLETE | Commit `d0ba670`; typecheck PASS, lint 0 errors, production build PASS. Full campaign tests remain in Phase 7. |
 | 1C | SSE logical status authority | COMPLETE | Commit `c429950`; focused parser/history tests 8/8 pass. |
-| 2 | Submission-aware reclaim / no duplicate paid generation | READY_FOR_COMMIT | Durable lease-fenced checkpoints; SAFE-only retry; file tests 12/12 and PG reclaim 1/1 pass; typecheck/build pass. |
-| 3 | Proxy/browser/session identity isolation | PENDING | Browser pool identity must include proxy credentials/id, not only host:port. |
+| 2 | Submission-aware reclaim / no duplicate paid generation | COMPLETE | Commit `1ff9844`; durable checkpoints, SAFE-only retry, heartbeat-aware PG reclaim and fenced cancellation. |
+| 3A | Proxy/browser/session identity isolation | COMPLETE | Commit `1ff9844`; proxy ID/credential fingerprint keys browser pools and launch config strips internal fields. Live proxy-down gate remains Phase 8. |
+| 3B | Model truth + operational default | READY_FOR_COMMIT | Default is honest `chatgpt-web-auto`; exact IDs select specifically/fail closed; requested/actual/verified metadata preserved. Focused tests pass. |
+| 3C | Chat attachment/disconnect closure | READY_FOR_COMMIT | Exact vision attachment count before send; abort races enqueue/wait and retains submitted attempts as uncertain. Live Chat gate remains. |
 | 4 | Image provenance/validator/media closure | PENDING | Propagate confidence/history/asset metadata; remove silent HIGH default. |
 | 5 | Canary + selector self-healing closure | PENDING | Wire worker probe, distributed scheduling/state, real low-frequency paid canary. |
 | 6 | Provider/capability/key backpressure | PENDING | File + PG parity, 429/503 + Retry-After. |
@@ -75,5 +77,6 @@ runs. No zero is inferred from unit tests:
 - `5e2bb60` — production admin login fail-closed
 - `d0ba670` — restore hard typecheck/build/lint gates
 - `c429950` — authoritative SSE logical status and terminal partial text
+- `1ff9844` — durable submission checkpoints, safe reclaim, proxy pool isolation
 
 Temporary dependency cache content is never committed.

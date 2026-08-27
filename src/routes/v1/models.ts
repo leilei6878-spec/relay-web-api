@@ -26,7 +26,16 @@ const gptImageCaps = { ...leonardo, imageGeneration: true, imageEdit: true, chat
 
 export const MODELS = [
   ...chatgpt.models.map((id) =>
-    asModel(id, "relay-chatgpt", chatgpt, id === "gpt-4o" ? "GPT-4o Vision" : "ChatGPT web, vision + multi-turn"),
+    asModel(
+      id,
+      "relay-chatgpt",
+      chatgpt,
+      id === "chatgpt-web-auto"
+        ? "ChatGPT web default; actual model remains unknown unless the UI exposes an exact version"
+        : id === "gpt-4o"
+          ? "GPT-4o Vision; request fails closed unless the UI confirms 4o"
+          : "ChatGPT web, vision + multi-turn; exact IDs fail closed unless confirmed by the UI",
+    ),
   ),
   asModel("gemini-image", "relay-gemini", gemini, "Gemini 出图 / 参考图编辑（mask 不支持）"),
   asModel("leonardo-gpt-image-2", "relay-leonardo", leonardo, "Leonardo web GPT Image 2"),

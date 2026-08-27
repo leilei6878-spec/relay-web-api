@@ -115,6 +115,7 @@ test("stale lease result is rejected", async () => {
     fencingToken: next.job!.fencingToken,
     attemptId: next.job!.attemptId,
     workerId: "qa-worker",
+    modelActual: "GPT-5.6",
   });
   assert.equal(ok.ok, true);
   const job = await getJob(next.job!.id);
@@ -203,6 +204,7 @@ test("post-submit cancellation retains the running attempt and never requeues", 
     workerId: "qa-worker",
     submissionState: "RESULT_VALIDATED",
     retrySafety: "UNSAFE",
+    modelActual: "GPT-5.6",
   });
   assert.equal(finished.ok, true);
   assert.equal((await getJob(job.id))?.status, "done");
@@ -261,4 +263,67 @@ test("queue cap returns QUEUE_FULL 429", async () => {
   assert.equal(b.ok, false);
   if (!b.ok) assert.match(b.error, /QUEUE_FULL: 429/);
   delete process.env.RELAY_QUEUE_CAP;
+});
+
+test("web-auto succeeds without inventing an actual model; exact IDs fail closed", async () => {
+  await seed();
+  const auto = await enqueueChat("auto", "chatgpt-web-auto", 8000, [], {
+    idempotencyKey: `model-auto-${Date.now()}`,
+  });
+  assert.equal(auto.ok, true);
+  if (!auto.ok) return;
+  const autoClaim = await claimNext("model-worker");
+  const autoDone = await finishJob(autoClaim.job!.id, {
+    ok: true,
+    text: "answer",
+    modelActual: "ChatGPT",
+    leaseId: autoClaim.job!.leaseId,
+    fencingToken: autoClaim.job!.fencingToken,
+    attemptId: autoClaim.job!.attemptId,
+    workerId: "model-worker",
+  });
+  assert.equal(autoDone.ok, true);
+  const autoJob = await getJob(autoClaim.job!.id);
+  assert.equal(autoJob?.status, "done");
+  assert.equal(autoJob?.actualModel, "unknown");
+  assert.equal(autoJob?.actualModelLabel, "ChatGPT");
+  assert.equal(autoJob?.modelVerified, false);
+
+  await seed();
+  const exact = await enqueueChat("exact", "gpt-5.6", 8000, [], {
+    idempotencyKey: `model-exact-${Date.now()}`,
+  });
+  assert.equal(exact.ok, true);
+  if (!exact.ok) return;
+  const exactClaim = await claimNext("model-worker");
+  const rejected = await finishJob(exactClaim.job!.id, {
+    ok: true,
+    text: "answer",
+    modelActual: "ChatGPT",
+    leaseId: exactClaim.job!.leaseId,
+    fencingToken: exactClaim.job!.fencingToken,
+    attemptId: exactClaim.job!.attemptId,
+    workerId: "model-worker",
+  });
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.match(rejected.error, /MODEL_SELECTION_UNCONFIRMED/);
+  assert.equal((await getJob(exactClaim.job!.id))?.status, "error");
+
+  await seed();
+  const missing = await enqueueChat("missing", "gpt-5.6", 8000, [], {
+    idempotencyKey: `model-missing-${Date.now()}`,
+  });
+  assert.equal(missing.ok, true);
+  if (!missing.ok) return;
+  const missingClaim = await claimNext("model-worker");
+  const missingRejected = await finishJob(missingClaim.job!.id, {
+    ok: true,
+    text: "answer",
+    leaseId: missingClaim.job!.leaseId,
+    fencingToken: missingClaim.job!.fencingToken,
+    attemptId: missingClaim.job!.attemptId,
+    workerId: "model-worker",
+  });
+  assert.equal(missingRejected.ok, false);
+  if (!missingRejected.ok) assert.match(missingRejected.error, /MODEL_SELECTION_UNCONFIRMED/);
 });

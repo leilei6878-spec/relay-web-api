@@ -22,6 +22,13 @@ export type SseOutcome = {
   accountEmail?: string;
   phase?: string;
   ssePartialBeforeError: boolean;
+  requestedModel?: string;
+  actualModel?: string;
+  actualModelLabel?: string;
+  modelVerified?: boolean;
+  requestedProfile?: string;
+  actualProfile?: string;
+  profileVerified?: boolean;
 };
 
 export function phaseFromLogical(status: LogicalStatus): "done" | "error" {
@@ -46,6 +53,13 @@ export function classifySseOutcome(input: {
   accountEmail?: string;
   requestId?: string;
   jobId?: string;
+  requestedModel?: string;
+  actualModel?: string;
+  actualModelLabel?: string;
+  modelVerified?: boolean;
+  requestedProfile?: string;
+  actualProfile?: string;
+  profileVerified?: boolean;
 }): SseOutcome {
   const partialText = input.partialText || input.text || "";
   const text = input.text || partialText;
@@ -59,6 +73,13 @@ export function classifySseOutcome(input: {
     accountEmail: input.accountEmail,
     requestId: input.requestId,
     jobId: input.jobId,
+    requestedModel: input.requestedModel,
+    actualModel: input.actualModel,
+    actualModelLabel: input.actualModelLabel,
+    modelVerified: input.modelVerified,
+    requestedProfile: input.requestedProfile,
+    actualProfile: input.actualProfile,
+    profileVerified: input.profileVerified,
     ssePartialBeforeError: Boolean(msg && partialText),
   };
   if (input.logicalStatus && input.logicalStatus !== "success") {
@@ -156,6 +177,13 @@ export async function readSse(
   let requestId = "";
   let jobId = "";
   let error: { message?: string } | undefined;
+  let requestedModel = "";
+  let actualModel = "";
+  let actualModelLabel = "";
+  let modelVerified: boolean | undefined;
+  let requestedProfile = "";
+  let actualProfile = "";
+  let profileVerified: boolean | undefined;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -181,6 +209,20 @@ export async function readSse(
             jobId?: string;
             logicalStatus?: string;
             partialText?: string;
+            requestedModel?: string;
+            actualModel?: string;
+            actualModelLabel?: string;
+            modelVerified?: boolean;
+            requestedProfile?: string;
+            actualProfile?: string;
+            profileVerified?: boolean;
+            requested_model?: string;
+            actual_model?: string;
+            actual_model_label?: string;
+            model_verified?: boolean;
+            requested_profile?: string;
+            actual_profile?: string;
+            profile_verified?: boolean;
           };
         };
         if (json.id) id = json.id;
@@ -196,6 +238,15 @@ export async function readSse(
           logicalStatus = json.relay.logicalStatus;
         }
         if (json.relay?.partialText !== undefined) partialText = json.relay.partialText;
+        requestedModel = json.relay?.requested_model || json.relay?.requestedModel || requestedModel;
+        actualModel = json.relay?.actual_model || json.relay?.actualModel || actualModel;
+        actualModelLabel = json.relay?.actual_model_label || json.relay?.actualModelLabel || actualModelLabel;
+        if (typeof json.relay?.model_verified === "boolean") modelVerified = json.relay.model_verified;
+        else if (typeof json.relay?.modelVerified === "boolean") modelVerified = json.relay.modelVerified;
+        requestedProfile = json.relay?.requested_profile || json.relay?.requestedProfile || requestedProfile;
+        actualProfile = json.relay?.actual_profile || json.relay?.actualProfile || actualProfile;
+        if (typeof json.relay?.profile_verified === "boolean") profileVerified = json.relay.profile_verified;
+        else if (typeof json.relay?.profileVerified === "boolean") profileVerified = json.relay.profileVerified;
         if (json.relay?.requestId) requestId = json.relay.requestId;
         if (json.relay?.jobId) jobId = json.relay.jobId;
         const fr = json.choices?.[0]?.finish_reason;
@@ -231,5 +282,12 @@ export async function readSse(
     accountEmail,
     requestId,
     jobId: jobId || id,
+    requestedModel: requestedModel || undefined,
+    actualModel: actualModel || undefined,
+    actualModelLabel: actualModelLabel || undefined,
+    modelVerified,
+    requestedProfile: requestedProfile || undefined,
+    actualProfile: actualProfile || undefined,
+    profileVerified,
   });
 }

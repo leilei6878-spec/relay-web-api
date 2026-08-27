@@ -17,7 +17,8 @@ import {
 export const Route = createFileRoute("/console")({ component: Page });
 
 const CHAT_MODELS = [
-  { id: "gpt-5.6", label: "GPT-5.6 Instant（快）" },
+  { id: "chatgpt-web-auto", label: "ChatGPT 网页默认（实际模型未验证）" },
+  { id: "gpt-5.6", label: "GPT-5.6（网页明确显示版本时）" },
   { id: "gpt-5", label: "GPT-5 Auto" },
   { id: "gpt-5-thinking", label: "GPT-5 Thinking" },
   { id: "gpt-4o", label: "GPT-4o" },
@@ -59,7 +60,7 @@ function Page() {
 
 function Console() {
   const [kind, setKind] = useState<Kind>("chat");
-  const [model, setModel] = useState("gpt-5.6");
+  const [model, setModel] = useState("chatgpt-web-auto");
   const [imageModel, setImageModel] = useState("leonardo-gemini");
   const [imageN, setImageN] = useState(1);
   const [imageAspect, setImageAspect] = useState<ImageAspect>("16:9");
@@ -238,6 +239,13 @@ function Console() {
             logicalStatus: logical,
             transportStatus: assembled.transportStatus,
             completed: assembled.completed,
+            requested_model: assembled.requestedModel,
+            actual_model: assembled.actualModel,
+            actual_model_label: assembled.actualModelLabel,
+            model_verified: assembled.modelVerified,
+            requested_profile: assembled.requestedProfile,
+            actual_profile: assembled.actualProfile,
+            profile_verified: assembled.profileVerified,
           },
           ...(assembled.error ? { error: assembled.error } : {}),
         };

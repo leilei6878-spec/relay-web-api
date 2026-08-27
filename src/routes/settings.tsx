@@ -191,7 +191,7 @@ function ApiKeyCard() {
   const curl = `curl ${origin}/v1/chat/completions \\
   -H "Authorization: Bearer ${apiKey}" \\
   -H "Content-Type: application/json" \\
-  -d '{"model":"gpt-5.6","messages":[{"role":"user","content":"你好"}]}'`;
+  -d '{"model":"chatgpt-web-auto","messages":[{"role":"user","content":"你好"}]}'`;
 
   return (
     <div className="space-y-3 rounded-xl border border-border bg-surface p-5">

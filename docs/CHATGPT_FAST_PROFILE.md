@@ -12,9 +12,10 @@ Live DOM dump of `chatgpt.com/?temporary-chat=true` after login:
 
 | Field | Value |
 |---|---|
-| requested_model | gpt-5.6 (alias: latest) |
+| requested_model | chatgpt-web-auto |
 | requested_profile | auto |
-| actual_model | ChatGPT (UI) / GPT-5.6 Sol when the model says so |
+| actual_model | unknown |
+| actual_model_label | ChatGPT (product label only) |
 | actual_profile | unknown (Sol mentioned in some answers → reasoning, **unverified switch**) |
 | profile_verified | false |
 | FAST_CAPABLE | false |
@@ -30,7 +31,9 @@ Response metadata (SSE `relay` on done):
 ```json
 {
   "requested_profile": "auto",
-  "actual_model": "ChatGPT",
+  "actual_model": "unknown",
+  "actual_model_label": "ChatGPT",
+  "model_verified": false,
   "actual_profile": "unknown",
   "profile_verified": false
 }

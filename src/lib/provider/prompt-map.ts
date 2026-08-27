@@ -91,7 +91,7 @@ export function prepareChatRequest(
   const webPrompt = toWebPrompt(turns, kind);
   return {
     provider,
-    model: input.model || (provider === "gemini" ? "gemini-image" : "gpt-5.6"),
+    model: input.model || (provider === "gemini" ? "gemini-image" : "chatgpt-web-auto"),
     webPrompt,
     turns,
     images,

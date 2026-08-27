@@ -82,6 +82,36 @@ test("HTTP 200 with partial and no done is not success", () => {
   assert.match(out.error?.message || "", /UNCERTAIN/);
 });
 
+test("successful SSE preserves requested and actual model truth", async () => {
+  const res = sseResponse([
+    { choices: [{ delta: { content: "ok" } }], relay: { phase: "streaming" } },
+    {
+      choices: [{ delta: {}, finish_reason: "stop" }],
+      relay: {
+        phase: "done",
+        logicalStatus: "success",
+        finalText: "ok",
+        requested_model: "chatgpt-web-auto",
+        actual_model: "unknown",
+        actual_model_label: "ChatGPT",
+        model_verified: false,
+        requested_profile: "auto",
+        actual_profile: "unknown",
+        profile_verified: false,
+      },
+    },
+  ]);
+  const out = await readSse(res);
+  assert.equal(out.logicalStatus, "success");
+  assert.equal(out.requestedModel, "chatgpt-web-auto");
+  assert.equal(out.actualModel, "unknown");
+  assert.equal(out.actualModelLabel, "ChatGPT");
+  assert.equal(out.modelVerified, false);
+  assert.equal(out.requestedProfile, "auto");
+  assert.equal(out.actualProfile, "unknown");
+  assert.equal(out.profileVerified, false);
+});
+
 test("explicit logical error overrides contradictory done and stop", async () => {
   const res = sseResponse([
     {

@@ -69,7 +69,7 @@ export const Route = createFileRoute("/v1/responses")({
             }
           }
         }
-        const prepared = prepareChatRequest("chatgpt", { messages, model: body.model || "gpt-5.6" });
+        const prepared = prepareChatRequest("chatgpt", { messages, model: body.model || "chatgpt-web-auto" });
         if (!prepared.webPrompt && !prepared.images.length) {
           return Response.json({ error: { message: "缺少 input" } }, { status: 400, headers: cors() });
         }
@@ -129,6 +129,12 @@ export const Route = createFileRoute("/v1/responses")({
               attemptId: result.attemptId,
               workerId: result.workerId,
               requested_model: prepared.model,
+              actual_model: result.actualModel || "unknown",
+              actual_model_label: result.actualModelLabel,
+              model_verified: result.modelVerified ?? false,
+              requested_profile: result.requestedProfile || "exact",
+              actual_profile: result.actualProfile || "unknown",
+              profile_verified: result.profileVerified ?? false,
             },
           },
           { headers: cors() },
