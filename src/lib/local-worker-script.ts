@@ -3,7 +3,7 @@ export const LOCAL_WORKER = "http://127.0.0.1:18765";
 export function localWorkerScript() {
   return `#!/usr/bin/env python3
 # Relay 本机 ChatGPT Worker。保持窗口开着，平台试运行会连过来。
-import json, os, socket, ssl, subprocess, sys, tempfile, threading, time, base64, queue, re
+import json, os, socket, ssl, subprocess, sys, tempfile, threading, time, base64, queue, re, hashlib
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
@@ -48,6 +48,7 @@ class JobRuntimeContext:
         self.retry_safety = "SAFE"
         self.submitted_at = 0
         self.click_attempted = False
+        self.reference_hashes = []
 
     def as_meta(self):
         return {
@@ -1236,6 +1237,151 @@ def accept_result_image(src, baseline, box=None):
         return True
     return False
 
+PRODUCTION_CONFIDENCE = set(("VERIFIED", "HIGH"))
+
+def score_result_candidate(c):
+    if not c or not c.get("src"):
+        return "REJECT"
+    if c.get("historicalDuplicate") or c.get("referenceDuplicate"):
+        return "REJECT"
+    src = str(c.get("src") or "")
+    low = src.lower()
+    for bad in ("favicon", "avatar", "logo", "sprite", "icon", "/static/", "profile"):
+        if bad in low:
+            return "REJECT"
+    if src.startswith("data:image/svg"):
+        return "REJECT"
+    w = int(c.get("width") or 0)
+    h = int(c.get("height") or 0)
+    if w and h and (w < 64 or h < 64):
+        return "REJECT"
+    if not c.get("isNewSrc") and not c.get("isNewContainer"):
+        return "REJECT"
+    if c.get("isNewContainer") and c.get("isNewSrc") and c.get("createdAfterSubmit") and c.get("domainMatch"):
+        return "VERIFIED"
+    if c.get("isNewSrc") and c.get("domainMatch") and (c.get("isNewContainer") or c.get("createdAfterSubmit")):
+        return "HIGH"
+    if c.get("isNewSrc"):
+        return "MEDIUM"
+    return "LOW"
+
+def pick_accepted_candidates(cands, n=1):
+    scored = []
+    for c in cands or []:
+        conf = score_result_candidate(c)
+        c = dict(c)
+        c["confidence"] = conf
+        if conf in PRODUCTION_CONFIDENCE:
+            scored.append(c)
+    scored.sort(key=lambda c: (
+        400 if c["confidence"] == "VERIFIED" else 300,
+        int(c.get("width") or 0) * int(c.get("height") or 0),
+        1 if c.get("isNewContainer") else 0,
+    ), reverse=True)
+    want = max(1, int(n or 1))
+    return scored[:want]
+
+def create_generation_boundary(page, ctx=None, provider=""):
+    snap = {"ids": [], "gens": [], "srcs": []}
+    try:
+        snap = page.evaluate("""() => {
+          const sel = 'model-response, .response-container, [data-message-author-role], [data-testid*="generation"], article, [class*="ImageCard"], [class*="result"]';
+          const nodes = [...document.querySelectorAll(sel)];
+          const ids = nodes.map((el, i) => el.getAttribute('data-generation-id') || el.getAttribute('data-response-id') || el.id || ('c'+i));
+          window.__relayBaselineContainers = ids;
+          const srcs = [...document.querySelectorAll('img')].map((im) => im.getAttribute('src') || '').filter(Boolean);
+          window.__relayBaselineSrcs = srcs;
+          return { ids, gens: ids, srcs };
+        }""") or snap
+    except Exception:
+        try:
+            snap["srcs"] = snapshot_image_srcs(page)
+        except Exception:
+            snap["srcs"] = []
+    refs = list(getattr(ctx, "reference_hashes", []) or []) if ctx else []
+    return {
+        "request_id": getattr(ctx, "request_id", "") if ctx else "",
+        "attempt_id": getattr(ctx, "attempt_id", "") if ctx else "",
+        "provider": provider,
+        "submitted_at": time.time(),
+        "baseline_result_container_ids": snap.get("ids") or [],
+        "baseline_generation_ids": snap.get("gens") or [],
+        "baseline_asset_urls": snap.get("srcs") or [],
+        "baseline_asset_hashes": [],
+        "reference_hashes": refs,
+    }
+
+def collect_result_candidates(page, boundary, provider=""):
+    baseline = (boundary or {}).get("baseline_asset_urls") or []
+    containers = (boundary or {}).get("baseline_result_container_ids") or []
+    ref_hashes = set((boundary or {}).get("reference_hashes") or [])
+    raw = []
+    try:
+        raw = page.evaluate(
+            """(args) => {
+              const baseline = new Set(args.baseline || []);
+              const baselineC = new Set(args.containers || []);
+              const domainRe = /googleusercontent|ggpht|leonardo\\.ai|leonardocdn|leonardousercontent|oaidalle|data:image/;
+              const uiRe = /favicon|avatar|logo|sprite|icon|emoji|\\/static\\/|profile/;
+              const sel = 'model-response, .response-container, [data-message-author-role], [data-testid*="generation"], article, [class*="ImageCard"], [class*="result"]';
+              const nodes = [...document.querySelectorAll(sel)];
+              const out = [];
+              const seen = new Set();
+              const push = (root, containerId, isNewContainer) => {
+                if (!root) return;
+                for (const im of root.querySelectorAll('img')) {
+                  const src = im.getAttribute('src') || '';
+                  if (!src || seen.has(src)) continue;
+                  seen.add(src);
+                  const r = im.getBoundingClientRect();
+                  out.push({
+                    src,
+                    containerId,
+                    createdAfterSubmit: isNewContainer,
+                    isNewContainer,
+                    isNewSrc: !baseline.has(src),
+                    domainMatch: domainRe.test(src),
+                    width: Math.round(im.naturalWidth || r.width || 0),
+                    height: Math.round(im.naturalHeight || r.height || 0),
+                    bytes: 0,
+                    mime: '',
+                    sha256: '',
+                    referenceDuplicate: false,
+                    historicalDuplicate: baseline.has(src),
+                    ui: uiRe.test(src),
+                    fallback: containerId === 'page-fallback',
+                  });
+                }
+              };
+              nodes.forEach((el, i) => {
+                const id = el.getAttribute('data-generation-id') || el.getAttribute('data-response-id') || el.id || ('c'+i);
+                push(el, id, !baselineC.has(id));
+              });
+              const hasGood = out.some((x) => x.isNewSrc && x.domainMatch && !x.ui && !x.historicalDuplicate);
+              if (!hasGood) push(document.body, 'page-fallback', false);
+              return out;
+            }""",
+            {"baseline": baseline, "containers": containers, "provider": provider},
+        ) or []
+    except Exception:
+        raw = []
+    cands = []
+    for row in raw:
+        if not isinstance(row, dict):
+            continue
+        if row.get("ui"):
+            continue
+        if ref_hashes and row.get("sha256") in ref_hashes:
+            row["referenceDuplicate"] = True
+        cands.append(row)
+    return cands
+
+def gemini_result_locator(page, boundary):
+    return collect_result_candidates(page, boundary, "gemini")
+
+def leonardo_result_locator(page, boundary):
+    return collect_result_candidates(page, boundary, "leonardo")
+
 def format_turns(turns):
     if not turns:
         return ""
@@ -2260,33 +2406,26 @@ def run_image(body, ctx=None):
         if not fill_composer(page, box, prompt):
             return fail_job(ctx, "PROVIDER_DOM_CHANGED: cannot fill composer", "provider")
         apply_gemini_aspect(page, body.get("aspect") or size_to_aspect(body.get("size") or "1:1"))
-        baseline = snapshot_image_srcs(page)
+        boundary = create_generation_boundary(page, ctx, "gemini")
+        baseline = boundary.get("baseline_asset_urls") or snapshot_image_srcs(page)
         send_btn, _ = pick_locator(page, send, 4)
         set_submission_state(ctx, "SUBMITTING")
         click_send(page, send_btn)
         set_submission_state(ctx, "SUBMITTED")
         deadline = time.time() + int(body.get("timeoutMs") or 90000) / 1000
         url = ""
-        box_info = None
+        conf = ""
         while time.time() < deadline:
-            imgs = page.locator("img")
-            n = imgs.count()
-            for i in range(n):
-                el = imgs.nth(i)
-                src = el.get_attribute("src") or ""
-                try:
-                    box_info = el.bounding_box()
-                except Exception:
-                    box_info = None
-                if accept_result_image(src, baseline, box_info):
-                    url = src
+            picked = pick_accepted_candidates(gemini_result_locator(page, boundary), 1)
+            if picked:
+                url = picked[0].get("src") or ""
+                conf = picked[0].get("confidence") or ""
+                if url:
                     break
-            if url:
-                break
             time.sleep(0.6)
         if not url:
             set_submission_state(ctx, "RESULT_UNCERTAIN")
-            return fail_job(ctx, "RESULT_UNCERTAIN: IMAGE_NOT_FOUND no new result image", "provider", {"pageState": detect_page_state(page, "gemini")})
+            return fail_job(ctx, "RESULT_UNCERTAIN: IMAGE_CONFIDENCE_TOO_LOW no HIGH/VERIFIED result", "provider", {"pageState": detect_page_state(page, "gemini")})
         if url.startswith("http"):
             try:
                 resp = context.request.get(url, timeout=20000)
@@ -2313,6 +2452,7 @@ def run_image(body, ctx=None):
             "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
             "selectorPackVersion": pack_version,
             "pageState": "RESULT_READY",
+            "resultConfidence": conf or "HIGH",
         }
 
     if pool_enabled():
@@ -3080,7 +3220,8 @@ def run_leonardo(body, ctx=None):
             shown_w, shown_h = read_displayed_size(page)
         if shown_w and shown_h and not aspect_match(shown_w, shown_h, aspect):
             return {"ok": False, "error": "LEONARDO_DOM_CHANGED: Image Dimensions stayed %dx%d, want %s %s" % (shown_w, shown_h, aspect, want_size), "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
-        baseline = snapshot_image_srcs(page)
+        boundary = create_generation_boundary(page, ctx, "leonardo")
+        baseline = boundary.get("baseline_asset_urls") or snapshot_image_srcs(page)
         captures = []
         def on_resp(resp):
             try:
@@ -3154,12 +3295,12 @@ def run_leonardo(body, ctx=None):
                     saw_progress = True
             except Exception:
                 pass
-            for src in snapshot_image_srcs(page):
-                if src in baseline:
+            located = pick_accepted_candidates(leonardo_result_locator(page, boundary), max(1, want_n))
+            for cand in located:
+                src = cand.get("src") or ""
+                if not src or src in baseline:
                     continue
                 saw_progress = True
-                if not accept_result_image(src, baseline, None):
-                    continue
                 data_url, _derr = download_result_image(context, src)
                 if not data_url:
                     continue
@@ -3170,7 +3311,7 @@ def run_leonardo(body, ctx=None):
                 if len(raw) in ref_sizes:
                     continue
                 w, h = image_wh(raw)
-                captures.append((len(raw), w, h, src, raw, "image/jpeg"))
+                captures.append((len(raw), w, h, src, raw, "image/jpeg", cand.get("confidence") or "HIGH"))
             if images and not saw_progress and time.time() > fail_at:
                 set_submission_state(ctx, "SUBMISSION_UNCERTAIN")
                 return fail_job(ctx, "SUBMISSION_UNCERTAIN: generate did not start (img2img)", "provider", {"pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked})

@@ -124,13 +124,13 @@ test("leonardo img2img attaches refs before generate and fail-fasts", () => {
   assert.match(s, /reference image did not attach/);
   const attachIdx = s.indexOf("up_err = attach_leonardo_refs");
   const readyIdx = s.indexOf("wait_leonardo_generate_ready(page, 20000)");
-  const baselineIdx = s.lastIndexOf("baseline = snapshot_image_srcs(page)");
+  const baselineIdx = s.lastIndexOf("create_generation_boundary(page, ctx, \"leonardo\")");
   const clickIdx = s.indexOf('print("leonardo clicking generate"');
   const sizeAfter = s.indexOf("apply_image_size(page, want_size, aspect, tier, gpt)", attachIdx);
   assert.ok(attachIdx > 0 && readyIdx > attachIdx, "wait generate ready after attach");
   assert.ok(sizeAfter > attachIdx && sizeAfter < readyIdx, "re-apply size after refs");
-  assert.ok(baselineIdx > readyIdx, "snapshot after refs, not before");
-  assert.ok(clickIdx > baselineIdx, "click generate after snapshot");
+  assert.ok(baselineIdx > readyIdx, "boundary after refs, not before");
+  assert.ok(clickIdx > baselineIdx, "click generate after boundary");
 });
 
 test("ref_body_sizes and extract_prompt_images keep leonardo refs", () => {
@@ -448,6 +448,42 @@ c = Counter(ids)
 assert all(v == 1 for v in c.values()), c
 none = m.warmup_plan(found, 0, {}, 3)
 assert none == []
+print("ok")
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /ok/);
+});
+
+test("generation boundary locators prefer new containers over page-wide img", () => {
+  const s = localWorkerScript();
+  assert.match(s, /def create_generation_boundary/);
+  assert.match(s, /def gemini_result_locator/);
+  assert.match(s, /def leonardo_result_locator/);
+  assert.match(s, /def score_result_candidate/);
+  const start = s.indexOf("def run_image_on");
+  const geminiFn = s.slice(start, s.indexOf("if pool_enabled():", start));
+  assert.equal(geminiFn.includes('page.locator("img")'), false, "gemini wait must not scan all img first");
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker.py", s);
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      `
+import importlib.util
+spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+new = {"src":"https://lh3.googleusercontent.com/gen-NEW","containerId":"resp-new","createdAfterSubmit":True,"isNewContainer":True,"isNewSrc":True,"domainMatch":True,"width":1376,"height":768,"bytes":180000,"mime":"image/png","sha256":"n","referenceDuplicate":False,"historicalDuplicate":False}
+hist = dict(new, src="https://lh3.googleusercontent.com/history-0", containerId="hist", createdAfterSubmit=False, isNewContainer=False, isNewSrc=False, historicalDuplicate=True)
+ref = dict(new, src="https://lh3.googleusercontent.com/ref-a", containerId="composer-ref", isNewContainer=False, referenceDuplicate=True)
+avatar = dict(new, src="https://lh3.googleusercontent.com/avatar.png", width=32, height=32, isNewContainer=False)
+picked = m.pick_accepted_candidates([hist, ref, avatar, new], 1)
+assert len(picked)==1 and picked[0]["src"].endswith("gen-NEW"), picked
+assert m.score_result_candidate(hist)=="REJECT"
+assert m.score_result_candidate(ref)=="REJECT"
 print("ok")
 `,
     ],
