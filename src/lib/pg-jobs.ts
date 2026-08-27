@@ -296,6 +296,8 @@ export async function finishJobPg(
     tokenState?: string;
     backendMode?: "web_account" | "official_api";
     queueDepth?: number;
+    retrySafety?: "SAFE" | "UNSAFE" | "UNKNOWN";
+    submissionState?: string;
   },
 ) {
   const current = asJob(await dbGetJob(id));
@@ -324,6 +326,8 @@ export async function finishJobPg(
   if (result.actualProfile) current.actualProfile = result.actualProfile;
   if (typeof result.profileVerified === "boolean") current.profileVerified = result.profileVerified;
   if (typeof result.recoveryLevel === "number") current.recoveryLevel = result.recoveryLevel;
+  if (result.retrySafety) current.retrySafety = result.retrySafety;
+  if (result.submissionState) current.submissionState = result.submissionState;
 
   if (result.ok && typeof result.modelActual === "string") {
     const { getAdapter } = await import("./provider/index");

@@ -41,6 +41,10 @@ class JobRuntimeContext:
         self.trace_id = str(body.get("traceId") or job_id)
         self.platform = str(body.get("platform") or "")
         self.model = str(body.get("model") or "")
+        self.submission_state = "PREPARING"
+        self.retry_safety = "SAFE"
+        self.submitted_at = 0
+        self.click_attempted = False
 
     def as_meta(self):
         return {
@@ -94,7 +98,37 @@ def attach_runtime(ctx, result):
     result.setdefault("traceId", ctx.trace_id)
     result.setdefault("proxyId", ctx.proxy_id)
     result.setdefault("requestId", ctx.request_id)
+    result.setdefault("retrySafety", ctx.retry_safety or "SAFE")
+    result.setdefault("submissionState", ctx.submission_state or "")
     return result
+
+POST_SUBMIT_STATES = set("SUBMITTED GENERATING RESULT_DETECTED RESULT_VALIDATED COMPLETED SUBMISSION_UNCERTAIN RESULT_UNCERTAIN".split())
+
+def set_submission_state(ctx, state):
+    if ctx is None:
+        return
+    ctx.submission_state = state
+    if state == "SUBMITTING":
+        ctx.click_attempted = True
+        if ctx.retry_safety == "SAFE":
+            ctx.retry_safety = "UNKNOWN"
+    elif state in POST_SUBMIT_STATES:
+        if not ctx.submitted_at:
+            ctx.submitted_at = time.time()
+        if state == "SUBMISSION_UNCERTAIN":
+            ctx.retry_safety = "UNKNOWN"
+        else:
+            ctx.retry_safety = "UNSAFE"
+    post_phase(state.lower(), ctx)
+
+def fail_job(ctx, error, fault="provider", extra=None):
+    extra = dict(extra or {})
+    extra["ok"] = False
+    extra["error"] = error
+    extra["fault"] = fault
+    extra["retrySafety"] = (ctx.retry_safety if ctx else None) or "UNKNOWN"
+    extra["submissionState"] = (ctx.submission_state if ctx else "") or ""
+    return extra
 
 MOCK_HTML = """<!doctype html><meta charset="utf-8"><title>mock</title>
 <textarea id="prompt-textarea"></textarea>
@@ -325,6 +359,8 @@ def post_result(ctx, result):
         "accountId": ctx.account_id,
         "proxyId": ctx.proxy_id,
         "requestId": ctx.request_id,
+        "retrySafety": result.get("retrySafety") or ctx.retry_safety,
+        "submissionState": result.get("submissionState") or ctx.submission_state,
     }
     try:
         import urllib.request
@@ -1011,11 +1047,12 @@ def wait_send_ack(page, before_user, before_as, timeout_ms=None, stop_sels=None,
     return False
 
 def submit_prompt(page, prompt, inp, send, stop_sels=None):
+    out = {"acked": False, "clicked": False, "composer_empty": False, "turn_increased": False}
     box = first_visible(page, inp)
     if box is None:
-        return False
+        return out
     if not fill_composer(page, box, prompt):
-        return False
+        return out
     waited = time.time() + 2
     while time.time() < waited and not send_button_enabled(page):
         time.sleep(0.1)
@@ -1023,17 +1060,27 @@ def submit_prompt(page, prompt, inp, send, stop_sels=None):
     before_user = page.locator("[data-message-author-role='user']").count()
     filled = composer_text(page)
     click_send(page, first_visible(page, send))
+    out["clicked"] = True
     if wait_send_ack(page, before_user, before_as, None, stop_sels, filled):
-        return True
+        out["acked"] = True
+        return out
     try:
         page.keyboard.press("Enter")
     except Exception:
         pass
     if wait_send_ack(page, before_user, before_as, 2000, stop_sels, filled):
-        return True
-    if filled and not composer_text(page):
-        return True
-    return False
+        out["acked"] = True
+        return out
+    try:
+        out["composer_empty"] = bool(filled and not composer_text(page))
+        after_user = page.locator("[data-message-author-role='user']").count()
+        after_as = page.locator("[data-message-author-role='assistant']").count()
+        out["turn_increased"] = after_user > before_user or after_as > before_as
+    except Exception:
+        pass
+    if out["composer_empty"] or out["turn_increased"]:
+        out["acked"] = True
+    return out
 
 PAGE_READY_TIMEOUT = 8000
 COMPOSER_READY_TIMEOUT = 4000
@@ -1783,22 +1830,35 @@ def run_chat(body, ctx=None):
             }
         mark("T5")
         install_mut_observer(page, page.locator("div[data-message-author-role='assistant']").count())
-        acked = submit_prompt(page, prompt, inp, send, stop)
+        set_submission_state(ctx, "INPUT_READY")
+        set_submission_state(ctx, "SUBMITTING")
+        sub = submit_prompt(page, prompt, inp, send, stop)
         mark("T6")
-        if not acked:
+        if sub.get("acked"):
+            set_submission_state(ctx, "SUBMITTED")
+        elif sub.get("clicked") or sub.get("composer_empty") or sub.get("turn_increased"):
+            set_submission_state(ctx, "SUBMISSION_UNCERTAIN")
+        else:
             page, recovery_level = recover_page(page, context, 3, real)
             composer_ready(page, COMPOSER_READY_TIMEOUT)
             switched, actual = select_model(page, model)
             install_mut_observer(page, page.locator("div[data-message-author-role='assistant']").count())
-            acked = submit_prompt(page, prompt, inp, send, stop)
-        if not acked and not TEST_URL:
-            try:
-                print("SEND_NOT_ACKED url", page.url, "send_on", send_button_enabled(page), "composer", composer_text(page)[:80], flush=True)
-            except Exception:
-                pass
-            return {"ok": False, "error": "SEND_NOT_ACKED: message did not enter conversation", "fault": "provider", "recoveryLevel": recovery_level, "timing": marks}
+            set_submission_state(ctx, "SUBMITTING")
+            sub = submit_prompt(page, prompt, inp, send, stop)
+            if sub.get("acked"):
+                set_submission_state(ctx, "SUBMITTED")
+            elif sub.get("clicked") or sub.get("composer_empty") or sub.get("turn_increased"):
+                set_submission_state(ctx, "SUBMISSION_UNCERTAIN")
+            elif not TEST_URL:
+                try:
+                    print("SEND_NOT_ACKED url", page.url, "send_on", send_button_enabled(page), "composer", composer_text(page)[:80], flush=True)
+                except Exception:
+                    pass
+                return fail_job(ctx, "SEND_NOT_ACKED: message did not enter conversation", "provider", {"recoveryLevel": recovery_level, "timing": marks})
         mark("T7")
         post_phase("generating", ctx)
+        if ctx and ctx.submission_state == "SUBMITTED":
+            set_submission_state(ctx, "GENERATING")
         stop_sel = ",".join(stop)
         want_fast = "thinking" not in (model or "").lower()
         has_images = bool(images)
@@ -1845,7 +1905,12 @@ def run_chat(body, ctx=None):
         mark("T9")
         if not usable_assistant_text(text):
             pst = detect_page_state(page, "chatgpt")
-            return {"ok": False, "error": "TIMEOUT: empty assistant", "fault": "provider", "pageState": pst, "timing": marks, "profile": profile}
+            if ctx and ctx.submission_state in POST_SUBMIT_STATES:
+                set_submission_state(ctx, "RESULT_UNCERTAIN")
+                return fail_job(ctx, "RESULT_UNCERTAIN: TIMEOUT empty assistant after submit", "provider", {"pageState": pst, "timing": marks, "profile": profile, "recoveryLevel": recovery_level})
+            return fail_job(ctx, "TIMEOUT: empty assistant", "provider", {"pageState": pst, "timing": marks, "profile": profile})
+        if ctx:
+            set_submission_state(ctx, "RESULT_VALIDATED")
         if "sol" in text.lower() or "reasoning" in text.lower() or "推理" in text:
             profile["actual_profile"] = "reasoning"
             profile["profile_verified"] = False
@@ -2080,11 +2145,13 @@ def run_image(body, ctx=None):
                 "selectorPackVersion": pack_version,
             }
         if not fill_composer(page, box, prompt):
-            return {"ok": False, "error": "PROVIDER_DOM_CHANGED: cannot fill composer", "fault": "provider"}
+            return fail_job(ctx, "PROVIDER_DOM_CHANGED: cannot fill composer", "provider")
         apply_gemini_aspect(page, body.get("aspect") or size_to_aspect(body.get("size") or "1:1"))
         baseline = snapshot_image_srcs(page)
         send_btn, _ = pick_locator(page, send, 4)
+        set_submission_state(ctx, "SUBMITTING")
         click_send(page, send_btn)
+        set_submission_state(ctx, "SUBMITTED")
         deadline = time.time() + int(body.get("timeoutMs") or 90000) / 1000
         url = ""
         box_info = None
@@ -2105,7 +2172,8 @@ def run_image(body, ctx=None):
                 break
             time.sleep(0.6)
         if not url:
-            return {"ok": False, "error": "IMAGE_NOT_FOUND: no new result image", "fault": "provider", "pageState": detect_page_state(page, "gemini")}
+            set_submission_state(ctx, "RESULT_UNCERTAIN")
+            return fail_job(ctx, "RESULT_UNCERTAIN: IMAGE_NOT_FOUND no new result image", "provider", {"pageState": detect_page_state(page, "gemini")})
         if url.startswith("http"):
             try:
                 resp = context.request.get(url, timeout=20000)
@@ -2923,6 +2991,7 @@ def run_leonardo(body, ctx=None):
         except Exception:
             pass
         print("leonardo clicking generate", flush=True)
+        set_submission_state(ctx, "SUBMITTING")
         gen_clicked = leonardo_js_generate(page)
         if not gen_clicked:
             if images:
@@ -2936,6 +3005,10 @@ def run_leonardo(body, ctx=None):
                     gen_clicked = True
                 except Exception:
                     page.keyboard.press("Enter")
+        if gen_clicked:
+            set_submission_state(ctx, "SUBMITTED")
+        else:
+            set_submission_state(ctx, "SUBMISSION_UNCERTAIN")
         page.wait_for_timeout(800)
         pst2 = detect_page_state(page, "leonardo")
         if pst2 in ("LOGIN_REQUIRED", "TOKEN_EXHAUSTED", "QUEUE_FULL", "CHALLENGE"):
@@ -2986,7 +3059,8 @@ def run_leonardo(body, ctx=None):
                 w, h = image_wh(raw)
                 captures.append((len(raw), w, h, src, raw, "image/jpeg"))
             if images and not saw_progress and time.time() > fail_at:
-                return {"ok": False, "error": "LEONARDO_GENERATION_FAILED: generate did not start (img2img)", "fault": "provider", "pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
+                set_submission_state(ctx, "SUBMISSION_UNCERTAIN")
+                return fail_job(ctx, "SUBMISSION_UNCERTAIN: generate did not start (img2img)", "provider", {"pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked})
             ranked = sorted(captures, key=lambda row: (1 if aspect_match(row[1], row[2], aspect) else 0, row[1] * row[2], row[0]), reverse=True)
             picked_rows = []
             seen = set()
@@ -3026,7 +3100,8 @@ def run_leonardo(body, ctx=None):
                 if ranked and max(ranked[0][1], ranked[0][2]) >= max(best[0][1], best[0][2]):
                     best = ranked[: max(1, want_n)]
         if not best:
-            return {"ok": False, "error": "LEONARDO_RESULT_NOT_FOUND", "fault": "provider", "pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
+            set_submission_state(ctx, "RESULT_UNCERTAIN")
+            return fail_job(ctx, "RESULT_UNCERTAIN: LEONARDO_RESULT_NOT_FOUND", "provider", {"pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked})
         data_urls = []
         for row in best:
             du = raw_to_data_url(row[4], row[5])

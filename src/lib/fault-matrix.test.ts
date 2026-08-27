@@ -20,6 +20,8 @@ test("every required error code has a decision", () => {
     "INTERNAL_ERROR",
     "MODEL_MISMATCH",
     "MODEL_SELECTION_UNCONFIRMED",
+    "SUBMISSION_UNCERTAIN",
+    "RESULT_UNCERTAIN",
   ];
   for (const code of required) {
     assert.ok(FAILURE_MATRIX[code as keyof typeof FAILURE_MATRIX], code);
@@ -84,4 +86,24 @@ test("assigned proxy failure never rebinds the account", () => {
   assert.equal(drift.switch_account, false);
   assert.equal(drift.switch_proxy, false);
   assert.equal(drift.retry_same_account, false);
+});
+
+test("post-submit uncertain never switches account or retries generation", () => {
+  const send = decide("SEND_NOT_ACKED: message did not enter conversation");
+  assert.equal(send.code, "SUBMISSION_UNCERTAIN");
+  assert.equal(send.switch_account, false);
+  assert.equal(send.retry_same_account, false);
+  const uncertain = decide("SUBMISSION_UNCERTAIN: generate did not start (img2img)");
+  assert.equal(uncertain.code, "SUBMISSION_UNCERTAIN");
+  assert.equal(uncertain.switch_account, false);
+  const result = decide("RESULT_UNCERTAIN: LEONARDO_RESULT_NOT_FOUND");
+  assert.equal(result.code, "RESULT_UNCERTAIN");
+  assert.equal(result.switch_account, false);
+  assert.equal(result.retry_same_account, false);
+  const timeout = decide("GENERATION_TIMEOUT: wait");
+  assert.equal(timeout.retry_same_account, false);
+  assert.equal(timeout.switch_account, false);
+  const failed = decide("LEONARDO_GENERATION_FAILED: generate did not start");
+  assert.equal(failed.switch_account, false);
+  assert.equal(failed.retry_same_account, false);
 });

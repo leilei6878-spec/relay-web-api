@@ -305,7 +305,8 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     }
     last = done.ok ? "未返回图片" : done.error;
     const decision = decide(last, fresh.fault);
-    if (!decision.switch_account) break;
+    const safety = String(fresh.retrySafety || "");
+    if (safety === "UNSAFE" || safety === "UNKNOWN" || !decision.switch_account) break;
     exclude.push(account.id);
   }
   await completeRequest(reqId, { ok: false, finalError: last });

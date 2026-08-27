@@ -13,6 +13,8 @@ export const ErrorCode = {
   PROVIDER_UNAVAILABLE: "PROVIDER_UNAVAILABLE",
   GENERATION_TIMEOUT: "GENERATION_TIMEOUT",
   IMAGE_NOT_FOUND: "IMAGE_NOT_FOUND",
+  SUBMISSION_UNCERTAIN: "SUBMISSION_UNCERTAIN",
+  RESULT_UNCERTAIN: "RESULT_UNCERTAIN",
   REQUEST_CANCELLED: "REQUEST_CANCELLED",
   INTERNAL_ERROR: "INTERNAL_ERROR",
   STALE_LEASE: "STALE_LEASE",
@@ -133,7 +135,7 @@ export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
   GENERATION_TIMEOUT: {
     code: "GENERATION_TIMEOUT",
     fault_domain: "infra",
-    retry_same_account: true,
+    retry_same_account: false,
     switch_account: false,
     switch_proxy: false,
     provider_circuit_effect: "none",
@@ -141,6 +143,24 @@ export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
   },
   IMAGE_NOT_FOUND: {
     code: "IMAGE_NOT_FOUND",
+    fault_domain: "provider",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
+  SUBMISSION_UNCERTAIN: {
+    code: "SUBMISSION_UNCERTAIN",
+    fault_domain: "provider",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
+  RESULT_UNCERTAIN: {
+    code: "RESULT_UNCERTAIN",
     fault_domain: "provider",
     retry_same_account: false,
     switch_account: false,
@@ -218,11 +238,19 @@ export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
     provider_circuit_effect: "trip",
     account_health_effect: "none",
   },
-  LEONARDO_GENERATION_FAILED: accountSwitch("LEONARDO_GENERATION_FAILED", "failCount"),
+  LEONARDO_GENERATION_FAILED: {
+    code: "LEONARDO_GENERATION_FAILED",
+    fault_domain: "provider",
+    retry_same_account: false,
+    switch_account: false,
+    switch_proxy: false,
+    provider_circuit_effect: "none",
+    account_health_effect: "none",
+  },
   LEONARDO_GENERATION_TIMEOUT: {
     code: "LEONARDO_GENERATION_TIMEOUT",
     fault_domain: "infra",
-    retry_same_account: true,
+    retry_same_account: false,
     switch_account: false,
     switch_proxy: false,
     provider_circuit_effect: "none",
@@ -260,6 +288,8 @@ export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
 export function normalizeError(error?: string, faultHint?: string): ErrorCode {
   const t = `${faultHint || ""} ${error || ""}`.toUpperCase();
   if (t.includes("STALE_LEASE")) return "STALE_LEASE";
+  if (t.includes("SUBMISSION_UNCERTAIN")) return "SUBMISSION_UNCERTAIN";
+  if (t.includes("RESULT_UNCERTAIN")) return "RESULT_UNCERTAIN";
   if (t.includes("LEONARDO_LOGIN_REQUIRED")) return "LEONARDO_LOGIN_REQUIRED";
   if (t.includes("LEONARDO_SESSION_EXPIRED")) return "LEONARDO_SESSION_EXPIRED";
   if (t.includes("LEONARDO_CHALLENGE")) return "LEONARDO_CHALLENGE";
@@ -278,7 +308,7 @@ export function normalizeError(error?: string, faultHint?: string): ErrorCode {
   if (t.includes("LEONARDO_DOWNLOAD_FAILED")) return "LEONARDO_DOWNLOAD_FAILED";
   if (t.includes("LEONARDO_PROXY_UNAVAILABLE")) return "LEONARDO_PROXY_UNAVAILABLE";
   if (t.includes("LEONARDO_GENERATION_FAILED")) return "LEONARDO_GENERATION_FAILED";
-  if (t.includes("SEND_NOT_ACKED") || t.includes("MESSAGE DID NOT ENTER")) return "PROVIDER_DOM_CHANGED";
+  if (t.includes("SEND_NOT_ACKED") || t.includes("MESSAGE DID NOT ENTER")) return "SUBMISSION_UNCERTAIN";
   if (t.includes("MODEL_SELECTION_UNCONFIRMED")) return "MODEL_SELECTION_UNCONFIRMED";
   if (t.includes("MODEL_MISMATCH")) return "MODEL_MISMATCH";
   if (t.includes("CHALLENGE")) return "ACCOUNT_RATE_LIMIT";

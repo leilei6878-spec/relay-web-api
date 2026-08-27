@@ -60,6 +60,8 @@ export type Job = {
   actualProfile?: string;
   profileVerified?: boolean;
   recoveryLevel?: number;
+  retrySafety?: "SAFE" | "UNSAFE" | "UNKNOWN";
+  submissionState?: string;
   n?: number;
   size?: string;
   quality?: string;
@@ -598,6 +600,8 @@ export function finishJob(
     tokenState?: string;
     backendMode?: "web_account" | "official_api";
     queueDepth?: number;
+    retrySafety?: "SAFE" | "UNSAFE" | "UNKNOWN";
+    submissionState?: string;
   },
 ) {
   if (pgSotActive()) {
@@ -619,6 +623,8 @@ export function finishJob(
     if (result.actualProfile) job.actualProfile = result.actualProfile;
     if (typeof result.profileVerified === "boolean") job.profileVerified = result.profileVerified;
     if (typeof result.recoveryLevel === "number") job.recoveryLevel = result.recoveryLevel;
+    if (result.retrySafety) job.retrySafety = result.retrySafety;
+    if (result.submissionState) job.submissionState = result.submissionState;
     if (typeof result.modelActual === "string") {
       const verdict = getAdapter(job.platform).verifyModel(job.model, result.modelActual);
       job.actualModel = result.modelActual;

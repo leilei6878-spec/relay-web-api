@@ -249,7 +249,8 @@ export async function runChat(
     const err = done.ok ? "执行器未返回模型原文" : done.error;
     const decision = decide(err, fresh.fault);
     last = { ok: false, status: 504, error: err };
-    if (!decision.switch_account) {
+    const safety = String(fresh.retrySafety || "");
+    if (safety === "UNSAFE" || safety === "UNKNOWN" || !decision.switch_account) {
       break;
     }
     exclude.push(account.id);

@@ -372,3 +372,43 @@ print("ok")
   assert.equal(out.status, 0, out.stderr || out.stdout);
   assert.match(out.stdout, /ok/);
 });
+
+test("submission state machine marks post-submit retry unsafe", () => {
+  const s = localWorkerScript();
+  assert.match(s, /def set_submission_state/);
+  assert.match(s, /def fail_job/);
+  assert.match(s, /SUBMISSION_UNCERTAIN/);
+  assert.match(s, /RESULT_UNCERTAIN/);
+  assert.match(s, /retrySafety/);
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker.py", s);
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      `
+import importlib.util
+spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+ctx = m.JobRuntimeContext({"id":"j1","accountId":"a1"})
+assert ctx.retry_safety == "SAFE"
+m.set_submission_state(ctx, "COMPOSER_READY")
+assert ctx.retry_safety == "SAFE"
+m.set_submission_state(ctx, "SUBMITTING")
+assert ctx.retry_safety == "UNKNOWN"
+m.set_submission_state(ctx, "SUBMITTED")
+assert ctx.retry_safety == "UNSAFE"
+fail = m.fail_job(ctx, "RESULT_UNCERTAIN: timeout")
+assert fail["retrySafety"] == "UNSAFE"
+assert fail["ok"] is False
+unk = m.JobRuntimeContext({"id":"j2"})
+m.set_submission_state(unk, "SUBMISSION_UNCERTAIN")
+assert unk.retry_safety == "UNKNOWN"
+print("ok")
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /ok/);
+});
