@@ -22,6 +22,8 @@ SEM = threading.Semaphore(max(1, CAPACITY))
 ACTIVE_JOBS = {}
 ACTIVE_JOBS_LOCK = threading.Lock()
 _JOB_SEQ = 0
+WARM_STATS = {"warm_hit": 0, "warm_miss": 0, "warm_recycle": 0, "reset_ms": 0, "navigation_ms": 0}
+WARM_STATS_LOCK = threading.Lock()
 
 class JobRuntimeContext:
     def __init__(self, body=None):
@@ -952,6 +954,143 @@ def wait_leonardo_refs(page, timeout_ms=8000):
             time.sleep(0.25)
     return count_leonardo_refs(page)
 
+
+def warm_bump(key, n=1):
+    with WARM_STATS_LOCK:
+        WARM_STATS[key] = int(WARM_STATS.get(key) or 0) + int(n)
+
+def classify_image_runtime(page, provider):
+    try:
+        url = page.url or ""
+    except Exception:
+        return "INVALID"
+    pst = detect_page_state(page, provider)
+    if pst in ("LOGIN_REQUIRED", "CHALLENGE", "ACCOUNT_RESTRICTED"):
+        return "INVALID"
+    if pst in ("GENERATING",):
+        return "GENERATING"
+    if provider == "gemini":
+        if "gemini.google.com" not in url:
+            return "INVALID"
+        if pst not in ("COMPOSER_READY", "RESULT_READY", "AUTHENTICATED", "IMAGE_GENERATOR_READY"):
+            if pst in ("RATE_LIMITED",):
+                return "INVALID"
+        composer = False
+        try:
+            composer = page.locator("div.ql-editor, rich-textarea, div[contenteditable='true']").first.count() > 0
+        except Exception:
+            composer = False
+        if not composer:
+            return "INVALID"
+        if count_gemini_refs(page) > 0:
+            return "DIRTY"
+        return "WARM_IDLE"
+    if provider == "leonardo":
+        if "leonardo.ai" not in url:
+            return "INVALID"
+        on_gen = "/generate" in url.lower() or "ai-creation" in url.lower()
+        try:
+            on_gen = on_gen or page.locator("#home-prompt-textarea, textarea[placeholder*='prompt' i]").count() > 0
+        except Exception:
+            pass
+        if not on_gen:
+            return "INVALID"
+        if count_leonardo_refs(page) > 0:
+            return "DIRTY"
+        return "WARM_IDLE"
+    return "INVALID"
+
+def cleanup_gemini(page):
+    t0 = time.time()
+    try:
+        for _ in range(8):
+            loc = page.locator('button[aria-label*="Remove"], button[aria-label*="移除"]').first
+            if loc.count() <= 0:
+                break
+            loc.click(timeout=800)
+            page.wait_for_timeout(120)
+        page.evaluate("""() => {
+          const el = document.querySelector('div.ql-editor, rich-textarea, div[contenteditable="true"]');
+          if (!el) return;
+          el.focus();
+          if (el.getAttribute && el.getAttribute('contenteditable') === 'true') {
+            el.innerHTML = '<p><br></p>';
+          } else {
+            el.value = '';
+          }
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+        }""")
+    except Exception:
+        pass
+    warm_bump("reset_ms", int((time.time() - t0) * 1000))
+    return count_gemini_refs(page) == 0
+
+def cleanup_leonardo(page):
+    t0 = time.time()
+    try:
+        for _ in range(8):
+            if count_leonardo_refs(page) <= 0:
+                break
+            page.evaluate("""() => {
+              const b = [...document.querySelectorAll('button')].find((el) => {
+                const a = (el.getAttribute('aria-label') || '').toLowerCase();
+                const t = (el.innerText || '').trim();
+                return /remove|delete|clear reference|remove image/.test(a) || t === '×' || t === 'x';
+              });
+              if (b) b.click();
+            }""")
+            try:
+                page.wait_for_timeout(180)
+            except Exception:
+                time.sleep(0.18)
+        leonardo_js_fill(page, "")
+    except Exception:
+        pass
+    warm_bump("reset_ms", int((time.time() - t0) * 1000))
+    return count_leonardo_refs(page) == 0
+
+def ensure_gemini_ready(page):
+    st = classify_image_runtime(page, "gemini")
+    if st == "WARM_IDLE":
+        warm_bump("warm_hit")
+        return True, st
+    if st == "DIRTY":
+        cleanup_gemini(page)
+        st = classify_image_runtime(page, "gemini")
+        if st == "WARM_IDLE":
+            warm_bump("warm_recycle")
+            return True, st
+    warm_bump("warm_miss")
+    t0 = time.time()
+    page.goto("https://gemini.google.com/app", wait_until="domcontentloaded", timeout=45000)
+    time.sleep(1.0)
+    warm_bump("navigation_ms", int((time.time() - t0) * 1000))
+    st = classify_image_runtime(page, "gemini")
+    if st == "DIRTY":
+        cleanup_gemini(page)
+        st = classify_image_runtime(page, "gemini")
+    return st in ("WARM_IDLE", "DIRTY"), st
+
+def ensure_leonardo_ready(page, navigate):
+    st = classify_image_runtime(page, "leonardo")
+    if st == "WARM_IDLE":
+        warm_bump("warm_hit")
+        return True, st
+    if st == "DIRTY":
+        cleanup_leonardo(page)
+        st = classify_image_runtime(page, "leonardo")
+        if st == "WARM_IDLE":
+            warm_bump("warm_recycle")
+            return True, st
+    warm_bump("warm_miss")
+    t0 = time.time()
+    navigate()
+    warm_bump("navigation_ms", int((time.time() - t0) * 1000))
+    st = classify_image_runtime(page, "leonardo")
+    if st == "DIRTY":
+        cleanup_leonardo(page)
+        st = classify_image_runtime(page, "leonardo")
+    return st in ("WARM_IDLE", "DIRTY"), st
 
 # Ignore ChatGPT placeholders such as "Analyzing image" so vision waits for the real answer.
 PLACEHOLDER_TEXT = re.compile(
@@ -2571,12 +2710,11 @@ def run_image(body, ctx=None):
     pack_version = body.get("selectorPackVersion") or sel.get("version") or "gemini-v1"
 
     def run_image_on(page, context):
-        page.goto("https://gemini.google.com/app", wait_until="domcontentloaded", timeout=45000)
-        time.sleep(1.2)
+        ready, warm_state = ensure_gemini_ready(page)
         pst = detect_page_state(page, "gemini")
-        if pst in ("LOGIN_REQUIRED", "CHALLENGE", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
-            err, fault = page_state_error(pst, False)
-            return {"ok": False, "error": err, "fault": fault, "pageState": pst}
+        if warm_state == "INVALID" or pst in ("LOGIN_REQUIRED", "CHALLENGE", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
+            err, fault = page_state_error(pst if pst in ("LOGIN_REQUIRED", "CHALLENGE", "RATE_LIMITED", "ACCOUNT_RESTRICTED") else "LOGIN_REQUIRED", False)
+            return {"ok": False, "error": err, "fault": fault, "pageState": pst, "runtimeState": warm_state}
         attach_images(page, images)
         requested, ref_hashes, _descs = bind_reference_hashes(ctx, images)
         if requested:
@@ -2648,6 +2786,7 @@ def run_image(body, ctx=None):
             state_out = context.storage_state()
         except Exception:
             state_out = None
+        cleanup_gemini(page)
         return {
             "ok": True,
             "url": url,
@@ -2655,8 +2794,10 @@ def run_image(body, ctx=None):
             "sessionBaseVersion": int(body.get("sessionVersion") or 0),
             "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
             "selectorPackVersion": pack_version,
-            "pageState": "RESULT_READY",
+            "pageState": "WARM_IDLE",
             "resultConfidence": conf or "HIGH",
+            "runtimeState": "WARM_IDLE",
+            "warmStats": dict(WARM_STATS),
         }
 
     if pool_enabled():
@@ -3280,7 +3421,7 @@ def run_leonardo(body, ctx=None):
             page.set_default_timeout(4000)
         except Exception:
             pass
-        goto_ai_creation(page)
+        ensure_leonardo_ready(page, lambda: goto_ai_creation(page))
         pst = detect_page_state(page, "leonardo")
         if pst in ("LOGIN_REQUIRED", "CHALLENGE", "TOKEN_EXHAUSTED", "QUEUE_FULL", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
             err, fault = page_state_error(pst, False, "leonardo")
@@ -3577,6 +3718,7 @@ def run_leonardo(body, ctx=None):
             state_out = context.storage_state()
         except Exception:
             state_out = None
+        refs_left = 0 if cleanup_leonardo(page) else count_leonardo_refs(page)
         return {
             "ok": True,
             "url": data_urls[0],
@@ -3586,7 +3728,10 @@ def run_leonardo(body, ctx=None):
             "modelActual": picked or model,
             "backendMode": "web_account",
             "latencyMs": int((time.time() - t0) * 1000),
-            "pageState": "GENERATION_COMPLETE",
+            "pageState": "WARM_IDLE" if refs_left == 0 else "DIRTY",
+            "runtimeState": "WARM_IDLE" if refs_left == 0 else "DIRTY",
+            "referenceCount": refs_left,
+            "warmStats": dict(WARM_STATS),
             "availableModels": available,
             "selectorPackVersion": pack_version,
             "sessionState": state_out,

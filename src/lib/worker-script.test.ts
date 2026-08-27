@@ -555,3 +555,21 @@ test("worker uploads media before result JSON", () => {
   const resultPost = s.indexOf('gw + "/api/worker/result"');
   assert.ok(mat > 0 && mat < resultPost, "strip data URLs before posting job result");
 });
+
+test("gemini and leonardo reuse warm idle pages", () => {
+  const s = localWorkerScript();
+  assert.match(s, /def ensure_gemini_ready/);
+  assert.match(s, /def ensure_leonardo_ready/);
+  assert.match(s, /def cleanup_gemini/);
+  assert.match(s, /def cleanup_leonardo/);
+  assert.match(s, /WARM_IDLE/);
+  const start = s.indexOf("def run_image_on");
+  const geminiFn = s.slice(start, s.indexOf("if pool_enabled():", start));
+  assert.equal(geminiFn.includes('page.goto("https://gemini.google.com/app"'), false, "gemini must not goto on every request");
+  assert.ok(geminiFn.includes("ensure_gemini_ready(page)"));
+  assert.ok(geminiFn.includes("cleanup_gemini(page)"));
+  const leoStart = s.indexOf("def run_leonardo");
+  assert.ok(s.indexOf("ensure_leonardo_ready(page", leoStart) > 0);
+  assert.ok(s.indexOf("cleanup_leonardo(page)", leoStart) > 0);
+});
+
