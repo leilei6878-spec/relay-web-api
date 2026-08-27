@@ -74,6 +74,8 @@ export type ProviderCapabilities = {
   streaming: boolean;
   multiTurn: boolean;
   models: string[];
+  /** Web UI reliable output count. Client n above this is 400, never silent truncate. */
+  maxOutputs: number;
 };
 
 export type VersionedSelectorPack = {

@@ -27,6 +27,7 @@ export const geminiAdapter: ProviderAdapter = {
       streaming: false,
       multiTurn: false,
       models: ["gemini-image"],
+      maxOutputs: 1,
     };
   },
   selectorPack(version) {

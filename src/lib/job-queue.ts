@@ -16,8 +16,10 @@ import { addAttempt, finishAttempt } from "./requests";
 import { getSecret, proxySecretKey } from "./secrets";
 import { proxyServer } from "./session-file";
 import { uid } from "./utils";
-import { applySessionUpdate, getAdapter, assertGeneratedImage } from "./provider/index";
+import { applySessionUpdate, getAdapter } from "./provider/index";
 import { isLeonardoModel } from "./provider/leonardo-models";
+import { validateJobImageUrls } from "./provider/image-result-validator";
+import { describeDataUrl } from "./provider/reference-verify";
 import type { ChatTurn } from "./provider/types";
 
 export type Job = {
@@ -67,6 +69,12 @@ export type Job = {
   quality?: string;
   aspect?: string;
   tier?: string;
+  requestedSize?: string;
+  actualWidth?: number;
+  actualHeight?: number;
+  actualAspect?: string;
+  requestedTier?: string;
+  actualTier?: string;
   backendMode?: "web_account" | "official_api";
 };
 
@@ -649,18 +657,28 @@ export function finishJob(
     let urls = (Array.isArray(result.urls) ? result.urls : []).filter((u: string) => typeof u === "string" && u) as string[];
     if (url && !urls.includes(url)) urls.unshift(url);
     if ((job.platform === "gemini" || job.platform === "leonardo") && result.ok && job.kind !== "canary" && result.text !== "CANARY") {
-      const checked: string[] = [];
-      for (const item of urls.length ? urls : url ? [url] : []) {
-        const gate = assertGeneratedImage(item, { allowSvg: process.env.RELAY_ALLOW_MOCK === "1" });
-        if (!gate.ok) {
-          result = { ...result, ok: false, error: gate.error };
-          break;
-        }
-        checked.push(gate.url);
-      }
-      if (result.ok) {
-        urls = checked;
-        url = checked[0];
+      const pending = urls.length ? urls : url ? [url] : [];
+      const refHashes = (job.images || [])
+        .map((u) => describeDataUrl(u)?.sha256)
+        .filter((x): x is string => Boolean(x));
+      const report = await validateJobImageUrls(pending, {
+        n: job.n || 1,
+        model: job.model,
+        size: job.size,
+        aspect: job.aspect,
+        tier: job.tier,
+        referenceHashes: refHashes,
+      });
+      if (!report.ok) {
+        result = { ...result, ok: false, error: report.error };
+      } else {
+        const first = report.results[0];
+        job.requestedSize = first.requestedSize;
+        job.actualWidth = first.width;
+        job.actualHeight = first.height;
+        job.actualAspect = first.actualAspect;
+        job.requestedTier = first.requestedTier;
+        job.actualTier = first.actualTier;
       }
     }
     if (urls.length && result.ok && (job.platform === "gemini" || job.platform === "leonardo") && job.kind !== "canary") {

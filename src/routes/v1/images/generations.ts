@@ -10,6 +10,7 @@ import { appendUsage } from "@/lib/usage";
 import { estimateTokens } from "@/lib/tokens";
 import { uid } from "@/lib/utils";
 import { collectSizeInput, resolveImageSpec } from "@/lib/provider/image-size";
+import { getAdapter } from "@/lib/provider";
 import {
   defaultResponseFormat,
   IMAGE_OFFICIAL_PARAMS,
@@ -187,7 +188,21 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     size = resolved.spec.size;
     aspect = resolved.spec.aspect;
     tier = resolved.spec.tier;
-    n = Math.max(1, Math.min(4, parsed.n || 1));
+    n = Math.max(1, parsed.n || 1);
+  }
+  const maxOut = getAdapter(platform).capabilities().maxOutputs || 1;
+  if (n > maxOut) {
+    return Response.json(
+      {
+        error: {
+          message: `unsupported parameter: n max ${maxOut} for ${platform} web_account`,
+          type: "invalid_request_error",
+          param: "n",
+          code: "RESULT_COUNT_MISMATCH",
+        },
+      },
+      { status: 400, headers: cors() },
+    );
   }
   const format = defaultResponseFormat(model, parsed.responseFormat);
   const requestId = request.headers.get("x-request-id") || uid();
@@ -286,7 +301,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     const done = await waitJob(queued.job.id, waitMs, { graceMs: 10_000, cancelOnTimeout: false });
     const fresh = (await getJob(queued.job.id)) || done.job || queued.job;
     const urls = (fresh.urls && fresh.urls.length ? fresh.urls : done.url ? [done.url] : []).filter(Boolean);
-    if (done.ok && urls.length) {
+    if (done.ok && urls.length === n) {
       await completeRequest(reqId, { ok: true, finalAttemptId: fresh.attemptId });
       await log({
         ok: true,
@@ -303,7 +318,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
         { headers: cors() },
       );
     }
-    last = done.ok ? "未返回图片" : done.error;
+    last = done.ok ? (urls.length ? `RESULT_COUNT_MISMATCH: want ${n} got ${urls.length}` : "未返回图片") : done.error;
     const decision = decideWithSafety(last, fresh.fault, fresh.retrySafety, fresh.submissionState);
     if (!decision.switch_account) break;
     exclude.push(account.id);
@@ -320,7 +335,20 @@ async function imagePayload(
   imageCount: number,
   mode: string,
   requestId?: string,
-  extra?: { attemptId?: string; workerId?: string; accountId?: string | null; proxyId?: string; traceId?: string },
+  extra?: {
+    attemptId?: string;
+    workerId?: string;
+    accountId?: string | null;
+    proxyId?: string;
+    traceId?: string;
+    actualWidth?: number;
+    actualHeight?: number;
+    actualAspect?: string;
+    requestedSize?: string;
+    requestedTier?: string;
+    actualTier?: string;
+    size?: string;
+  },
   format: "url" | "b64_json" = "url",
   size?: string,
 ) {
@@ -359,6 +387,12 @@ async function imagePayload(
       traceId: extra?.traceId,
       backend_mode: mode === "web_account" ? "web_account" : undefined,
       size,
+      requested_size: extra?.requestedSize || size,
+      actual_width: extra?.actualWidth,
+      actual_height: extra?.actualHeight,
+      actual_aspect: extra?.actualAspect,
+      requested_tier: extra?.requestedTier,
+      actual_tier: extra?.actualTier,
     },
   };
 }

@@ -176,6 +176,10 @@ function closestAspect(w: number, h: number): ImageAspect {
   return best;
 }
 
+export function aspectFromPixels(w: number, h: number): ImageAspect {
+  return closestAspect(w, h);
+}
+
 export function aspectFromSize(size?: string): ImageAspect {
   const s = (size || "").trim();
   if ((IMAGE_ASPECTS as readonly string[]).includes(s)) return s as ImageAspect;
@@ -355,3 +359,28 @@ export function sizeOptionsFor(model: string): { id: string; label: string }[] {
 }
 
 void gcd;
+
+export function compatibleNatives(spec: ImageSpec): { w: number; h: number }[] {
+  const fam = spec.family === "gemini" ? "nano" : spec.family;
+  const out: { w: number; h: number }[] = [pixelsFor(spec.aspect, spec.imageSize, fam)];
+  for (const family of ["gpt", "nano"] as ImageFamily[]) {
+    const px = pixelsFor(spec.aspect, spec.imageSize, family);
+    if (!out.some((p) => p.w === px.w && p.h === px.h)) out.push(px);
+  }
+  for (const [alias, mapped] of Object.entries(OPENAI_ALIAS)) {
+    if (mapped.aspect !== spec.aspect || mapped.k !== spec.imageSize) continue;
+    const [w, h] = alias.split("x").map(Number);
+    if (!w || !h) continue;
+    if (!out.some((p) => p.w === w && p.h === h)) out.push({ w, h });
+  }
+  return out;
+}
+
+export function sizeMatchesSpec(width: number, height: number, spec: ImageSpec): boolean {
+  if (width === spec.width && height === spec.height) return true;
+  return compatibleNatives(spec).some((p) => p.w === width && p.h === height);
+}
+
+export function kFromPixels(width: number, height: number, family: ImageFamily): ImageK {
+  return kFromMax(Math.max(width, height), family === "gemini" ? "nano" : family);
+}

@@ -34,6 +34,7 @@ export const chatgptAdapter: ProviderAdapter = {
       streaming: true,
       multiTurn: true,
       models: ["gpt-5.6", "gpt-5", "gpt-5-thinking", "gpt-4o"],
+      maxOutputs: 1,
     };
   },
   selectorPack(version) {

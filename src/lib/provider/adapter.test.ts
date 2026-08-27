@@ -32,6 +32,9 @@ test("adapters expose the required surface", () => {
   assert.equal(geminiAdapter.capabilities().imageGeneration, true);
   assert.equal(geminiAdapter.capabilities().imageEdit, true);
   assert.equal(getAdapter("leonardo").capabilities().imageGeneration, true);
+  assert.equal(geminiAdapter.capabilities().maxOutputs, 1);
+  assert.equal(getAdapter("leonardo").capabilities().maxOutputs, 1);
+  assert.equal(chatgptAdapter.capabilities().maxOutputs, 1);
 });
 
 test("page state does not map composer miss to session death", () => {

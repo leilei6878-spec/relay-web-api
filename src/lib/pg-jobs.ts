@@ -368,20 +368,30 @@ export async function finishJobPg(
   if (result.url && !rawUrls.includes(result.url)) rawUrls.unshift(result.url);
   let url = result.url;
   let urls = rawUrls;
-  if ((current.platform === "gemini" || current.platform === "leonardo") && result.ok) {
-    const { assertGeneratedImage } = await import("./provider/index");
-    const checked: string[] = [];
-    for (const item of urls.length ? urls : url ? [url] : []) {
-      const gate = assertGeneratedImage(item, { allowSvg: process.env.RELAY_ALLOW_MOCK === "1" });
-      if (!gate.ok) {
-        result = { ...result, ok: false, error: gate.error };
-        break;
-      }
-      checked.push(gate.url);
-    }
-    if (result.ok) {
-      urls = checked;
-      url = checked[0];
+  if ((current.platform === "gemini" || current.platform === "leonardo") && result.ok && current.kind !== "canary" && result.text !== "CANARY") {
+    const { validateJobImageUrls } = await import("./provider/image-result-validator");
+    const { describeDataUrl } = await import("./provider/reference-verify");
+    const pending = urls.length ? urls : url ? [url] : [];
+    const refHashes = (current.images || [])
+      .map((u) => describeDataUrl(u)?.sha256)
+      .filter((x): x is string => Boolean(x));
+    const report = await validateJobImageUrls(pending, {
+      n: current.n || 1,
+      model: current.model,
+      size: current.size,
+      aspect: current.aspect,
+      tier: current.tier,
+      referenceHashes: refHashes,
+    });
+    if (!report.ok) {
+      result = { ...result, ok: false, error: report.error };
+    } else if (report.results[0]) {
+      current.requestedSize = report.results[0].requestedSize;
+      current.actualWidth = report.results[0].width;
+      current.actualHeight = report.results[0].height;
+      current.actualAspect = report.results[0].actualAspect;
+      current.requestedTier = report.results[0].requestedTier;
+      current.actualTier = report.results[0].actualTier;
     }
   }
   if (urls.length && result.ok && (current.platform === "gemini" || current.platform === "leonardo")) {

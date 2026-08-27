@@ -11,6 +11,7 @@ export { prepareChatRequest, toWebPrompt, turnsFromMessages } from "./prompt-map
 export { packFor, selectorCandidates, CURRENT_PACK } from "./selectors";
 export { applySessionUpdate, canWriteSession, sessionExpired } from "./session-cas";
 export { assertGeneratedImage, assertGeneratedBytes, isUiOrOldSrc } from "./image-guard";
+export { validateImageResults, validateJobImageUrls } from "./image-result-validator";
 export { fingerprint, featureDelta } from "./fingerprint";
 export type { ProviderAdapter, ProviderId, PageState, ChatTurn, PreparedRequest } from "./types";
 

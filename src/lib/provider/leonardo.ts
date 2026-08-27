@@ -35,6 +35,7 @@ export const leonardoAdapter: ProviderAdapter = {
       streaming: false,
       multiTurn: false,
       models: ["leonardo-gpt-image-2", "leonardo-gemini"],
+      maxOutputs: 1,
     };
   },
   selectorPack(version) {
