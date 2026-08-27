@@ -35,9 +35,11 @@ export function historyBadgeOk(status: LogicalStatus): boolean {
 export function classifySseOutcome(input: {
   transportStatus: number;
   text?: string;
+  partialText?: string;
   error?: { message?: string };
   phase?: string;
   finishReason?: string | null;
+  logicalStatus?: LogicalStatus;
   aborted?: boolean;
   id?: string;
   mode?: string;
@@ -45,11 +47,12 @@ export function classifySseOutcome(input: {
   requestId?: string;
   jobId?: string;
 }): SseOutcome {
-  const partialText = input.text || "";
+  const partialText = input.partialText || input.text || "";
+  const text = input.text || partialText;
   const msg = input.error?.message || "";
   const base = {
     transportStatus: input.transportStatus,
-    text: partialText,
+    text,
     partialText,
     id: input.id,
     mode: input.mode,
@@ -58,6 +61,25 @@ export function classifySseOutcome(input: {
     jobId: input.jobId,
     ssePartialBeforeError: Boolean(msg && partialText),
   };
+  if (input.logicalStatus && input.logicalStatus !== "success") {
+    const logicalStatus = input.logicalStatus;
+    return {
+      ...base,
+      logicalStatus,
+      error: input.error || {
+        message:
+          logicalStatus === "cancelled"
+            ? "REQUEST_CANCELLED"
+            : logicalStatus === "uncertain"
+              ? "RESULT_UNCERTAIN"
+              : "stream failed",
+      },
+      finishReason: logicalStatus,
+      completed: false,
+      phase: "error",
+      ssePartialBeforeError: Boolean(partialText),
+    };
+  }
   if (input.aborted) {
     return {
       ...base,
@@ -129,6 +151,8 @@ export async function readSse(
   let accountEmail = "";
   let phase = "";
   let finishReason: string | null = null;
+  let logicalStatus: LogicalStatus | undefined;
+  let partialText = "";
   let requestId = "";
   let jobId = "";
   let error: { message?: string } | undefined;
@@ -163,6 +187,15 @@ export async function readSse(
         if (json.relay?.accountEmail) accountEmail = json.relay.accountEmail;
         if (json.relay?.mode) mode = json.relay.mode;
         if (json.relay?.phase) phase = json.relay.phase;
+        if (
+          json.relay?.logicalStatus === "success" ||
+          json.relay?.logicalStatus === "error" ||
+          json.relay?.logicalStatus === "cancelled" ||
+          json.relay?.logicalStatus === "uncertain"
+        ) {
+          logicalStatus = json.relay.logicalStatus;
+        }
+        if (json.relay?.partialText !== undefined) partialText = json.relay.partialText;
         if (json.relay?.requestId) requestId = json.relay.requestId;
         if (json.relay?.jobId) jobId = json.relay.jobId;
         const fr = json.choices?.[0]?.finish_reason;
@@ -188,9 +221,11 @@ export async function readSse(
   return classifySseOutcome({
     transportStatus: res.status,
     text,
+    partialText,
     error,
     phase,
     finishReason,
+    logicalStatus,
     id,
     mode,
     accountEmail,

@@ -81,3 +81,59 @@ test("HTTP 200 with partial and no done is not success", () => {
   assert.equal(out.completed, false);
   assert.match(out.error?.message || "", /UNCERTAIN/);
 });
+
+test("explicit logical error overrides contradictory done and stop", async () => {
+  const res = sseResponse([
+    {
+      choices: [{ delta: {}, finish_reason: "stop" }],
+      relay: {
+        phase: "done",
+        logicalStatus: "error",
+        partialText: "仅有部分结果",
+      },
+    },
+  ]);
+  const out = await readSse(res);
+  assert.equal(out.logicalStatus, "error");
+  assert.equal(out.completed, false);
+  assert.equal(out.phase, "error");
+  assert.equal(out.finishReason, "error");
+  assert.equal(out.text, "仅有部分结果");
+  assert.equal(out.partialText, "仅有部分结果");
+  assert.equal(out.ssePartialBeforeError, true);
+});
+
+test("terminal logical uncertainty preserves relay partial text without deltas", async () => {
+  const res = sseResponse([
+    {
+      error: { message: "worker disconnected" },
+      choices: [{ delta: {}, finish_reason: "stop" }],
+      relay: {
+        phase: "done",
+        logicalStatus: "uncertain",
+        partialText: "terminal-only partial",
+      },
+    },
+  ]);
+  const out = await readSse(res);
+  assert.equal(out.logicalStatus, "uncertain");
+  assert.equal(out.completed, false);
+  assert.equal(out.partialText, "terminal-only partial");
+  assert.equal(out.text, "terminal-only partial");
+  assert.equal(out.finishReason, "uncertain");
+});
+
+test("explicit logical cancellation overrides done classification", () => {
+  const out = classifySseOutcome({
+    transportStatus: 200,
+    text: "partial",
+    phase: "done",
+    finishReason: "stop",
+    logicalStatus: "cancelled",
+  });
+  assert.equal(out.logicalStatus, "cancelled");
+  assert.equal(out.completed, false);
+  assert.equal(out.phase, "error");
+  assert.equal(out.finishReason, "cancelled");
+  assert.equal(historyBadgeOk(out.logicalStatus), false);
+});
