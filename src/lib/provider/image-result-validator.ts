@@ -35,6 +35,8 @@ export type ImageValidationRequest = {
   family?: ImageFamily;
   referenceHashes?: string[];
   historicalHashes?: string[];
+  confidences?: ResultConfidence[];
+  requireConfidence?: boolean;
   spec?: ImageSpec;
 };
 
@@ -126,6 +128,9 @@ export function validateOneImage(item: ImageBytes, req: ImageValidationRequest):
   if ((req.historicalHashes || []).includes(sha)) {
     return { ok: false, error: "IMAGE_NOT_FOUND: historical asset returned" };
   }
+  if (!item.confidence && req.requireConfidence) {
+    return { ok: false, error: "IMAGE_CONFIDENCE_TOO_LOW: MISSING" };
+  }
   const conf = item.confidence || "HIGH";
   if (!PRODUCTION_CONFIDENCE.has(conf)) {
     return { ok: false, error: `IMAGE_CONFIDENCE_TOO_LOW: ${conf}` };
@@ -203,10 +208,11 @@ export function hashOf(buf: Buffer) {
 
 export async function validateJobImageUrls(urls: string[], req: ImageValidationRequest): Promise<ImageValidationReport> {
   const loaded: ImageBytes[] = [];
-  for (const u of urls) {
+  for (let index = 0; index < urls.length; index += 1) {
+    const u = urls[index]!;
     const item = await loadImageBytes(u);
     if (!item.ok) return { ok: false, error: item.error, results: [] };
-    loaded.push(item);
+    loaded.push({ ...item, confidence: req.confidences?.[index] });
   }
   return validateImageResults(loaded, req);
 }

@@ -3,6 +3,7 @@ import { assertApiKey } from "@/lib/control-plane";
 import { parseMessageContent } from "@/lib/media";
 import { prepareChatRequest } from "@/lib/provider/index";
 import { estimateTokens } from "@/lib/tokens";
+import { ingestReferenceImages } from "@/lib/reference-input";
 import { runChat, streamChat } from "./chat/completions";
 
 const ALLOWED = new Set(["model", "input", "stream"]);
@@ -48,6 +49,8 @@ export const Route = createFileRoute("/v1/responses")({
         }
         const items = Array.isArray(body.input) ? body.input : body.input != null ? [body.input] : [];
         const messages: { role?: string; content?: unknown }[] = [];
+        let imageOverflow = false;
+        let imageInvalid = false;
         for (const item of items) {
           if (typeof item === "string") messages.push({ role: "user", content: item });
           else if (item && typeof item === "object") {
@@ -57,6 +60,8 @@ export const Route = createFileRoute("/v1/responses")({
               messages.push({ role: "user", content: item.text });
             } else {
               const parsed = parseMessageContent(item);
+              imageOverflow ||= parsed.imageOverflow;
+              imageInvalid ||= parsed.imageInvalid;
               if (parsed.text || parsed.images.length) {
                 messages.push({
                   role: "user",
@@ -69,35 +74,64 @@ export const Route = createFileRoute("/v1/responses")({
             }
           }
         }
+        imageOverflow ||= messages.some((message) => parseMessageContent(message.content).imageOverflow);
+        imageInvalid ||= messages.some((message) => parseMessageContent(message.content).imageInvalid);
+        if (imageInvalid) {
+          return Response.json(
+            { error: { message: "unsupported parameter: invalid input image", type: "invalid_request_error" } },
+            { status: 400, headers: cors() },
+          );
+        }
+        if (imageOverflow) {
+          return Response.json(
+            { error: { message: "unsupported parameter: input images max 4", type: "invalid_request_error" } },
+            { status: 400, headers: cors() },
+          );
+        }
         const prepared = prepareChatRequest("chatgpt", { messages, model: body.model || "chatgpt-web-auto" });
         if (!prepared.webPrompt && !prepared.images.length) {
           return Response.json({ error: { message: "缺少 input" } }, { status: 400, headers: cors() });
         }
         const idem = request.headers.get("idempotency-key") || undefined;
         const requestId = request.headers.get("x-request-id") || undefined;
+        const frozen = await ingestReferenceImages(prepared.images, new URL(request.url).origin);
+        if (!frozen.ok) {
+          return Response.json(
+            { error: { message: frozen.error, type: "invalid_request_error" } },
+            { status: 400, headers: cors() },
+          );
+        }
+        const imageMap = new Map(prepared.images.map((url, index) => [url, frozen.assets[index]?.url || url]));
+        const frozenImages = frozen.assets.map((asset) => asset.url);
+        const frozenTurns = prepared.turns.map((turn) => ({
+          ...turn,
+          images: turn.images?.map((url) => imageMap.get(url) || url),
+        }));
         if (body.stream) {
           const key = auth.record;
           return streamChat(
             prepared.webPrompt,
             prepared.model,
-            prepared.images,
+            frozenImages,
             key,
             idem,
             requestId,
             request.signal,
-            prepared.turns,
+            frozenTurns,
             prepared.selectorPackVersion,
+            frozen.assets,
           );
         }
         const result = await runChat(
           prepared.webPrompt,
           prepared.model,
-          prepared.images,
+          frozenImages,
           idem,
           requestId,
           auth.record.id,
-          prepared.turns,
+          frozenTurns,
           prepared.selectorPackVersion,
+          frozen.assets,
         );
         if (!result.ok) {
           return Response.json({ error: { message: result.error } }, { status: result.status, headers: cors() });

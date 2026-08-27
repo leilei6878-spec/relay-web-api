@@ -40,9 +40,9 @@ At takeover:
 | 1C | SSE logical status authority | COMPLETE | Commit `c429950`; focused parser/history tests 8/8 pass. |
 | 2 | Submission-aware reclaim / no duplicate paid generation | COMPLETE | Commit `1ff9844`; durable checkpoints, SAFE-only retry, heartbeat-aware PG reclaim and fenced cancellation. |
 | 3A | Proxy/browser/session identity isolation | COMPLETE | Commit `1ff9844`; proxy ID/credential fingerprint keys browser pools and launch config strips internal fields. Live proxy-down gate remains Phase 8. |
-| 3B | Model truth + operational default | READY_FOR_COMMIT | Default is honest `chatgpt-web-auto`; exact IDs select specifically/fail closed; requested/actual/verified metadata preserved. Focused tests pass. |
-| 3C | Chat attachment/disconnect closure | READY_FOR_COMMIT | Exact vision attachment count before send; abort races enqueue/wait and retains submitted attempts as uncertain. Live Chat gate remains. |
-| 4 | Image provenance/validator/media closure | PENDING | Propagate confidence/history/asset metadata; remove silent HIGH default. |
+| 3B | Model truth + operational default | COMPLETE | Commit `06cca41`; honest web-auto default, exact-model fail closed, full truth metadata. |
+| 3C | Chat attachment/disconnect closure | COMPLETE | Commit `06cca41`; exact vision attachment and cancellation/uncertainty closure. |
+| 4 | Image provenance/validator/media closure | READY_FOR_COMMIT | Input refs frozen outside Job JSON; overflow/invalid rejected; confidence required end-to-end; DOM-correlated Leonardo bytes; recent hash exclusion; WebP; WARM_IDLE fail-closed. Focused tests/build pending final gate. |
 | 5 | Canary + selector self-healing closure | PENDING | Wire worker probe, distributed scheduling/state, real low-frequency paid canary. |
 | 6 | Provider/capability/key backpressure | PENDING | File + PG parity, 429/503 + Retry-After. |
 | 7 | Full local automated campaign | PENDING | unit, typecheck, build, contract, concurrency, chaos, runtime, leak. |
@@ -78,5 +78,6 @@ runs. No zero is inferred from unit tests:
 - `d0ba670` — restore hard typecheck/build/lint gates
 - `c429950` — authoritative SSE logical status and terminal partial text
 - `1ff9844` — durable submission checkpoints, safe reclaim, proxy pool isolation
+- `06cca41` — truthful chat model contract, exact vision attach, abort recovery
 
 Temporary dependency cache content is never committed.

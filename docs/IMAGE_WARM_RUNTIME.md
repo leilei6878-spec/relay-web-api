@@ -11,6 +11,10 @@ INVALID / CONTEXT_DEAD → new page
 
 Only `WARM_IDLE` takes the next request.
 
+`WARM_IDLE` proves both zero reference cards and an empty composer. Cleanup
+errors or a remaining DIRTY state fail closed before Generate; DIRTY is never a
+successful readiness result.
+
 After every request:
 
 - Gemini: clear composer and attachments

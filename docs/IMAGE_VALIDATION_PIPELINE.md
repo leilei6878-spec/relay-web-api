@@ -19,6 +19,11 @@ bytes
 
 Any step fails → not 200.
 
+Missing confidence is rejected in the production finish path. Worker asset
+metadata (sha256/MIME/bytes/dimensions/confidence) must match the gateway's
+recalculation. Each account retains a bounded recent-result hash set, so the
+same historical bytes are rejected even behind a new/cache-busted URL.
+
 ## Size truth
 
 Response `relay` records:

@@ -11,6 +11,7 @@ import { estimateTokens } from "@/lib/tokens";
 import { uid } from "@/lib/utils";
 import { collectSizeInput, resolveImageSpec } from "@/lib/provider/image-size";
 import { getAdapter } from "@/lib/provider";
+import { ingestReferenceImages } from "@/lib/reference-input";
 import {
   defaultResponseFormat,
   IMAGE_OFFICIAL_PARAMS,
@@ -67,6 +68,10 @@ async function parseBody(request: Request) {
       aspectRatio: String(form.get("aspect_ratio") || form.get("aspectRatio") || "") || undefined,
       imageSize: String(form.get("image_size") || form.get("imageSize") || "") || undefined,
       responseFormat: String(form.get("response_format") || "") || undefined,
+      imageOverflow: images.length > (isLeonardoModel(model) ? MAX_IMAGES_LEONARDO : 4),
+      imageInvalid: images.some(
+        (url) => !url.startsWith("data:image") && !url.startsWith("http://") && !url.startsWith("https://"),
+      ),
     };
   }
   const body = (await request.json()) as Record<string, unknown>;
@@ -89,6 +94,8 @@ async function parseBody(request: Request) {
     aspectRatio: sizeFields.aspectRatio,
     imageSize: sizeFields.imageSize,
     responseFormat: typeof body.response_format === "string" ? body.response_format : undefined,
+    imageOverflow: parsed.imageOverflow,
+    imageInvalid: parsed.imageInvalid,
   };
 }
 
@@ -144,6 +151,19 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
           param: mask ? "mask" : parsed.extra[0],
         },
       },
+      { status: 400, headers: cors() },
+    );
+  }
+  if (parsed.imageOverflow) {
+    const max = isLeonardoModel(parsed.model || "") ? MAX_IMAGES_LEONARDO : 4;
+    return Response.json(
+      { error: { message: `unsupported parameter: images max ${max}`, type: "invalid_request_error", param: "images" } },
+      { status: 400, headers: cors() },
+    );
+  }
+  if (parsed.imageInvalid) {
+    return Response.json(
+      { error: { message: "unsupported parameter: invalid image reference", type: "invalid_request_error", param: "images" } },
       { status: 400, headers: cors() },
     );
   }
@@ -215,6 +235,14 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     );
   }
   const format = defaultResponseFormat(model, parsed.responseFormat);
+  const frozen = await ingestReferenceImages(parsed.images, new URL(request.url).origin);
+  if (!frozen.ok) {
+    return Response.json(
+      { error: { message: frozen.error, type: "invalid_request_error", param: "images" } },
+      { status: 400, headers: cors() },
+    );
+  }
+  const referenceUrls = frozen.assets.map((asset) => asset.url);
   const requestId = request.headers.get("x-request-id") || uid();
   const idem = request.headers.get("idempotency-key") || undefined;
   const created = await createRelayRequest({
@@ -271,7 +299,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
       return Response.json({ error: { message: error } }, { status: 503, headers: cors() });
     }
     const account = await pickAccount(platform, [], { model });
-    const fb = await fallbackImage(prompt, 90_000, parsed.images);
+    const fb = await fallbackImage(prompt, 90_000, referenceUrls);
     if (!fb.ok) {
       await completeRequest(reqId, { ok: false, finalError: fb.error });
       await log({ ok: false, error: fb.error });
@@ -289,7 +317,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
   for (let i = 0; i <= maxRetry; i++) {
     const account = await pickAccount(platform, exclude, { model });
     if (!account) break;
-    const queued = await enqueueImage(prompt, model, platform === "leonardo" ? 180_000 : 90_000, parsed.images, {
+    const queued = await enqueueImage(prompt, model, platform === "leonardo" ? 180_000 : 90_000, referenceUrls, {
       idempotencyKey: idem,
       requestId: reqId,
       excludeAccountIds: exclude,
@@ -300,6 +328,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
       quality,
       aspect,
       tier,
+      referenceAssets: frozen.assets,
     });
     if (!queued.ok) {
       last = queued.error;

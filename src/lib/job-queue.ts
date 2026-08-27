@@ -21,6 +21,9 @@ import { isLeonardoModel } from "./provider/leonardo-models";
 import { validateJobImageUrls } from "./provider/image-result-validator";
 import { describeDataUrl } from "./provider/reference-verify";
 import type { ChatTurn } from "./provider/types";
+import type { ReferenceAsset } from "./reference-input";
+import type { ResultConfidence } from "./provider/generation-boundary";
+import type { ImageAssetRecord } from "./image-asset";
 import {
   applySubmissionCheckpoint,
   recoveryDisposition,
@@ -44,6 +47,11 @@ export type Job = {
   createdAt: string;
   timeoutMs: number;
   images?: string[];
+  referenceAssets?: ReferenceAsset[];
+  historicalHashes?: string[];
+  resultHashes?: string[];
+  resultConfidences?: ResultConfidence[];
+  resultAssets?: ImageAssetRecord[];
   attempts?: number;
   startedAt?: string;
   workerName?: string;
@@ -106,6 +114,7 @@ export type EnqueueOpts = {
   quality?: string;
   aspect?: string;
   tier?: string;
+  referenceAssets?: ReferenceAsset[];
 };
 
 export type WorkerRow = {
@@ -414,6 +423,8 @@ async function enqueue(
       createdAt: new Date().toISOString(),
       timeoutMs,
       images: images.slice(0, platform === "leonardo" ? 6 : 4),
+      referenceAssets: opts.referenceAssets?.slice(0, platform === "leonardo" ? 6 : 4),
+      historicalHashes: account.recentResultHashes?.slice(-64) || [],
       attempts: 0,
       requestId: opts.requestId || uid(),
       traceId: opts.traceId || uid(),
@@ -658,6 +669,8 @@ export function finishJob(
     queueDepth?: number;
     retrySafety?: "SAFE" | "UNSAFE" | "UNKNOWN";
     submissionState?: string;
+    resultConfidences?: ResultConfidence[];
+    resultAssets?: ImageAssetRecord[];
   },
 ) {
   if (pgSotActive()) {
@@ -714,9 +727,11 @@ export function finishJob(
     if (url && !urls.includes(url)) urls.unshift(url);
     if ((job.platform === "gemini" || job.platform === "leonardo") && result.ok && job.kind !== "canary" && result.text !== "CANARY") {
       const pending = urls.length ? urls : url ? [url] : [];
-      const refHashes = (job.images || [])
-        .map((u) => describeDataUrl(u)?.sha256)
-        .filter((x): x is string => Boolean(x));
+      const refHashes = job.referenceAssets?.length
+        ? job.referenceAssets.map((asset) => asset.sha256)
+        : (job.images || [])
+            .map((u) => describeDataUrl(u)?.sha256)
+            .filter((x): x is string => Boolean(x));
       const report = await validateJobImageUrls(pending, {
         n: job.n || 1,
         model: job.model,
@@ -724,10 +739,28 @@ export function finishJob(
         aspect: job.aspect,
         tier: job.tier,
         referenceHashes: refHashes,
+        historicalHashes: job.historicalHashes || [],
+        confidences: result.resultConfidences,
+        requireConfidence: true,
       });
       if (!report.ok) {
         result = { ...result, ok: false, error: report.error };
       } else {
+        const metadataMismatch = report.results.some((item, index) => {
+          const supplied = result.resultAssets?.[index];
+          return Boolean(
+            supplied &&
+              (supplied.sha256 !== item.sha256 ||
+                supplied.mime !== item.mime ||
+                supplied.bytes !== item.bytes ||
+                supplied.width !== item.width ||
+                supplied.height !== item.height ||
+                supplied.confidence !== item.confidence),
+          );
+        });
+        if (metadataMismatch) {
+          result = { ...result, ok: false, error: "IMAGE_NOT_FOUND: worker asset metadata mismatch" };
+        }
         const first = report.results[0];
         job.requestedSize = first.requestedSize;
         job.actualWidth = first.width;
@@ -735,6 +768,20 @@ export function finishJob(
         job.actualAspect = first.actualAspect;
         job.requestedTier = first.requestedTier;
         job.actualTier = first.actualTier;
+        job.resultHashes = report.results.map((item) => item.sha256);
+        job.resultConfidences = report.results.map((item) => item.confidence);
+        job.resultAssets = report.results.map((item, index) => ({
+          assetId:
+            result.resultAssets?.[index]?.assetId ||
+            (urls[index]?.match(/\/api\/media\/([^/?#]+)/)?.[1] ?? ""),
+          url: urls[index] || "",
+          sha256: item.sha256,
+          mime: item.mime,
+          bytes: item.bytes,
+          width: item.width,
+          height: item.height,
+          confidence: item.confidence,
+        }));
       }
     }
     if (urls.length && result.ok && (job.platform === "gemini" || job.platform === "leonardo") && job.kind !== "canary") {
@@ -810,7 +857,7 @@ export function finishJob(
         if (Object.keys(capabilityPatch).length) {
           await patchAccount(acc.id, capabilityPatch as never);
         }
-        if (result.ok && has) {
+          if (result.ok && has) {
           if (isCanaryAccount(acc) || job.kind === "canary") await recordCanaryResult(job.platform, true);
           await patchAccount(acc.id, {
             failCount: 0,
@@ -819,6 +866,10 @@ export function finishJob(
             lastError: null,
             lockedUntil: null,
             status: "healthy",
+            recentResultHashes: [
+              ...(acc.recentResultHashes || []),
+              ...(job.resultHashes || []),
+            ].slice(-64),
           });
         } else if (decision.provider_circuit_effect === "trip") {
           if (isCanaryAccount(acc) || job.kind === "canary") await recordCanaryResult(job.platform, false);

@@ -6,6 +6,8 @@ import "./test-env.ts";
 import { resetCoordForTests } from "./coord.ts";
 import { writeControlPlane } from "./control-plane.ts";
 import { checkpointJob, claimNext, cancelJob, enqueueChat, finishJob, getJob } from "./job-queue.ts";
+import { resetMediaStoreForTests } from "./media-store.ts";
+import { ingestReferenceImages } from "./reference-input.ts";
 
 process.env.RELAY_SKIP_DB = "1";
 
@@ -326,4 +328,30 @@ test("web-auto succeeds without inventing an actual model; exact IDs fail closed
   });
   assert.equal(missingRejected.ok, false);
   if (!missingRejected.ok) assert.match(missingRejected.error, /MODEL_SELECTION_UNCONFIRMED/);
+});
+
+test("input reference bytes are frozen outside job JSON", async () => {
+  await seed();
+  resetMediaStoreForTests();
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
+  const frozen = await ingestReferenceImages([dataUrl], "http://relay.test");
+  assert.equal(frozen.ok, true);
+  if (!frozen.ok) return;
+  const queued = await enqueueChat(
+    "vision",
+    "chatgpt-web-auto",
+    8000,
+    frozen.assets.map((asset) => asset.url),
+    { referenceAssets: frozen.assets, idempotencyKey: `frozen-${Date.now()}` },
+  );
+  assert.equal(queued.ok, true);
+  if (!queued.ok) return;
+  const json = JSON.stringify(await getJob(queued.job.id));
+  assert.doesNotMatch(json, /data:image/);
+  assert.match(json, /\/api\/media\//);
+  assert.match(json, new RegExp(frozen.assets[0]!.sha256));
 });

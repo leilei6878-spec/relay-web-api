@@ -22,18 +22,31 @@ function asUrl(value: unknown): string {
   return "";
 }
 
-function pushImage(list: string[], url: string, max = MAX_IMAGES) {
-  if (!url) return;
-  if (url.length > MAX_CHARS) return;
-  if (!url.startsWith("data:image") && !url.startsWith("http://") && !url.startsWith("https://")) return;
-  if (list.length >= max) return;
+function pushImage(list: string[], url: string, max = MAX_IMAGES): "added" | "overflow" | "ignored" {
+  if (!url) return "ignored";
+  if (url.length > MAX_CHARS) return "ignored";
+  if (!url.startsWith("data:image") && !url.startsWith("http://") && !url.startsWith("https://")) return "ignored";
+  if (list.length >= max) return "overflow";
   list.push(url);
+  return "added";
 }
 
-export function parseMessageContent(content: unknown): { text: string; images: string[] } {
+export function parseMessageContent(content: unknown): {
+  text: string;
+  images: string[];
+  imageOverflow: boolean;
+  imageInvalid: boolean;
+} {
   const images: string[] = [];
-  if (typeof content === "string") return { text: content.trim(), images };
-  if (!Array.isArray(content)) return { text: "", images };
+  let imageOverflow = false;
+  let imageInvalid = false;
+  const collect = (url: string) => {
+    const outcome = pushImage(images, url);
+    imageOverflow ||= outcome === "overflow";
+    imageInvalid ||= outcome === "ignored";
+  };
+  if (typeof content === "string") return { text: content.trim(), images, imageOverflow, imageInvalid };
+  if (!Array.isArray(content)) return { text: "", images, imageOverflow, imageInvalid };
   const texts: string[] = [];
   for (const part of content as ChatPart[]) {
     if (typeof part === "string") {
@@ -44,11 +57,17 @@ export function parseMessageContent(content: unknown): { text: string; images: s
     if (part.type === "text" || part.text) {
       if (part.text?.trim()) texts.push(part.text.trim());
     }
-    if (part.type === "image_url" || part.image_url) pushImage(images, asUrl(part.image_url) || asUrl(part.url));
-    if (part.type === "image" || part.image) pushImage(images, asUrl(part.image) || asUrl(part.url));
-    if (part.type === "input_image") pushImage(images, asUrl(part.image_url) || asUrl(part.url));
+    if (part.type === "image_url" || part.image_url) {
+      collect(asUrl(part.image_url) || asUrl(part.url));
+    }
+    if (part.type === "image" || part.image) {
+      collect(asUrl(part.image) || asUrl(part.url));
+    }
+    if (part.type === "input_image") {
+      collect(asUrl(part.image_url) || asUrl(part.url));
+    }
   }
-  return { text: texts.join("\n").trim(), images };
+  return { text: texts.join("\n").trim(), images, imageOverflow, imageInvalid };
 }
 
 export function parseImageRequest(
@@ -59,15 +78,24 @@ export function parseImageRequest(
     images?: unknown;
   },
   opts?: { maxImages?: number },
-): { prompt: string; images: string[] } {
+): { prompt: string; images: string[]; imageOverflow: boolean; imageInvalid: boolean } {
   const max = opts?.maxImages ?? MAX_IMAGES;
   const images: string[] = [];
-  pushImage(images, asUrl(body.image), max);
-  pushImage(images, asUrl(body.image_url), max);
+  let imageOverflow = false;
+  let imageInvalid = false;
+  const collect = (value: unknown) => {
+    const outcome = pushImage(images, asUrl(value), max);
+    imageOverflow ||= outcome === "overflow";
+    imageInvalid ||= outcome === "ignored";
+  };
+  if (body.image !== undefined) collect(body.image);
+  if (body.image_url !== undefined) collect(body.image_url);
   if (Array.isArray(body.images)) {
-    for (const item of body.images) pushImage(images, asUrl(item), max);
+    for (const item of body.images) {
+      collect(item);
+    }
   }
-  return { prompt: (body.prompt || "").trim(), images };
+  return { prompt: (body.prompt || "").trim(), images, imageOverflow, imageInvalid };
 }
 
 export function defaultPrompt(kind: "chat" | "image", text: string, images: string[]) {

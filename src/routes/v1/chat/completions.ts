@@ -8,6 +8,7 @@ import { nextSseDelta, subscribeJob } from "@/lib/job-events";
 import { parseMessageContent } from "@/lib/media";
 import { prepareChatRequest } from "@/lib/provider/index";
 import type { ChatTurn } from "@/lib/provider/types";
+import { ingestReferenceImages, type ReferenceAsset } from "@/lib/reference-input";
 import type { ApiKeyRecord } from "@/lib/api-keys";
 import { completeRequest, createRelayRequest } from "@/lib/requests";
 import { attachSseLifecycle, enqueueWithBackpressure, sseUsageChunk } from "@/lib/sse-runtime";
@@ -78,6 +79,20 @@ export async function handleChat(request: Request): Promise<Response> {
         }
         const last = [...(body.messages || [])].reverse().find((m) => m.role === "user");
         const parsed = parseMessageContent(last?.content);
+        const imageOverflow = (body.messages || []).some((message) => parseMessageContent(message.content).imageOverflow);
+        const imageInvalid = (body.messages || []).some((message) => parseMessageContent(message.content).imageInvalid);
+        if (imageInvalid) {
+          return Response.json(
+            { error: { message: "unsupported parameter: invalid chat image", type: "invalid_request_error" } },
+            { status: 400, headers: cors() },
+          );
+        }
+        if (imageOverflow) {
+          return Response.json(
+            { error: { message: "unsupported parameter: chat images max 4", type: "invalid_request_error" } },
+            { status: 400, headers: cors() },
+          );
+        }
         const prepared = prepareChatRequest("chatgpt", {
           messages: body.messages,
           model: body.model || "chatgpt-web-auto",
@@ -98,13 +113,26 @@ export async function handleChat(request: Request): Promise<Response> {
           );
         }
         const model = prepared.model;
+        const frozen = await ingestReferenceImages(prepared.images, new URL(request.url).origin);
+        if (!frozen.ok) {
+          return Response.json(
+            { error: { message: frozen.error, type: "invalid_request_error" } },
+            { status: 400, headers: cors() },
+          );
+        }
+        const imageMap = new Map(prepared.images.map((url, index) => [url, frozen.assets[index]?.url || url]));
+        const frozenImages = frozen.assets.map((asset) => asset.url);
+        const frozenTurns = prepared.turns.map((turn) => ({
+          ...turn,
+          images: turn.images?.map((url) => imageMap.get(url) || url),
+        }));
         const started = Date.now();
         const idem = request.headers.get("idempotency-key") || undefined;
         const requestId = request.headers.get("x-request-id") || uid();
         if (body.stream) {
-          return streamChat(prompt, model, prepared.images, auth.record, idem, requestId, request.signal, prepared.turns, prepared.selectorPackVersion);
+          return streamChat(prompt, model, frozenImages, auth.record, idem, requestId, request.signal, frozenTurns, prepared.selectorPackVersion, frozen.assets);
         }
-        const result = await runChat(prompt, model, prepared.images, idem, requestId, auth.record.id, prepared.turns, prepared.selectorPackVersion);
+        const result = await runChat(prompt, model, frozenImages, idem, requestId, auth.record.id, frozenTurns, prepared.selectorPackVersion, frozen.assets);
         await logUsage(auth.record, model, parsed, prompt, started, result);
         if (!result.ok) {
           return Response.json({ error: { message: result.error } }, { status: result.status, headers: cors() });
@@ -162,6 +190,7 @@ export async function runChat(
   keyId?: string,
   turns?: ChatTurn[],
   selectorPackVersion?: string,
+  referenceAssets?: ReferenceAsset[],
 ): Promise<ChatOk | ChatFail> {
   const plane = await readControlPlane();
   const maxRetry = plane.settings.maxRetry || 3;
@@ -234,6 +263,7 @@ export async function runChat(
       excludeAccountIds: exclude,
       turns,
       selectorPackVersion,
+      referenceAssets,
     });
     if (!queued.ok) {
       last = { ok: false, status: queued.error.includes("QUEUE_FULL") ? 429 : 503, error: queued.error };
@@ -289,6 +319,7 @@ export function streamChat(
   abortSignal?: AbortSignal,
   turns?: ChatTurn[],
   selectorPackVersion?: string,
+  referenceAssets?: ReferenceAsset[],
 ) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -427,6 +458,7 @@ export function streamChat(
           requestId,
           turns,
           selectorPackVersion,
+          referenceAssets,
         });
         if (!queued.ok) {
           await send({ error: { message: queued.error }, relay: { phase: "error" } });

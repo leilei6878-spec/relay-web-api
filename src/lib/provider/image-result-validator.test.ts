@@ -137,3 +137,31 @@ test("low confidence is not a 200", () => {
   assert.equal(low.ok, false);
   if (!low.ok) assert.match(low.error, /IMAGE_CONFIDENCE_TOO_LOW/);
 });
+
+test("same bytes at a new URL are rejected by historical hash", () => {
+  const img = syntheticPng(1024, 1024);
+  const spec = resolveImageSpec({ model: "gemini-image", size: "1:1" });
+  const sha = sha256Hex(img);
+  const hit = validateOneImage(
+    { buf: img, src: "https://cdn.test/cache-busted.png", confidence: "HIGH" },
+    { spec: spec.ok ? spec.spec : undefined, historicalHashes: [sha], requireConfidence: true },
+  );
+  assert.equal(hit.ok, false);
+  if (!hit.ok) assert.match(hit.error, /historical asset/);
+});
+
+test("production validation rejects missing confidence", () => {
+  const img = syntheticPng(1024, 1024);
+  const spec = resolveImageSpec({ model: "gemini-image", size: "1:1" });
+  const missing = validateOneImage(
+    { buf: img },
+    { spec: spec.ok ? spec.spec : undefined, requireConfidence: true },
+  );
+  assert.equal(missing.ok, false);
+  if (!missing.ok) assert.match(missing.error, /IMAGE_CONFIDENCE_TOO_LOW: MISSING/);
+  const high = validateOneImage(
+    { buf: img, confidence: "HIGH" },
+    { spec: spec.ok ? spec.spec : undefined, requireConfidence: true },
+  );
+  assert.equal(high.ok, true);
+});

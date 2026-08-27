@@ -37,6 +37,7 @@ export type Account = {
   lastPageState?: string | null;
   generationConcurrency?: number;
   queueDepthHint?: number | null;
+  recentResultHashes?: string[];
 };
 
 export type Proxy = {

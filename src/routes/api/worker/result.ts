@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertWorker } from "@/lib/authz";
 import { finishJob, type JobTiming } from "@/lib/job-queue";
+import type { ResultConfidence } from "@/lib/provider/generation-boundary";
+import type { ImageAssetRecord } from "@/lib/image-asset";
 
 export const Route = createFileRoute("/api/worker/result")({
   server: {
@@ -37,6 +39,8 @@ export const Route = createFileRoute("/api/worker/result")({
           recoveryLevel?: number;
           retrySafety?: "SAFE" | "UNKNOWN" | "UNSAFE";
           submissionState?: string;
+          resultConfidences?: ResultConfidence[];
+          resultAssets?: ImageAssetRecord[];
         };
         if (!body.id) return Response.json({ error: "缺少任务 id" }, { status: 400 });
         return Response.json(
@@ -67,6 +71,8 @@ export const Route = createFileRoute("/api/worker/result")({
             recoveryLevel: body.recoveryLevel,
             retrySafety: body.retrySafety,
             submissionState: body.submissionState,
+            resultConfidences: body.resultConfidences,
+            resultAssets: body.resultAssets,
           }),
         );
       },

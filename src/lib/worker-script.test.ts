@@ -571,6 +571,8 @@ test("gemini and leonardo reuse warm idle pages", () => {
   const leoStart = s.indexOf("def run_leonardo");
   assert.ok(s.indexOf("ensure_leonardo_ready(page", leoStart) > 0);
   assert.ok(s.indexOf("cleanup_leonardo(page)", leoStart) > 0);
+  assert.match(s, /return st == "WARM_IDLE", st/);
+  assert.match(s, /page not WARM_IDLE after cleanup/);
 });
 
 test("chatgpt completion detector does not finish on 350ms pause", () => {
@@ -726,5 +728,24 @@ test("chat vision requires every requested image to attach before submit", () =>
   const fn = s.slice(start, end);
   assert.match(fn, /miss = attachment_incomplete\(len\(images\), attached\)/);
   assert.match(fn, /requestedReferenceCount/);
+});
+
+test("Leonardo network images require a HIGH or VERIFIED DOM candidate", () => {
+  const s = localWorkerScript();
+  const start = s.indexOf("captures_by_url = {}");
+  const end = s.indexOf("if not best:", start);
+  const fn = s.slice(start, end);
+  assert.match(fn, /captures_by_url\[url\] =/);
+  assert.doesNotMatch(fn, /captures\.append\(\(len\(raw\).*ct\.split/);
+  assert.match(fn, /located = pick_accepted_candidates/);
+  assert.match(fn, /cand\.get\("confidence"\) or ""/);
+  assert.match(s, /"resultConfidences": \[row\[6\] for row in best\]/);
+});
+
+test("worker parses WebP dimensions", () => {
+  const s = localWorkerScript();
+  assert.match(s, /raw\[:4\] == b"RIFF" and raw\[8:12\] == b"WEBP"/);
+  assert.match(s, /chunk == b"VP8X"/);
+  assert.match(s, /chunk == b"VP8L"/);
 });
 

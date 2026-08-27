@@ -4,7 +4,8 @@ Reference images must be **counted and hashed**, not guessed from “at least on
 
 ```
 request images
-→ sha256 + mime + width + height + byte_size
+→ freeze exact bytes in MediaStore
+→ asset_id + stable URL + sha256 + mime + width + height + byte_size
 → attach
 → attached_count == requested_count
 → Generate
@@ -17,11 +18,15 @@ request images
 - If the page loaded fewer cards than requested: `REFERENCE_ATTACH_INCOMPLETE`. Generate is not clicked.
 - If a candidate result’s sha256 equals any reference: `RESULT_IS_REFERENCE_IMAGE`. Not a 200.
 - Byte-length equality is a leftover filter only. Isolation is sha256.
+- Invalid or over-limit references are HTTP 400; they are never silently dropped.
+- Remote references are fetched once from their original URL. Worker attachment
+  reads the frozen asset, so the hash and attached bytes cannot drift.
 
 ## Worker
 
 `describe_references` / `bind_reference_hashes` run before Generate.
 
+ChatGPT: `count_chat_refs` after attach.
 Gemini: `count_gemini_refs` after attach.
 Leonardo: `count_leonardo_refs` after attach.
 

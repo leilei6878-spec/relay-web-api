@@ -134,6 +134,8 @@ export async function enqueuePg(
     createdAt: new Date().toISOString(),
     timeoutMs,
     images: images.slice(0, platform === "leonardo" ? 6 : 4),
+    referenceAssets: opts.referenceAssets?.slice(0, platform === "leonardo" ? 6 : 4),
+    historicalHashes: account.recentResultHashes?.slice(-64) || [],
     attempts: 0,
     requestId: opts.requestId || uid(),
     traceId: opts.traceId || uid(),
@@ -312,6 +314,8 @@ export async function finishJobPg(
     queueDepth?: number;
     retrySafety?: "SAFE" | "UNSAFE" | "UNKNOWN";
     submissionState?: string;
+    resultConfidences?: import("./provider/generation-boundary").ResultConfidence[];
+    resultAssets?: import("./image-asset").ImageAssetRecord[];
   },
 ) {
   const current = asJob(await dbGetJob(id));
@@ -394,9 +398,11 @@ export async function finishJobPg(
     const { validateJobImageUrls } = await import("./provider/image-result-validator");
     const { describeDataUrl } = await import("./provider/reference-verify");
     const pending = urls.length ? urls : url ? [url] : [];
-    const refHashes = (current.images || [])
-      .map((u) => describeDataUrl(u)?.sha256)
-      .filter((x): x is string => Boolean(x));
+    const refHashes = current.referenceAssets?.length
+      ? current.referenceAssets.map((asset) => asset.sha256)
+      : (current.images || [])
+          .map((u) => describeDataUrl(u)?.sha256)
+          .filter((x): x is string => Boolean(x));
     const report = await validateJobImageUrls(pending, {
       n: current.n || 1,
       model: current.model,
@@ -404,16 +410,48 @@ export async function finishJobPg(
       aspect: current.aspect,
       tier: current.tier,
       referenceHashes: refHashes,
+      historicalHashes: current.historicalHashes || [],
+      confidences: result.resultConfidences,
+      requireConfidence: true,
     });
     if (!report.ok) {
       result = { ...result, ok: false, error: report.error };
     } else if (report.results[0]) {
+      const metadataMismatch = report.results.some((item, index) => {
+        const supplied = result.resultAssets?.[index];
+        return Boolean(
+          supplied &&
+            (supplied.sha256 !== item.sha256 ||
+              supplied.mime !== item.mime ||
+              supplied.bytes !== item.bytes ||
+              supplied.width !== item.width ||
+              supplied.height !== item.height ||
+              supplied.confidence !== item.confidence),
+        );
+      });
+      if (metadataMismatch) {
+        result = { ...result, ok: false, error: "IMAGE_NOT_FOUND: worker asset metadata mismatch" };
+      }
       current.requestedSize = report.results[0].requestedSize;
       current.actualWidth = report.results[0].width;
       current.actualHeight = report.results[0].height;
       current.actualAspect = report.results[0].actualAspect;
       current.requestedTier = report.results[0].requestedTier;
       current.actualTier = report.results[0].actualTier;
+      current.resultHashes = report.results.map((item) => item.sha256);
+      current.resultConfidences = report.results.map((item) => item.confidence);
+      current.resultAssets = report.results.map((item, index) => ({
+        assetId:
+          result.resultAssets?.[index]?.assetId ||
+          (urls[index]?.match(/\/api\/media\/([^/?#]+)/)?.[1] ?? ""),
+        url: urls[index] || "",
+        sha256: item.sha256,
+        mime: item.mime,
+        bytes: item.bytes,
+        width: item.width,
+        height: item.height,
+        confidence: item.confidence,
+      }));
     }
   }
   if (urls.length && result.ok && (current.platform === "gemini" || current.platform === "leonardo")) {
@@ -524,6 +562,10 @@ export async function finishJobPg(
           lastError: null,
           lockedUntil: null,
           status: "healthy",
+          recentResultHashes: [
+            ...(acc.recentResultHashes || []),
+            ...(current.resultHashes || []),
+          ].slice(-64),
         });
         markResilience("success");
       } else if (decision.provider_circuit_effect === "trip") {

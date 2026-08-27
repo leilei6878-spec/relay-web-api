@@ -51,6 +51,7 @@ class JobRuntimeContext:
         self.submitted_at = 0
         self.click_attempted = False
         self.reference_hashes = []
+        self.historical_hashes = list(body.get("historicalHashes") or [])
         self.requested_reference_count = 0
 
     def as_meta(self):
@@ -399,6 +400,8 @@ def post_result(ctx, result):
         "actualProfile": result.get("actualProfile"),
         "profileVerified": result.get("profileVerified"),
         "recoveryLevel": result.get("recoveryLevel"),
+        "resultConfidences": result.get("resultConfidences"),
+        "resultAssets": result.get("resultAssets"),
         "traceId": ctx.trace_id,
         "accountId": ctx.account_id,
         "proxyId": ctx.proxy_id,
@@ -481,7 +484,9 @@ def materialize_result_assets(ctx, result):
     t0 = time.time()
     out = []
     ids = []
-    for u in urls:
+    assets = []
+    confidences = result.get("resultConfidences") if isinstance(result.get("resultConfidences"), list) else []
+    for index, u in enumerate(urls):
         if isinstance(u, str) and u.startswith("data:image"):
             raw, mime = data_url_parts(u)
             if not raw or not image_magic_ok(raw):
@@ -500,11 +505,22 @@ def materialize_result_assets(ctx, result):
             out.append(up.get("url"))
             if up.get("assetId"):
                 ids.append(up.get("assetId"))
+            assets.append({
+                "assetId": up.get("assetId") or "",
+                "url": up.get("url") or "",
+                "sha256": up.get("sha256") or "",
+                "mime": up.get("mime") or (mime or "image/png"),
+                "bytes": int(up.get("bytes") or len(raw)),
+                "width": int(up.get("width") or 0),
+                "height": int(up.get("height") or 0),
+                "confidence": confidences[index] if index < len(confidences) else "",
+            })
         elif isinstance(u, str) and u:
             out.append(u)
     result["urls"] = out
     result["url"] = out[0] if out else ""
     result["assetIds"] = ids
+    result["resultAssets"] = assets
     result["workerMediaUploadMs"] = int((time.time() - t0) * 1000)
     return result
 
@@ -1029,6 +1045,15 @@ def classify_image_runtime(page, provider):
             composer = False
         if not composer:
             return "INVALID"
+        try:
+            prompt_text = page.evaluate("""() => {
+              const el = document.querySelector('div.ql-editor, rich-textarea, div[contenteditable="true"]');
+              return ((el && (el.innerText || el.value || el.textContent)) || '').trim();
+            }""") or ""
+        except Exception:
+            prompt_text = ""
+        if prompt_text:
+            return "DIRTY"
         if count_gemini_refs(page) > 0:
             return "DIRTY"
         return "WARM_IDLE"
@@ -1042,6 +1067,15 @@ def classify_image_runtime(page, provider):
             pass
         if not on_gen:
             return "INVALID"
+        try:
+            prompt_text = page.evaluate("""() => {
+              const el = document.querySelector('#home-prompt-textarea, textarea[placeholder*="prompt" i], textarea, div[contenteditable="true"]');
+              return ((el && (el.value || el.innerText || el.textContent)) || '').trim();
+            }""") or ""
+        except Exception:
+            prompt_text = ""
+        if prompt_text:
+            return "DIRTY"
         if count_leonardo_refs(page) > 0:
             return "DIRTY"
         return "WARM_IDLE"
@@ -1070,7 +1104,7 @@ def cleanup_gemini(page):
     except Exception:
         pass
     warm_bump("reset_ms", int((time.time() - t0) * 1000))
-    return count_gemini_refs(page) == 0
+    return classify_image_runtime(page, "gemini") == "WARM_IDLE"
 
 def cleanup_leonardo(page):
     t0 = time.time()
@@ -1094,7 +1128,7 @@ def cleanup_leonardo(page):
     except Exception:
         pass
     warm_bump("reset_ms", int((time.time() - t0) * 1000))
-    return count_leonardo_refs(page) == 0
+    return classify_image_runtime(page, "leonardo") == "WARM_IDLE"
 
 def ensure_gemini_ready(page):
     st = classify_image_runtime(page, "gemini")
@@ -1116,7 +1150,7 @@ def ensure_gemini_ready(page):
     if st == "DIRTY":
         cleanup_gemini(page)
         st = classify_image_runtime(page, "gemini")
-    return st in ("WARM_IDLE", "DIRTY"), st
+    return st == "WARM_IDLE", st
 
 def ensure_leonardo_ready(page, navigate):
     st = classify_image_runtime(page, "leonardo")
@@ -1137,7 +1171,7 @@ def ensure_leonardo_ready(page, navigate):
     if st == "DIRTY":
         cleanup_leonardo(page)
         st = classify_image_runtime(page, "leonardo")
-    return st in ("WARM_IDLE", "DIRTY"), st
+    return st == "WARM_IDLE", st
 
 # Ignore ChatGPT placeholders such as "Analyzing image" so vision waits for the real answer.
 PLACEHOLDER_TEXT = re.compile(
@@ -1891,7 +1925,7 @@ def create_generation_boundary(page, ctx=None, provider=""):
         "baseline_result_container_ids": snap.get("ids") or [],
         "baseline_generation_ids": snap.get("gens") or [],
         "baseline_asset_urls": snap.get("srcs") or [],
-        "baseline_asset_hashes": [],
+        "baseline_asset_hashes": list(getattr(ctx, "historical_hashes", []) or []) if ctx else [],
         "reference_hashes": refs,
     }
 
@@ -1965,6 +1999,8 @@ def collect_result_candidates(page, boundary, provider=""):
                 pass
         if ref_hashes and row.get("sha256") in ref_hashes:
             row["referenceDuplicate"] = True
+        if row.get("sha256") and row.get("sha256") in set((boundary or {}).get("baseline_asset_hashes") or []):
+            row["historicalDuplicate"] = True
         cands.append(row)
     return cands
 
@@ -3053,6 +3089,8 @@ def run_image(body, ctx=None):
     def run_image_on(page, context):
         ready, warm_state = ensure_gemini_ready(page)
         pst = detect_page_state(page, "gemini")
+        if not ready:
+            return fail_job(ctx, "PROVIDER_DOM_CHANGED: Gemini page not WARM_IDLE after cleanup", "provider", {"pageState": pst, "runtimeState": warm_state})
         if warm_state == "INVALID" or pst in ("LOGIN_REQUIRED", "CHALLENGE", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
             err, fault = page_state_error(pst if pst in ("LOGIN_REQUIRED", "CHALLENGE", "RATE_LIMITED", "ACCOUNT_RESTRICTED") else "LOGIN_REQUIRED", False)
             return {"ok": False, "error": err, "fault": fault, "pageState": pst, "runtimeState": warm_state}
@@ -3089,6 +3127,7 @@ def run_image(body, ctx=None):
             return fail_job(ctx, "WORKER_TIMEOUT: submission checkpoint unavailable", "worker")
         click_send(page, send_btn)
         set_submission_state(ctx, "SUBMITTED")
+        set_submission_state(ctx, "GENERATING")
         deadline = time.time() + int(body.get("timeoutMs") or 90000) / 1000
         url = ""
         conf = ""
@@ -3098,6 +3137,7 @@ def run_image(body, ctx=None):
                 url = picked[0].get("src") or ""
                 conf = picked[0].get("confidence") or ""
                 if url:
+                    set_submission_state(ctx, "RESULT_DETECTED")
                     break
             time.sleep(0.6)
         if not url:
@@ -3114,6 +3154,8 @@ def run_image(body, ctx=None):
                     return {"ok": False, "error": "IMAGE_NOT_FOUND: image too small", "fault": "provider"}
                 if result_is_reference(raw, ref_hashes):
                     return fail_job(ctx, "RESULT_IS_REFERENCE_IMAGE", "provider", {"pageState": detect_page_state(page, "gemini")})
+                if sha256_hex(raw) in set(ctx.historical_hashes or []):
+                    return fail_job(ctx, "IMAGE_NOT_FOUND: historical asset returned", "provider", {"pageState": detect_page_state(page, "gemini")})
                 url = "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode())
             except Exception:
                 return {"ok": False, "error": "IMAGE_NOT_FOUND: download failed", "fault": "provider"}
@@ -3124,6 +3166,8 @@ def run_image(body, ctx=None):
                 raw = base64.b64decode(url.split(",", 1)[1])
                 if result_is_reference(raw, ref_hashes):
                     return fail_job(ctx, "RESULT_IS_REFERENCE_IMAGE", "provider", {"pageState": detect_page_state(page, "gemini")})
+                if sha256_hex(raw) in set(ctx.historical_hashes or []):
+                    return fail_job(ctx, "IMAGE_NOT_FOUND: historical asset returned", "provider", {"pageState": detect_page_state(page, "gemini")})
             except Exception:
                 pass
         try:
@@ -3131,6 +3175,7 @@ def run_image(body, ctx=None):
         except Exception:
             state_out = None
         cleanup_gemini(page)
+        set_submission_state(ctx, "RESULT_VALIDATED")
         return {
             "ok": True,
             "url": url,
@@ -3140,6 +3185,7 @@ def run_image(body, ctx=None):
             "selectorPackVersion": pack_version,
             "pageState": "WARM_IDLE",
             "resultConfidence": conf or "HIGH",
+            "resultConfidences": [conf or "HIGH"],
             "runtimeState": "WARM_IDLE",
             "warmStats": dict(WARM_STATS),
         }
@@ -3525,6 +3571,15 @@ def image_wh(raw):
                 if ln < 2:
                     break
                 i += 2 + ln
+        if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+            chunk = raw[12:16]
+            if chunk == b"VP8X" and len(raw) >= 30:
+                return 1 + int.from_bytes(raw[24:27], "little"), 1 + int.from_bytes(raw[27:30], "little")
+            if chunk == b"VP8 " and len(raw) >= 30 and raw[23:26] == b"\\x9d\\x01\\x2a":
+                return int.from_bytes(raw[26:28], "little") & 0x3fff, int.from_bytes(raw[28:30], "little") & 0x3fff
+            if chunk == b"VP8L" and len(raw) >= 25 and raw[20] == 0x2f:
+                bits = int.from_bytes(raw[21:25], "little")
+                return (bits & 0x3fff) + 1, ((bits >> 14) & 0x3fff) + 1
     except Exception:
         return 0, 0
     return 0, 0
@@ -3765,8 +3820,10 @@ def run_leonardo(body, ctx=None):
             page.set_default_timeout(4000)
         except Exception:
             pass
-        ensure_leonardo_ready(page, lambda: goto_ai_creation(page))
+        ready, warm_state = ensure_leonardo_ready(page, lambda: goto_ai_creation(page))
         pst = detect_page_state(page, "leonardo")
+        if not ready:
+            return fail_job(ctx, "LEONARDO_DOM_CHANGED: page not WARM_IDLE after cleanup", "provider", {"pageState": pst, "runtimeState": warm_state, "backendMode": "web_account"})
         if pst in ("LOGIN_REQUIRED", "CHALLENGE", "TOKEN_EXHAUSTED", "QUEUE_FULL", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
             err, fault = page_state_error(pst, False, "leonardo")
             return {"ok": False, "error": err, "fault": fault, "pageState": pst, "backendMode": "web_account", "selectorPackVersion": pack_version}
@@ -3914,6 +3971,8 @@ def run_leonardo(body, ctx=None):
         boundary = create_generation_boundary(page, ctx, "leonardo")
         baseline = boundary.get("baseline_asset_urls") or snapshot_image_srcs(page)
         captures = []
+        captures_by_url = {}
+        captured_srcs = set()
         def on_resp(resp):
             try:
                 ct = (resp.headers.get("content-type") or "").lower()
@@ -3928,7 +3987,7 @@ def run_leonardo(body, ctx=None):
                 if result_is_reference(raw, ref_hashes):
                     return
                 w, h = image_wh(raw)
-                captures.append((len(raw), w, h, url, raw, ct.split(";")[0]))
+                captures_by_url[url] = (len(raw), w, h, url, raw, ct.split(";")[0])
             except Exception:
                 pass
         try:
@@ -3977,7 +4036,7 @@ def run_leonardo(body, ctx=None):
             low = html2.lower()
             if "out of tokens" in low or "insufficient tokens" in low:
                 return {"ok": False, "error": "LEONARDO_TOKEN_EXHAUSTED", "fault": "account", "pageState": "TOKEN_EXHAUSTED", "backendMode": "web_account", "tokenState": "TOKEN_EXHAUSTED", "availableModels": available}
-            if any(h in low for h in progress_hint) or captures:
+            if any(h in low for h in progress_hint):
                 saw_progress = True
             try:
                 busy = page.evaluate("""() => {
@@ -3987,6 +4046,7 @@ def run_leonardo(body, ctx=None):
                 }""")
                 if busy:
                     saw_progress = True
+                    set_submission_state(ctx, "GENERATING")
             except Exception:
                 pass
             located = pick_accepted_candidates(leonardo_result_locator(page, boundary), max(1, want_n))
@@ -3994,18 +4054,30 @@ def run_leonardo(body, ctx=None):
                 src = cand.get("src") or ""
                 if not src or src in baseline:
                     continue
+                if src in captured_srcs:
+                    continue
                 saw_progress = True
-                data_url, _derr = download_result_image(context, src)
-                if not data_url:
-                    continue
-                try:
-                    raw = base64.b64decode(data_url.split(",", 1)[-1])
-                except Exception:
-                    continue
+                cached = captures_by_url.get(src)
+                if cached:
+                    _n, w, h, _src, raw, mime = cached
+                else:
+                    data_url, _derr = download_result_image(context, src)
+                    if not data_url:
+                        continue
+                    try:
+                        header, encoded = data_url.split(",", 1)
+                        raw = base64.b64decode(encoded)
+                        mime = header[5:].split(";")[0] if header.startswith("data:") else "image/jpeg"
+                    except Exception:
+                        continue
+                    w, h = image_wh(raw)
                 if result_is_reference(raw, ref_hashes):
                     continue
-                w, h = image_wh(raw)
-                captures.append((len(raw), w, h, src, raw, "image/jpeg", cand.get("confidence") or "HIGH"))
+                if sha256_hex(raw) in set(ctx.historical_hashes or []):
+                    continue
+                captures.append((len(raw), w, h, src, raw, mime, cand.get("confidence") or ""))
+                captured_srcs.add(src)
+                set_submission_state(ctx, "RESULT_DETECTED")
             if images and not saw_progress and time.time() > fail_at:
                 set_submission_state(ctx, "SUBMISSION_UNCERTAIN")
                 return fail_job(ctx, "SUBMISSION_UNCERTAIN: generate did not start (img2img)", "provider", {"pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked})
@@ -4053,6 +4125,8 @@ def run_leonardo(body, ctx=None):
         for row in best:
             if result_is_reference(row[4], ref_hashes):
                 return fail_job(ctx, "RESULT_IS_REFERENCE_IMAGE", "provider", {"pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked})
+            if sha256_hex(row[4]) in set(ctx.historical_hashes or []):
+                return fail_job(ctx, "IMAGE_NOT_FOUND: historical asset returned", "provider", {"pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked})
         data_urls = []
         for row in best:
             du = raw_to_data_url(row[4], row[5])
@@ -4066,10 +4140,12 @@ def run_leonardo(body, ctx=None):
         except Exception:
             state_out = None
         refs_left = 0 if cleanup_leonardo(page) else count_leonardo_refs(page)
+        set_submission_state(ctx, "RESULT_VALIDATED")
         return {
             "ok": True,
             "url": data_urls[0],
             "urls": data_urls,
+            "resultConfidences": [row[6] for row in best],
             "width": best[0][1],
             "height": best[0][2],
             "modelActual": picked or model,
@@ -4206,6 +4282,7 @@ def poll_gateway():
                 "attemptId": (data.get("lease") or {}).get("attemptId") or job.get("attemptId"),
                 "requestId": job.get("requestId") or data.get("requestId") or job.get("id"),
                 "traceId": job.get("traceId") or data.get("traceId") or job.get("id"),
+                "historicalHashes": job.get("historicalHashes") or [],
             }
             if job.get("platform") == "gemini":
                 payload["platform"] = "gemini"
