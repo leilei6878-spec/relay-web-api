@@ -191,6 +191,7 @@ test("selector pack is recon-based and versioned", () => {
   assert.ok(pack.send.some((s) => s.includes("Generate")));
   assert.ok(pack.modelSwitcher?.some((s) => s.includes("Model:")));
   assert.ok(leonardoAdapter.selectorPack().fileInput?.includes('button[aria-label="Add image reference"]'));
+  assert.ok(leonardoAdapter.selectorPack().fileInput?.includes('button[aria-label="Add reference to generation"]'));
 });
 
 test("historical / ui images are not treated as results", () => {

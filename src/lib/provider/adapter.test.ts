@@ -183,18 +183,24 @@ test("selector packs are versioned and bounded", () => {
   assert.ok(input.length >= 2);
 });
 
-test("model verify accepts UI labels and fails unconfirmed", () => {
+test("model verify requires version evidence, not product labels", () => {
   const ok = chatgptAdapter.verifyModel("gpt-5.6", "GPT-5.6");
   assert.equal(ok.ok, true);
   const def = chatgptAdapter.verifyModel("gpt-5.6", "ChatGPT");
-  assert.equal(def.ok, true);
+  assert.equal(def.ok, false);
+  if (!def.ok) assert.equal(def.code, "MODEL_SELECTION_UNCONFIRMED");
   const v52 = chatgptAdapter.verifyModel("gpt-5.6", "ChatGPT 5.2 Instant");
-  assert.equal(v52.ok, true);
+  assert.equal(v52.ok, false);
+  if (!v52.ok) assert.equal(v52.confirmed, false);
   const miss = chatgptAdapter.verifyModel("gpt-5.6", "GPT-4o");
   assert.equal(miss.ok, false);
+  if (!miss.ok) assert.equal(miss.code, "MODEL_MISMATCH");
   const unconfirmed = chatgptAdapter.verifyModel("gpt-5.6", "");
   assert.equal(unconfirmed.ok, false);
   if (!unconfirmed.ok) assert.equal(unconfirmed.code, "MODEL_SELECTION_UNCONFIRMED");
+  const alias = chatgptAdapter.verifyModel("chatgpt-web-auto", "ChatGPT");
+  assert.equal(alias.ok, false);
+  if (!alias.ok) assert.equal(alias.confirmed, false);
 });
 
 test("fingerprint change on missing composer is critical", () => {

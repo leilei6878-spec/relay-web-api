@@ -27,7 +27,7 @@ export const SELECTOR_PACKS: Record<string, VersionedSelectorPack> = {
     assistant: [],
     streamingStop: [],
     modelSwitcher: ['button[aria-label^="Model:"]', '[data-slot="dropdown-menu-trigger"][aria-label^="Model"]'],
-    fileInput: ['input[type=file]', 'button[aria-label="Add reference to generation"]', 'button[aria-label*="Image Guidance" i]'],
+    fileInput: ['input[type=file]', 'button[aria-label="Add image reference"]', 'button[aria-label="Add reference to generation"]'],
     imageResult: ["img[src*='leonardo']", "img[src*='cdn']", "img[src^='https://']"],
   },
   "gemini-v1": {

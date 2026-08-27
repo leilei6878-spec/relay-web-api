@@ -98,8 +98,8 @@ export type NormalizedProviderError = {
 };
 
 export type ModelVerdict =
-  | { ok: true; requested: string; actual: string; confirmed: true }
-  | { ok: false; requested: string; actual: string; confirmed: false; code: "MODEL_MISMATCH" | "MODEL_SELECTION_UNCONFIRMED" };
+  | { ok: true; requested: string; actual: string; confirmed: true; profile?: string; profileVerified?: boolean }
+  | { ok: false; requested: string; actual: string; confirmed: false; code: "MODEL_MISMATCH" | "MODEL_SELECTION_UNCONFIRMED"; profile?: string; profileVerified?: boolean };
 
 export type ExtractedResult =
   | { ok: true; text?: string; url?: string; actualModel?: string }

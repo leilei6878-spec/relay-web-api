@@ -15,13 +15,24 @@ import type {
   StorageState,
 } from "./types";
 
-const LABELS: Record<string, string[]> = {
-  "gpt-5.6": ["gpt-5.6", "5.6", "5.2", "5.4", "5.5", "chatgpt", "instant", "auto", "gpt-5"],
-  latest: ["gpt-5.6", "gpt-5", "5.6", "5.2", "chatgpt", "instant", "auto"],
-  "gpt-5": ["gpt-5 auto", "auto", "gpt-5", "chatgpt", "instant"],
-  "gpt-5-thinking": ["gpt-5 thinking", "thinking"],
-  "gpt-4o": ["gpt-4o", "4o"],
+const VERSION_TOKEN: Record<string, RegExp> = {
+  "gpt-5.6": /gpt-5\.6|\b5\.6\b/,
+  latest: /gpt-5\.6|\b5\.6\b/,
+  "gpt-5": /gpt-5(?!\.\d)|gpt-5 auto/,
+  "gpt-5-thinking": /thinking|\bsol\b/,
+  "gpt-4o": /gpt-4o|\b4o\b/,
 };
+
+const PRODUCT_ONLY = /^(chatgpt|auto|instant|fast|chatgpt\s*auto|chatgpt\s*instant)$/i;
+const WEB_ALIAS = new Set(["chatgpt-web-auto", "chatgpt-web-fast", "chatgpt-web"]);
+
+function profileOf(actual: string) {
+  const g = actual.toLowerCase();
+  if (g.includes("thinking")) return "thinking";
+  if (g.includes("instant") || g.includes("fast")) return "fast";
+  if (g.includes("auto")) return "auto";
+  return "";
+}
 
 export const chatgptAdapter: ProviderAdapter = {
   id: "chatgpt",
@@ -33,7 +44,7 @@ export const chatgptAdapter: ProviderAdapter = {
       imageEdit: false,
       streaming: true,
       multiTurn: true,
-      models: ["gpt-5.6", "gpt-5", "gpt-5-thinking", "gpt-4o"],
+      models: ["gpt-5.6", "gpt-5", "gpt-5-thinking", "gpt-4o", "chatgpt-web-auto", "chatgpt-web-fast"],
       maxOutputs: 1,
     };
   },
@@ -62,15 +73,43 @@ export const chatgptAdapter: ProviderAdapter = {
     } satisfies NormalizedProviderError;
   },
   verifyModel(requested, actual) {
-    const labels = LABELS[requested] || [requested];
-    const got = (actual || "").toLowerCase();
+    const req = (requested || "").trim();
+    const gotRaw = actual || "";
+    const got = gotRaw.toLowerCase();
+    const profile = profileOf(gotRaw);
+    if (WEB_ALIAS.has(req.toLowerCase())) {
+      return {
+        ok: false,
+        requested: req,
+        actual: gotRaw || "ChatGPT",
+        confirmed: false,
+        code: "MODEL_SELECTION_UNCONFIRMED",
+        profile,
+        profileVerified: Boolean(profile),
+      };
+    }
     if (!got) {
-      return { ok: false, requested, actual: "", confirmed: false, code: "MODEL_SELECTION_UNCONFIRMED" };
+      return { ok: false, requested: req, actual: "", confirmed: false, code: "MODEL_SELECTION_UNCONFIRMED", profile, profileVerified: false };
     }
-    if (labels.some((l) => got.includes(l.toLowerCase()))) {
-      return { ok: true, requested, actual: actual || requested, confirmed: true };
+    if (PRODUCT_ONLY.test(got.trim()) || ( /^(chatgpt)(\s+\d+(\.\d+)?)?(\s+(instant|auto|fast))?$/i.test(got.trim()) && !VERSION_TOKEN["gpt-5.6"].test(got) && req.toLowerCase().includes("5.6") )) {
+      if (req.toLowerCase() === "gpt-4o" && !/4o/.test(got)) {
+        return { ok: false, requested: req, actual: gotRaw, confirmed: false, code: "MODEL_MISMATCH", profile, profileVerified: Boolean(profile) };
+      }
+      if (req.toLowerCase() === "gpt-5.6" || req.toLowerCase() === "latest") {
+        return { ok: false, requested: req, actual: gotRaw, confirmed: false, code: "MODEL_SELECTION_UNCONFIRMED", profile, profileVerified: Boolean(profile) };
+      }
     }
-    return { ok: false, requested, actual: actual || "", confirmed: false, code: "MODEL_MISMATCH" };
+    const token = VERSION_TOKEN[req] || new RegExp(req.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    if (token.test(got)) {
+      return { ok: true, requested: req, actual: gotRaw, confirmed: true, profile, profileVerified: Boolean(profile) };
+    }
+    if (req.toLowerCase() === "gpt-5.6" || req.toLowerCase() === "latest") {
+      if (/gpt-4o|\b4o\b/.test(got)) {
+        return { ok: false, requested: req, actual: gotRaw, confirmed: false, code: "MODEL_MISMATCH", profile, profileVerified: Boolean(profile) };
+      }
+      return { ok: false, requested: req, actual: gotRaw, confirmed: false, code: "MODEL_SELECTION_UNCONFIRMED", profile, profileVerified: Boolean(profile) };
+    }
+    return { ok: false, requested: req, actual: gotRaw, confirmed: false, code: "MODEL_MISMATCH", profile, profileVerified: Boolean(profile) };
   },
   extractResult(raw) {
     if (!raw.ok) return { ok: false, error: raw.error || "PROVIDER_ERROR" };
