@@ -1,11 +1,14 @@
 # Security Release Review
 
-Date: 2026-08-26. HEAD after delivery commits on `main`.
+Date: 2026-08-28. Codex acceptance-candidate `main`.
 
 ## Dependency audit
 
-Run on the release host: `npm audit --omit=dev`. Not executed as a gate in this workspace.
-CI does not fail the build on npm audit yet (noise vs supply-chain). Track as PARTIAL.
+`npm audit --omit=dev --registry=https://registry.npmjs.org`: **0
+vulnerabilities**. The first audit found two high-severity denial-of-service
+advisories in direct dependency `image-size@2.0.2` (no fixed release existed).
+The dependency was removed and replaced by bounded PNG/JPEG/WebP-only dimension
+parsers; ICNS/JXL-like bytes have a rejection regression test.
 
 ## Secret scan (HEAD)
 
@@ -13,7 +16,7 @@ CI does not fail the build on npm audit yet (noise vs supply-chain). Track as PA
 
 - live `ss://…@x.x.x.x` share links
 - `ghp_` / `github_pat_`
-- RSA private keys
+- RSA/OpenSSH private keys
 
 HEAD: **PASS** (share-link removed in `2c75aaf`).
 
@@ -51,4 +54,6 @@ also sets `RELAY_REQUIRE_ADMIN_LOGIN=1`.
 
 ## Log redaction
 
-PARTIAL. Proxy passwords are `***` in public objects. Install a request logger that redacts `Authorization` before production traffic.
+Application code does not log complete request headers or bearer/cookie values;
+proxy passwords are `***` in public objects. Reverse-proxy/access-log policy is
+host configuration and remains a deployment-host verification item.

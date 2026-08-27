@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { imageSize } from "image-size";
 import { PRODUCTION_CONFIDENCE, type ResultConfidence } from "./generation-boundary.ts";
 import { parseDataUrl } from "./image-guard.ts";
 import {
@@ -68,13 +67,57 @@ export function detectMagicMime(buf: Buffer): "image/png" | "image/jpeg" | "imag
 }
 
 export function readImageMeta(buf: Buffer): { width: number; height: number; type?: string } | null {
-  try {
-    const info = imageSize(buf);
-    if (!info.width || !info.height) return null;
-    return { width: info.width, height: info.height, type: info.type };
-  } catch {
+  const mime = detectMagicMime(buf);
+  if (mime === "image/png") {
+    if (buf.length < 24 || buf.toString("ascii", 12, 16) !== "IHDR") return null;
+    const width = buf.readUInt32BE(16);
+    const height = buf.readUInt32BE(20);
+    return width > 0 && height > 0 ? { width, height, type: "png" } : null;
+  }
+  if (mime === "image/webp") {
+    if (buf.length < 30) return null;
+    const chunk = buf.toString("ascii", 12, 16);
+    if (chunk === "VP8X") {
+      const width = 1 + buf.readUIntLE(24, 3);
+      const height = 1 + buf.readUIntLE(27, 3);
+      return { width, height, type: "webp" };
+    }
+    if (chunk === "VP8 " && buf.length >= 30 && buf[23] === 0x9d && buf[24] === 0x01 && buf[25] === 0x2a) {
+      const width = buf.readUInt16LE(26) & 0x3fff;
+      const height = buf.readUInt16LE(28) & 0x3fff;
+      return width > 0 && height > 0 ? { width, height, type: "webp" } : null;
+    }
+    if (chunk === "VP8L" && buf.length >= 25 && buf[20] === 0x2f) {
+      const width = 1 + buf[21]! + ((buf[22]! & 0x3f) << 8);
+      const height = 1 + ((buf[22]! & 0xc0) >> 6) + (buf[23]! << 2) + ((buf[24]! & 0x0f) << 10);
+      return { width, height, type: "webp" };
+    }
     return null;
   }
+  if (mime === "image/jpeg") {
+    const limit = Math.min(buf.length, 1024 * 1024);
+    let offset = 2;
+    const startOfFrame = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+    while (offset + 3 < limit) {
+      while (offset < limit && buf[offset] !== 0xff) offset += 1;
+      while (offset < limit && buf[offset] === 0xff) offset += 1;
+      if (offset >= limit) return null;
+      const marker = buf[offset]!;
+      offset += 1;
+      if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+      if (offset + 2 > limit) return null;
+      const length = buf.readUInt16BE(offset);
+      if (length < 2 || offset + length > limit) return null;
+      if (startOfFrame.has(marker)) {
+        if (length < 7) return null;
+        const height = buf.readUInt16BE(offset + 3);
+        const width = buf.readUInt16BE(offset + 5);
+        return width > 0 && height > 0 ? { width, height, type: "jpg" } : null;
+      }
+      offset += length;
+    }
+  }
+  return null;
 }
 
 function specFor(req: ImageValidationRequest): ImageSpec {

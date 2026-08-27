@@ -57,6 +57,29 @@ function syntheticWebp(w: number, h: number, minBytes = 4096): Buffer {
   return out;
 }
 
+function syntheticJpeg(w: number, h: number, minBytes = 4096): Buffer {
+  const header = Buffer.from([
+    0xff,
+    0xd8,
+    0xff,
+    0xc0,
+    0x00,
+    0x0b,
+    0x08,
+    (h >> 8) & 0xff,
+    h & 0xff,
+    (w >> 8) & 0xff,
+    w & 0xff,
+    0x01,
+    0x01,
+    0x11,
+    0x00,
+    0xff,
+    0xd9,
+  ]);
+  return header.length < minBytes ? Buffer.concat([header, Buffer.alloc(minBytes - header.length, 0)]) : header;
+}
+
 test("webp jpeg png magic and dimensions", () => {
   const png = syntheticPng(1376, 768);
   assert.equal(detectMagicMime(png), "image/png");
@@ -66,6 +89,19 @@ test("webp jpeg png magic and dimensions", () => {
   const meta = readImageMeta(webp);
   assert.equal(meta?.width, 1024);
   assert.equal(meta?.height, 1024);
+  const jpeg = syntheticJpeg(1264, 848);
+  assert.equal(detectMagicMime(jpeg), "image/jpeg");
+  assert.deepEqual(readImageMeta(jpeg), { width: 1264, height: 848, type: "jpg" });
+});
+
+test("unsupported ICNS/JXL-like bytes are rejected without parser dispatch", () => {
+  const icns = Buffer.alloc(1024 * 1024, 0);
+  icns.write("icns", 0, "ascii");
+  assert.equal(detectMagicMime(icns), null);
+  assert.equal(readImageMeta(icns), null);
+  const jxl = Buffer.from([0x00, 0x00, 0x00, 0x0c, 0x4a, 0x58, 0x4c, 0x20, 0x0d, 0x0a, 0x87, 0x0a]);
+  assert.equal(detectMagicMime(jxl), null);
+  assert.equal(readImageMeta(jxl), null);
 });
 
 test("16:9 requested vs 1:1 actual is OUTPUT_SIZE_MISMATCH", () => {
