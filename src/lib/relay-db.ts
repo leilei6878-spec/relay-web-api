@@ -702,6 +702,42 @@ export async function reclaimDeadJobsWithDb(
   return recovered;
 }
 
+export async function queueCountsWithDb(
+  db: QueryDb,
+  platform: string,
+  capability: "chat" | "image",
+  keyId?: string,
+) {
+  const rows = await db.query<{
+    global_count: number;
+    provider_count: number;
+    capability_count: number;
+    key_count: number;
+  }>(
+    `select
+       count(*)::int as global_count,
+       count(*) filter (where platform=$1)::int as provider_count,
+       count(*) filter (
+         where case when platform='chatgpt' then 'chat' else 'image' end = $2
+       )::int as capability_count,
+       count(*) filter (where $3::text is not null and extra->>'keyId'=$3)::int as key_count
+     from relay_jobs
+     where status in ('queued','running')`,
+    [platform, capability, keyId || null],
+  );
+  const row = rows[0];
+  return {
+    global: Number(row?.global_count || 0),
+    provider: Number(row?.provider_count || 0),
+    capability: Number(row?.capability_count || 0),
+    key: Number(row?.key_count || 0),
+  };
+}
+
+export async function dbQueueCounts(platform: string, capability: "chat" | "image", keyId?: string) {
+  return queueCountsWithDb(await sql(), platform, capability, keyId);
+}
+
 export async function dbReclaimDeadJobs(deadMs: number, graceMs: number, maxRetry: number) {
   return reclaimDeadJobsWithDb(await sql(), deadMs, graceMs, maxRetry);
 }

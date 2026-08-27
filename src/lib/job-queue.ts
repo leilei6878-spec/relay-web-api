@@ -20,10 +20,13 @@ import { applySessionUpdate, getAdapter, isWebModelAlias } from "./provider/inde
 import { isLeonardoModel } from "./provider/leonardo-models";
 import { validateJobImageUrls } from "./provider/image-result-validator";
 import { describeDataUrl } from "./provider/reference-verify";
-import type { ChatTurn } from "./provider/types";
+import type { ChatTurn, WorkerFingerprint } from "./provider/types";
 import type { ReferenceAsset } from "./reference-input";
 import type { ResultConfidence } from "./provider/generation-boundary";
 import type { ImageAssetRecord } from "./image-asset";
+import { activeSelectorPack } from "./selector-promotion";
+import { processStructuralCanaryResult } from "./canary-result";
+import { queueAdmissionError, queueCapability } from "./queue-admission";
 import {
   applySubmissionCheckpoint,
   recoveryDisposition,
@@ -52,12 +55,14 @@ export type Job = {
   resultHashes?: string[];
   resultConfidences?: ResultConfidence[];
   resultAssets?: ImageAssetRecord[];
+  fingerprint?: WorkerFingerprint;
   attempts?: number;
   startedAt?: string;
   workerName?: string;
   requestId?: string;
   traceId?: string;
   idempotencyKey?: string;
+  keyId?: string;
   attemptId?: string;
   leaseId?: string;
   fencingToken?: number;
@@ -105,6 +110,7 @@ export type EnqueueOpts = {
   idempotencyKey?: string;
   requestId?: string;
   traceId?: string;
+  keyId?: string;
   excludeAccountIds?: string[];
   kind?: Job["kind"];
   turns?: ChatTurn[];
@@ -353,13 +359,21 @@ async function enqueue(
   opts: EnqueueOpts = {},
 ) {
   return locked(async () => {
-    const cap = Number(process.env.RELAY_QUEUE_CAP || 200);
-    if ((opts.kind || "") !== "canary" && Number.isFinite(cap) && cap > 0) {
+    if ((opts.kind || "") !== "canary") {
       const peek = await load();
-      const depth = peek.jobs.filter((j) => j.status === "queued" || j.status === "running").length;
-      if (depth >= cap) {
-        return { ok: false as const, error: `QUEUE_FULL: 429 depth ${depth} cap ${cap}` };
-      }
+      const active = peek.jobs.filter((j) => j.status === "queued" || j.status === "running");
+      const capability = queueCapability(platform);
+      const error = queueAdmissionError(
+        {
+          global: active.length,
+          provider: active.filter((job) => job.platform === platform).length,
+          capability: active.filter((job) => queueCapability(job.platform) === capability).length,
+          key: opts.keyId ? active.filter((job) => job.keyId === opts.keyId).length : 0,
+        },
+        platform,
+        Boolean(opts.keyId),
+      );
+      if (error) return { ok: false as const, error };
     }
     if (opts.idempotencyKey) {
       const idemKey = `idem:${opts.idempotencyKey}`;
@@ -429,11 +443,15 @@ async function enqueue(
       requestId: opts.requestId || uid(),
       traceId: opts.traceId || uid(),
       idempotencyKey: opts.idempotencyKey,
+      keyId: opts.keyId,
       excludeAccountIds: exclude,
       proxyId: account.proxyId || undefined,
       kind: opts.kind,
       turns: opts.turns,
-      selectorPackVersion: opts.selectorPackVersion,
+      selectorPackVersion:
+        opts.kind === "canary" && opts.selectorPackVersion
+          ? opts.selectorPackVersion
+          : await activeSelectorPack(platform),
       requestedModel: model,
       n: opts.n,
       size: opts.size,
@@ -657,7 +675,7 @@ export function finishJob(
     sessionBaseVersion?: number;
     modelActual?: string;
     pageState?: string;
-    fingerprint?: string;
+    fingerprint?: WorkerFingerprint;
     selectorPackVersion?: string;
     timing?: JobTiming;
     actualProfile?: string;
@@ -694,6 +712,7 @@ export function finishJob(
     if (typeof result.recoveryLevel === "number") job.recoveryLevel = result.recoveryLevel;
     if (result.retrySafety) job.retrySafety = result.retrySafety;
     if (result.submissionState) job.submissionState = result.submissionState;
+    if (result.fingerprint) job.fingerprint = result.fingerprint;
     if (result.ok && (job.platform === "chatgpt" || typeof result.modelActual === "string")) {
       const modelLabel = typeof result.modelActual === "string" ? result.modelActual : "";
       const verdict = getAdapter(job.platform).verifyModel(job.model, modelLabel);
@@ -807,6 +826,16 @@ export function finishJob(
     job.selectorPackVersion = result.selectorPackVersion || job.selectorPackVersion;
     job.lease = undefined;
     await save(store);
+    if (job.kind === "canary") {
+      await processStructuralCanaryResult({
+        provider: job.platform,
+        selectorPackVersion: job.selectorPackVersion || getAdapter(job.platform).selectorPack().version,
+        ok: Boolean(result.ok && has && !result.error),
+        error: result.error,
+        errorCode: job.errorCode,
+        fingerprint: result.fingerprint,
+      });
+    }
     if (job.accountId) await releaseJobLeases(job.id, job.accountId, job.workerName || job.workerId);
     await coordDel(`job-claim:${job.id}`);
     if (job.attemptId) {
@@ -857,8 +886,8 @@ export function finishJob(
         if (Object.keys(capabilityPatch).length) {
           await patchAccount(acc.id, capabilityPatch as never);
         }
-          if (result.ok && has) {
-          if (isCanaryAccount(acc) || job.kind === "canary") await recordCanaryResult(job.platform, true);
+        if (result.ok && has) {
+          if (job.kind !== "canary" && isCanaryAccount(acc)) await recordCanaryResult(job.platform, true);
           await patchAccount(acc.id, {
             failCount: 0,
             totalRequests: (acc.totalRequests || 0) + 1,
@@ -872,8 +901,10 @@ export function finishJob(
             ].slice(-64),
           });
         } else if (decision.provider_circuit_effect === "trip") {
-          if (isCanaryAccount(acc) || job.kind === "canary") await recordCanaryResult(job.platform, false);
-          else await recordProviderFault(job.platform, decision.code, acc.id);
+          if (job.kind !== "canary") {
+            if (isCanaryAccount(acc)) await recordCanaryResult(job.platform, false);
+            else await recordProviderFault(job.platform, decision.code, acc.id);
+          }
           await patchAccount(acc.id, {
             totalRequests: (acc.totalRequests || 0) + 1,
             lastUsedAt: new Date().toISOString(),
@@ -881,7 +912,6 @@ export function finishJob(
             lockedUntil: null,
           });
         } else if (job.kind === "canary") {
-          await recordCanaryResult(job.platform, false);
           await patchAccount(acc.id, {
             totalRequests: (acc.totalRequests || 0) + 1,
             lastUsedAt: new Date().toISOString(),

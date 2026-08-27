@@ -22,4 +22,8 @@ Optional: `LOG_LEVEL`, `MAX_WORKERS`, `MAX_WORKER_CONCURRENCY`, `PROVIDER_CANARY
 admin login is never available when `NODE_ENV=production`; the flag also disables
 the convenience in development.
 
+Queue admission: `RELAY_QUEUE_CAP`, `RELAY_PROVIDER_QUEUE_CAP`,
+`RELAY_CHAT_QUEUE_CAP`, `RELAY_IMAGE_QUEUE_CAP`, and `RELAY_KEY_QUEUE_CAP`.
+See `BACKPRESSURE.md`.
+
 Development may omit the above; `/readyz` reports `degraded`.

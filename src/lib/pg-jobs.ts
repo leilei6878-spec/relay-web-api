@@ -20,6 +20,7 @@ import {
   dbListQueuedJobs,
   dbLoadJobs,
   dbLoadWorkers,
+  dbQueueCounts,
   dbReclaimDeadJobs,
   dbTryLockAccount,
   dbUnlockAccount,
@@ -31,6 +32,9 @@ import { proxyServer } from "./session-file";
 import { uid } from "./utils";
 import { markResilience } from "./resilience-metrics";
 import { isWebModelAlias } from "./provider/chatgpt";
+import { activeSelectorPack } from "./selector-promotion";
+import { processStructuralCanaryResult } from "./canary-result";
+import { queueCapability, withQueueAdmission } from "./queue-admission";
 import {
   applySubmissionCheckpoint,
   recoveryDisposition,
@@ -140,11 +144,15 @@ export async function enqueuePg(
     requestId: opts.requestId || uid(),
     traceId: opts.traceId || uid(),
     idempotencyKey: opts.idempotencyKey,
+    keyId: opts.keyId,
     excludeAccountIds: exclude,
     proxyId: account.proxyId || undefined,
     kind: opts.kind,
     turns: opts.turns,
-    selectorPackVersion: opts.selectorPackVersion,
+    selectorPackVersion:
+      opts.kind === "canary" && opts.selectorPackVersion
+        ? opts.selectorPackVersion
+        : await activeSelectorPack(platform),
     requestedModel: model,
     n: opts.n,
     size: opts.size,
@@ -154,7 +162,20 @@ export async function enqueuePg(
     backendMode: platform === "leonardo" ? "web_account" : undefined,
   };
 
-  const inserted = await dbInsertJobIdempotent(job as unknown as Record<string, unknown>);
+  const admission = await withQueueAdmission({
+    platform,
+    hasKey: Boolean(opts.keyId),
+    bypass: opts.kind === "canary",
+    readCounts: () => dbQueueCounts(platform, queueCapability(platform), opts.keyId),
+    insert: () => dbInsertJobIdempotent(job as unknown as Record<string, unknown>),
+  });
+  if (admission.error || !admission.inserted) {
+    await coordDel(`account-lease:${account.id}`);
+    await dbUnlockAccount(account.id).catch(() => undefined);
+    if (opts.idempotencyKey) await coordDel(`idem:${opts.idempotencyKey}`);
+    return { ok: false as const, error: admission.error || "QUEUE_FULL: 503 admission failed retry_after=5" };
+  }
+  const inserted = admission.inserted;
   if (!inserted.inserted) {
     await coordDel(`account-lease:${account.id}`);
     await dbUnlockAccount(account.id).catch(() => undefined);
@@ -302,7 +323,7 @@ export async function finishJobPg(
     sessionBaseVersion?: number;
     modelActual?: string;
     pageState?: string;
-    fingerprint?: string;
+    fingerprint?: import("./provider/types").WorkerFingerprint;
     selectorPackVersion?: string;
     timing?: JobTiming;
     actualProfile?: string;
@@ -346,6 +367,7 @@ export async function finishJobPg(
   if (typeof result.recoveryLevel === "number") current.recoveryLevel = result.recoveryLevel;
   if (result.retrySafety) current.retrySafety = result.retrySafety;
   if (result.submissionState) current.submissionState = result.submissionState;
+  if (result.fingerprint) current.fingerprint = result.fingerprint;
 
   if (result.ok && (current.platform === "chatgpt" || typeof result.modelActual === "string")) {
     const { getAdapter } = await import("./provider/index");
@@ -493,6 +515,18 @@ export async function finishJobPg(
     return { ok: false as const, error: "STALE_LEASE: fencing mismatch or job not running" };
   }
 
+  if (current.kind === "canary") {
+    const { getAdapter } = await import("./provider/index");
+    await processStructuralCanaryResult({
+      provider: current.platform,
+      selectorPackVersion: current.selectorPackVersion || getAdapter(current.platform).selectorPack().version,
+      ok: Boolean(result.ok && has && !result.error),
+      error: result.error,
+      errorCode: decision.code,
+      fingerprint: result.fingerprint,
+    });
+  }
+
   if (current.accountId) {
     await releaseJobLeases(id, current.accountId, current.workerName || current.workerId);
     await dbUnlockAccount(current.accountId).catch(() => undefined);
@@ -554,7 +588,7 @@ export async function finishJobPg(
         await patchAccount(acc.id, capabilityPatch as never);
       }
       if (result.ok && has) {
-        if (isCanaryAccount(acc)) await recordCanaryResult(current.platform, true);
+        if (current.kind !== "canary" && isCanaryAccount(acc)) await recordCanaryResult(current.platform, true);
         await patchAccount(acc.id, {
           failCount: 0,
           totalRequests: (acc.totalRequests || 0) + 1,
@@ -569,8 +603,10 @@ export async function finishJobPg(
         });
         markResilience("success");
       } else if (decision.provider_circuit_effect === "trip") {
-        if (isCanaryAccount(acc)) await recordCanaryResult(current.platform, false);
-        else await recordProviderFault(current.platform, decision.code, acc.id);
+        if (current.kind !== "canary") {
+          if (isCanaryAccount(acc)) await recordCanaryResult(current.platform, false);
+          else await recordProviderFault(current.platform, decision.code, acc.id);
+        }
         await patchAccount(acc.id, {
           totalRequests: (acc.totalRequests || 0) + 1,
           lastUsedAt: new Date().toISOString(),

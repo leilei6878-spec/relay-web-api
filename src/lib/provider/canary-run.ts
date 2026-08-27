@@ -6,6 +6,7 @@ import { enqueueChat, enqueueImage } from "../job-queue";
 import { featureDelta, fingerprint } from "./fingerprint";
 import { getAdapter } from "./index";
 import type { DomFeature } from "./types";
+import { activeSelectorPack, selectorPackForCanary } from "../selector-promotion";
 
 export async function rememberFingerprint(provider: ProviderId, features: DomFeature[], packVersion: string) {
   const fp = fingerprint(provider, packVersion, features);
@@ -25,7 +26,10 @@ export async function rememberFingerprint(provider: ProviderId, features: DomFea
  * Control-plane canary. Live DOM probe is executed by a worker job with kind=canary.
  * Never increments account failCount (enqueue uses canary account + circuit recordCanaryResult).
  */
-export async function enqueueProviderCanary(provider: ProviderId) {
+export async function enqueueProviderCanary(provider: ProviderId, kind: "structural" | "paid" = "structural") {
+  if (kind === "paid" && provider === "chatgpt") {
+    return { ok: false as const, error: "paid image canary is not applicable to chatgpt" };
+  }
   const plane = await readControlPlane();
   const account = pickCanary(plane.accounts, provider);
   if (!account) {
@@ -33,20 +37,35 @@ export async function enqueueProviderCanary(provider: ProviderId) {
     return { ok: false as const, error: "no canary account", circuit: snap.state };
   }
   const adapter = getAdapter(provider);
+  const selectorPackVersion =
+    kind === "structural"
+      ? await selectorPackForCanary(provider)
+      : await activeSelectorPack(provider);
   const prepared = adapter.prepareRequest({
-    prompt: "Reply with the single word: pong",
+    prompt:
+      kind === "paid"
+        ? "A plain cobalt blue square centered on a white background"
+        : "Reply with the single word: pong",
     model: adapter.capabilities().models[0],
-    kind: "canary",
+    kind: kind === "paid" ? "image" : "canary",
   });
+  const excludeAccountIds = plane.accounts.filter((item) => item.id !== account.id).map((item) => item.id);
+  const timeoutMs = kind === "paid" ? (provider === "leonardo" ? 180_000 : 90_000) : 45_000;
   const queued =
     provider === "gemini" || provider === "leonardo"
-      ? await enqueueImage(prepared.webPrompt, prepared.model, 45_000, [], {
-          kind: "canary",
-          selectorPackVersion: prepared.selectorPackVersion,
+      ? await enqueueImage(prepared.webPrompt, prepared.model, timeoutMs, [], {
+          kind: kind === "paid" ? "image" : "canary",
+          selectorPackVersion,
+          excludeAccountIds,
+          n: 1,
+          size: "1024x1024",
+          aspect: "1:1",
+          tier: "Small",
         })
-      : await enqueueChat(prepared.webPrompt, prepared.model, 45_000, [], {
+      : await enqueueChat(prepared.webPrompt, prepared.model, timeoutMs, [], {
           kind: "canary",
-          selectorPackVersion: prepared.selectorPackVersion,
+          selectorPackVersion,
+          excludeAccountIds,
         });
   return queued;
 }

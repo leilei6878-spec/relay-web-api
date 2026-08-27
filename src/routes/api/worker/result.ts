@@ -3,6 +3,7 @@ import { assertWorker } from "@/lib/authz";
 import { finishJob, type JobTiming } from "@/lib/job-queue";
 import type { ResultConfidence } from "@/lib/provider/generation-boundary";
 import type { ImageAssetRecord } from "@/lib/image-asset";
+import type { WorkerFingerprint } from "@/lib/provider/types";
 
 export const Route = createFileRoute("/api/worker/result")({
   server: {
@@ -27,7 +28,7 @@ export const Route = createFileRoute("/api/worker/result")({
           sessionBaseVersion?: number;
           modelActual?: string;
           pageState?: string;
-          fingerprint?: unknown;
+          fingerprint?: WorkerFingerprint;
           selectorPackVersion?: string;
           availableModels?: string[];
           tokenState?: string;
@@ -65,6 +66,7 @@ export const Route = createFileRoute("/api/worker/result")({
             tokenState: body.tokenState,
             backendMode: body.backendMode,
             queueDepth: body.queueDepth,
+            fingerprint: body.fingerprint,
             timing: body.timing,
             actualProfile: body.actualProfile,
             profileVerified: body.profileVerified,

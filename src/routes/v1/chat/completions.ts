@@ -135,7 +135,10 @@ export async function handleChat(request: Request): Promise<Response> {
         const result = await runChat(prompt, model, frozenImages, idem, requestId, auth.record.id, frozenTurns, prepared.selectorPackVersion, frozen.assets);
         await logUsage(auth.record, model, parsed, prompt, started, result);
         if (!result.ok) {
-          return Response.json({ error: { message: result.error } }, { status: result.status, headers: cors() });
+          return Response.json(
+            { error: { message: result.error } },
+            { status: result.status, headers: result.status === 429 ? { ...cors(), "Retry-After": "5" } : cors() },
+          );
         }
         return Response.json(
           completion(result, parsed.images.length, estimateTokens(prompt), estimateTokens(result.text)),
@@ -258,6 +261,7 @@ export async function runChat(
     }
     const queued = await enqueueChat(prompt, model, chatJobTimeoutMs(model, images), images, {
       idempotencyKey,
+      keyId,
       requestId: reqId,
       traceId,
       excludeAccountIds: exclude,
@@ -455,14 +459,22 @@ export function streamChat(
         }
         const queued = await enqueueChat(prompt, model, chatJobTimeoutMs(model, images), images, {
           idempotencyKey: idem,
+          keyId: key.id,
           requestId,
           turns,
           selectorPackVersion,
           referenceAssets,
         });
         if (!queued.ok) {
-          await send({ error: { message: queued.error }, relay: { phase: "error" } });
-          await logUsage(key, model, { images }, prompt, started, { ok: false, status: 503, error: queued.error });
+          await send({
+            error: { message: queued.error },
+            relay: { phase: "error", logicalStatus: "error", retry_after: queued.error.includes("QUEUE_FULL") ? 5 : undefined },
+          });
+          await logUsage(key, model, { images }, prompt, started, {
+            ok: false,
+            status: queued.error.includes("QUEUE_FULL") ? 429 : 503,
+            error: queued.error,
+          });
           await finish();
           return;
         }

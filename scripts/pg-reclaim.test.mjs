@@ -4,13 +4,14 @@ import { PGlite } from "@electric-sql/pglite";
 
 test("PG reclaim respects fresh heartbeats and never requeues submitted work", async () => {
   process.env.DATABASE_URL = "postgres://unused-for-pure-reclaim-test";
-  const { reclaimDeadJobsWithDb } = await import("../src/lib/relay-db.ts");
+  const { queueCountsWithDb, reclaimDeadJobsWithDb } = await import("../src/lib/relay-db.ts");
   const pg = new PGlite();
   await pg.waitReady;
   await pg.exec(`
     create table relay_jobs (
       id text primary key,
       status text not null,
+      platform text not null,
       worker_id text,
       attempt_id text,
       lease_id text,
@@ -37,8 +38,8 @@ test("PG reclaim respects fresh heartbeats and never requeues submitted work", a
   async function insertJob(id, worker, started, timeoutMs, extra) {
     await pg.query(
       `insert into relay_jobs
-        (id,status,worker_id,attempt_id,lease_id,fencing_token,attempts,timeout_ms,started_at,extra)
-       values ($1,'running',$2,'attempt-1','lease-1',1,1,$3,now() - $4::interval,$5::jsonb)`,
+        (id,status,platform,worker_id,attempt_id,lease_id,fencing_token,attempts,timeout_ms,started_at,extra)
+       values ($1,'running','chatgpt',$2,'attempt-1','lease-1',1,1,$3,now() - $4::interval,$5::jsonb)`,
       [id, worker, timeoutMs, started, JSON.stringify({ id, accountId: `account-${id}`, timeoutMs, attempts: 1, ...extra })],
     );
   }
@@ -82,5 +83,7 @@ test("PG reclaim respects fresh heartbeats and never requeues submitted work", a
   assert.equal(byId["dead-submitted"].status, "error");
   assert.match(byId["dead-submitted"].error || "", /RESULT_UNCERTAIN/);
   assert.equal(byId["timed-out"].status, "queued");
+  const counts = await queueCountsWithDb(db, "chatgpt", "chat", undefined);
+  assert.deepEqual(counts, { global: 3, provider: 3, capability: 3, key: 0 });
   await pg.close();
 });

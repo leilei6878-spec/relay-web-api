@@ -118,6 +118,12 @@ export type Fingerprint = {
   features: DomFeature[];
 };
 
+export type WorkerFingerprint = {
+  features?: string[];
+  testids?: string[];
+  pack?: string;
+};
+
 export type ProviderAdapter = {
   id: ProviderId;
   capabilities(): ProviderCapabilities;

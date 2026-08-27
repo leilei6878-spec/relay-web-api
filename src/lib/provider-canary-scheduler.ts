@@ -1,5 +1,6 @@
 import { enqueueProviderCanary } from "./provider/canary-run";
 import type { ProviderId } from "./circuit";
+import { coordSetNx } from "./coord";
 
 export type CanaryKind = "structural" | "paid";
 
@@ -37,6 +38,20 @@ export function isPaidImageCanary(provider: ProviderId, kind: CanaryKind) {
   return kind === "paid" && (provider === "gemini" || provider === "leonardo");
 }
 
+export function canaryDispatchKey(provider: ProviderId, kind: CanaryKind, now: number, intervalMs: number) {
+  const window = Math.floor(now / Math.max(60_000, intervalMs));
+  return `provider-canary-dispatch:${provider}:${kind}:${window}`;
+}
+
+export function claimCanaryDispatch(provider: ProviderId, kind: CanaryKind, now = Date.now()) {
+  const interval = kind === "paid" ? realImageCanaryMs() : structuralCanaryMs();
+  return coordSetNx(
+    canaryDispatchKey(provider, kind, now, interval),
+    `${process.pid}:${now}`,
+    Math.max(60_000, Math.round(interval * 0.9)),
+  );
+}
+
 type Due = { provider: ProviderId; kind: CanaryKind; at: number };
 
 const nextDue: Due[] = [];
@@ -61,17 +76,20 @@ export function dueCanaries(now = Date.now()) {
   return nextDue.filter((d) => d.at <= now);
 }
 
-export async function tickProviderCanaries(now = Date.now()) {
+export async function tickProviderCanaries(
+  now = Date.now(),
+  enqueue: typeof enqueueProviderCanary = enqueueProviderCanary,
+) {
   const due = dueCanaries(now);
-  const ran: { provider: ProviderId; kind: CanaryKind; ok: boolean; error?: string }[] = [];
+  const ran: { provider: ProviderId; kind: CanaryKind; ok: boolean; dispatched: boolean; error?: string }[] = [];
   for (const item of due) {
     item.at = now + nextCanaryDelay(item.kind === "paid" ? realImageCanaryMs() : structuralCanaryMs(), 0.2);
-    if (item.kind === "paid") {
-      ran.push({ provider: item.provider, kind: "paid", ok: true, error: "skipped: paid interval only, no structural generation" });
+    if (!(await claimCanaryDispatch(item.provider, item.kind, now))) {
+      ran.push({ provider: item.provider, kind: item.kind, ok: true, dispatched: false, error: "claimed by another gateway" });
       continue;
     }
-    const out = await enqueueProviderCanary(item.provider);
-    ran.push({ provider: item.provider, kind: item.kind, ok: out.ok, error: out.ok ? undefined : out.error });
+    const out = await enqueue(item.provider, item.kind);
+    ran.push({ provider: item.provider, kind: item.kind, ok: out.ok, dispatched: true, error: out.ok ? undefined : out.error });
   }
   return ran;
 }

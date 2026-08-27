@@ -7,27 +7,29 @@ import {
   resetSelectorPromotionForTests,
   setCandidateSelectorPack,
 } from "./selector-promotion.ts";
-import { nextCanaryDelay, parseInterval, realImageCanaryMs, isPaidImageCanary } from "./provider-canary-scheduler.ts";
+import { claimCanaryDispatch, nextCanaryDelay, parseInterval, realImageCanaryMs, isPaidImageCanary, resetCanarySchedulerForTests, scheduleCanaries, tickProviderCanaries } from "./provider-canary-scheduler.ts";
+import { resetCoordForTests } from "./coord.ts";
 
-test("candidate pack promotes after 3 consecutive passes and rolls back on fail", () => {
-  resetSelectorPromotionForTests();
-  const prev = activeSelectorPack("chatgpt");
-  setCandidateSelectorPack("chatgpt", "chatgpt-v2");
-  assert.equal(candidateSelectorPack("chatgpt"), "chatgpt-v2");
-  assert.equal(recordSelectorCanary("chatgpt", "chatgpt-v2", true).promoted, false);
-  assert.equal(recordSelectorCanary("chatgpt", "chatgpt-v2", true).promoted, false);
-  const third = recordSelectorCanary("chatgpt", "chatgpt-v2", true);
+test("candidate pack promotes after 3 consecutive passes and rolls back on fail", async () => {
+  resetCoordForTests();
+  await resetSelectorPromotionForTests();
+  const prev = await activeSelectorPack("chatgpt");
+  await setCandidateSelectorPack("chatgpt", "chatgpt-v2");
+  assert.equal(await candidateSelectorPack("chatgpt"), "chatgpt-v2");
+  assert.equal((await recordSelectorCanary("chatgpt", "chatgpt-v2", true)).promoted, false);
+  assert.equal((await recordSelectorCanary("chatgpt", "chatgpt-v2", true)).promoted, false);
+  const third = await recordSelectorCanary("chatgpt", "chatgpt-v2", true);
   assert.equal(third.promoted, true);
-  assert.equal(activeSelectorPack("chatgpt"), "chatgpt-v2");
-  assert.equal(candidateSelectorPack("chatgpt"), null);
+  assert.equal(await activeSelectorPack("chatgpt"), "chatgpt-v2");
+  assert.equal(await candidateSelectorPack("chatgpt"), null);
 
-  resetSelectorPromotionForTests();
-  setCandidateSelectorPack("chatgpt", "chatgpt-v2");
-  recordSelectorCanary("chatgpt", "chatgpt-v2", true);
-  const fail = recordSelectorCanary("chatgpt", "chatgpt-v2", false);
+  await resetSelectorPromotionForTests();
+  await setCandidateSelectorPack("chatgpt", "chatgpt-v2");
+  await recordSelectorCanary("chatgpt", "chatgpt-v2", true);
+  const fail = await recordSelectorCanary("chatgpt", "chatgpt-v2", false);
   assert.equal(fail.rolledBack, true);
-  assert.equal(activeSelectorPack("chatgpt"), prev);
-  assert.equal(candidateSelectorPack("chatgpt"), null);
+  assert.equal(await activeSelectorPack("chatgpt"), prev);
+  assert.equal(await candidateSelectorPack("chatgpt"), null);
 });
 
 test("structural vs paid image canary intervals", () => {
@@ -39,4 +41,29 @@ test("structural vs paid image canary intervals", () => {
   assert.equal(isPaidImageCanary("chatgpt", "paid"), false);
   assert.equal(isPaidImageCanary("leonardo", "paid"), true);
   assert.equal(isPaidImageCanary("gemini", "structural"), false);
+});
+
+test("only one gateway claims a provider canary window", async () => {
+  resetCoordForTests();
+  const now = 1_800_000;
+  const [a, b] = await Promise.all([
+    claimCanaryDispatch("gemini", "structural", now),
+    claimCanaryDispatch("gemini", "structural", now),
+  ]);
+  assert.equal([a, b].filter(Boolean).length, 1);
+});
+
+test("paid image due items dispatch a real paid canary instead of reporting a skip", async () => {
+  resetCoordForTests();
+  resetCanarySchedulerForTests();
+  scheduleCanaries(0);
+  const calls: string[] = [];
+  const ran = await tickProviderCanaries(24 * 3_600_000, async (provider, kind) => {
+    calls.push(`${provider}:${kind}`);
+    return { ok: true as const, job: { id: `${provider}-${kind}` } as never };
+  });
+  assert.ok(calls.includes("gemini:paid"));
+  assert.ok(calls.includes("leonardo:paid"));
+  assert.equal(ran.filter((row) => row.kind === "paid").every((row) => row.dispatched && row.ok), true);
+  assert.equal(ran.some((row) => /skipped/i.test(row.error || "")), false);
 });

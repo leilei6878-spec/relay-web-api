@@ -4,10 +4,11 @@ import { test } from "node:test";
 import { resolve } from "node:path";
 import "./test-env.ts";
 import { resetCoordForTests } from "./coord.ts";
-import { writeControlPlane } from "./control-plane.ts";
+import { readControlPlane, writeControlPlane } from "./control-plane.ts";
 import { checkpointJob, claimNext, cancelJob, enqueueChat, finishJob, getJob } from "./job-queue.ts";
 import { resetMediaStoreForTests } from "./media-store.ts";
 import { ingestReferenceImages } from "./reference-input.ts";
+import { activeSelectorPack, recordSelectorCanary, resetSelectorPromotionForTests, setCandidateSelectorPack } from "./selector-promotion.ts";
 
 process.env.RELAY_SKIP_DB = "1";
 
@@ -267,6 +268,37 @@ test("queue cap returns QUEUE_FULL 429", async () => {
   delete process.env.RELAY_QUEUE_CAP;
 });
 
+test("per-key queue cap isolates customers", async () => {
+  await seed();
+  process.env.RELAY_QUEUE_CAP = "20";
+  process.env.RELAY_PROVIDER_QUEUE_CAP = "20";
+  process.env.RELAY_CHAT_QUEUE_CAP = "20";
+  process.env.RELAY_KEY_QUEUE_CAP = "1";
+  try {
+    const first = await enqueueChat("one", "chatgpt-web-auto", 8000, [], {
+      keyId: "key-a",
+      idempotencyKey: `key-a-1-${Date.now()}`,
+    });
+    assert.equal(first.ok, true);
+    const blocked = await enqueueChat("two", "chatgpt-web-auto", 8000, [], {
+      keyId: "key-a",
+      idempotencyKey: `key-a-2-${Date.now()}`,
+    });
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) assert.match(blocked.error, /scope=key/);
+    const other = await enqueueChat("other", "chatgpt-web-auto", 8000, [], {
+      keyId: "key-b",
+      idempotencyKey: `key-b-${Date.now()}`,
+    });
+    assert.equal(other.ok, true);
+  } finally {
+    delete process.env.RELAY_QUEUE_CAP;
+    delete process.env.RELAY_PROVIDER_QUEUE_CAP;
+    delete process.env.RELAY_CHAT_QUEUE_CAP;
+    delete process.env.RELAY_KEY_QUEUE_CAP;
+  }
+});
+
 test("web-auto succeeds without inventing an actual model; exact IDs fail closed", async () => {
   await seed();
   const auto = await enqueueChat("auto", "chatgpt-web-auto", 8000, [], {
@@ -354,4 +386,56 @@ test("input reference bytes are frozen outside job JSON", async () => {
   assert.doesNotMatch(json, /data:image/);
   assert.match(json, /\/api\/media\//);
   assert.match(json, new RegExp(frozen.assets[0]!.sha256));
+});
+
+test("customer jobs use the shared promoted selector pack", async () => {
+  await seed();
+  await resetSelectorPromotionForTests();
+  await setCandidateSelectorPack("chatgpt", "chatgpt-v2");
+  await recordSelectorCanary("chatgpt", "chatgpt-v2", true);
+  await recordSelectorCanary("chatgpt", "chatgpt-v2", true);
+  await recordSelectorCanary("chatgpt", "chatgpt-v2", true);
+  const queued = await enqueueChat("selector", "chatgpt-web-auto", 8000, [], {
+    idempotencyKey: `selector-${Date.now()}`,
+    selectorPackVersion: "chatgpt-v1",
+  });
+  assert.equal(queued.ok, true);
+  if (queued.ok) assert.equal(queued.job.selectorPackVersion, "chatgpt-v2");
+});
+
+test("worker canary results promote a candidate through the real finish path", async () => {
+  await seed();
+  await resetSelectorPromotionForTests();
+  await setCandidateSelectorPack("chatgpt", "chatgpt-v2");
+  const plane = await readControlPlane();
+  const canaryId = plane.accounts[0]!.id;
+  await writeControlPlane({
+    ...plane,
+    accounts: plane.accounts.map((account, index) => ({ ...account, canary: index === 0 })),
+  });
+  for (let index = 0; index < 3; index += 1) {
+    const queued = await enqueueChat("canary", "chatgpt-web-auto", 8000, [], {
+      kind: "canary",
+      selectorPackVersion: "chatgpt-v2",
+      excludeAccountIds: plane.accounts.filter((account) => account.id !== canaryId).map((account) => account.id),
+      idempotencyKey: `canary-${index}-${Date.now()}`,
+    });
+    assert.equal(queued.ok, true);
+    if (!queued.ok) return;
+    const claimed = await claimNext("canary-worker");
+    assert.equal(claimed.job?.accountId, canaryId);
+    const done = await finishJob(claimed.job!.id, {
+      ok: true,
+      text: "CANARY",
+      modelActual: "ChatGPT",
+      selectorPackVersion: "chatgpt-v2",
+      fingerprint: { features: ["input:1", "send:1", "assistant:1"], pack: "chatgpt-v2" },
+      leaseId: claimed.job!.leaseId,
+      fencingToken: claimed.job!.fencingToken,
+      attemptId: claimed.job!.attemptId,
+      workerId: "canary-worker",
+    });
+    assert.equal(done.ok, true);
+  }
+  assert.equal(await activeSelectorPack("chatgpt"), "chatgpt-v2");
 });

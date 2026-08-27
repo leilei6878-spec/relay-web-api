@@ -2,7 +2,7 @@
 
 Started: 2026-08-27  
 Takeover HEAD: `b30a9f7d52653344d8512f5479b8f882c88500d0`  
-Current phase: Phase 1 — production safety and hard-gate recovery
+Current phase: Phase 5/6 — provider self-healing and backpressure
 
 ## Rules for this log
 
@@ -42,9 +42,9 @@ At takeover:
 | 3A | Proxy/browser/session identity isolation | COMPLETE | Commit `1ff9844`; proxy ID/credential fingerprint keys browser pools and launch config strips internal fields. Live proxy-down gate remains Phase 8. |
 | 3B | Model truth + operational default | COMPLETE | Commit `06cca41`; honest web-auto default, exact-model fail closed, full truth metadata. |
 | 3C | Chat attachment/disconnect closure | COMPLETE | Commit `06cca41`; exact vision attachment and cancellation/uncertainty closure. |
-| 4 | Image provenance/validator/media closure | READY_FOR_COMMIT | Input refs frozen outside Job JSON; overflow/invalid rejected; confidence required end-to-end; DOM-correlated Leonardo bytes; recent hash exclusion; WebP; WARM_IDLE fail-closed. Focused tests/build pending final gate. |
-| 5 | Canary + selector self-healing closure | PENDING | Wire worker probe, distributed scheduling/state, real low-frequency paid canary. |
-| 6 | Provider/capability/key backpressure | PENDING | File + PG parity, 429/503 + Retry-After. |
+| 4 | Image provenance/validator/media closure | COMPLETE | Commit `ac0ae39`; frozen refs, strict confidence/assets/history, DOM correlation, WebP, WARM_IDLE fail-closed. |
+| 5 | Canary + selector self-healing closure | READY_FOR_COMMIT | Distributed dispatch lease, real paid canary, shared selector state, real finish-path fingerprint/promotion. Focused tests 6/6 + integration tests pass. |
+| 6 | Provider/capability/key backpressure | READY_FOR_COMMIT | Global/provider/chat/image/key caps; file + distributed PG admission; 429/Retry-After. Focused tests pass. |
 | 7 | Full local automated campaign | PENDING | unit, typecheck, build, contract, concurrency, chaos, runtime, leak. |
 | 8 | Real providers + soak | BLOCKED_BY_ENVIRONMENT | Needs healthy sessions/accounts and reachable production worker/infrastructure. |
 | 9 | Final acceptance | PENDING | `CODEX_FINAL_ACCEPTANCE.md`, requirement-by-requirement completion audit. |
@@ -79,5 +79,6 @@ runs. No zero is inferred from unit tests:
 - `c429950` — authoritative SSE logical status and terminal partial text
 - `1ff9844` — durable submission checkpoints, safe reclaim, proxy pool isolation
 - `06cca41` — truthful chat model contract, exact vision attach, abort recovery
+- `ac0ae39` — frozen references, strict image provenance, warm runtime closure
 
 Temporary dependency cache content is never committed.

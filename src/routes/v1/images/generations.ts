@@ -319,6 +319,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     if (!account) break;
     const queued = await enqueueImage(prompt, model, platform === "leonardo" ? 180_000 : 90_000, referenceUrls, {
       idempotencyKey: idem,
+      keyId: auth.record.id,
       requestId: reqId,
       excludeAccountIds: exclude,
       kind: kind === "edit" || parsed.images.length ? "edit" : "image",
@@ -365,7 +366,10 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
   await completeRequest(reqId, { ok: false, finalError: last });
   await log({ ok: false, error: last });
   const status = last.includes("QUEUE_FULL") ? 429 : 504;
-  return Response.json({ error: { message: last } }, { status, headers: cors() });
+  return Response.json(
+    { error: { message: last } },
+    { status, headers: status === 429 ? { ...cors(), "Retry-After": "5" } : cors() },
+  );
 }
 
 async function imagePayload(

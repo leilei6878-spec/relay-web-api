@@ -134,7 +134,10 @@ export const Route = createFileRoute("/v1/responses")({
           frozen.assets,
         );
         if (!result.ok) {
-          return Response.json({ error: { message: result.error } }, { status: result.status, headers: cors() });
+          return Response.json(
+            { error: { message: result.error } },
+            { status: result.status, headers: result.status === 429 ? { ...cors(), "Retry-After": "5" } : cors() },
+          );
         }
         return Response.json(
           {
