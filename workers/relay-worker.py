@@ -1106,6 +1106,223 @@ def usable_assistant_text(text):
     return True
 
 
+def _env_ms(name, default):
+    try:
+        v = int(os.environ.get(name) or str(default))
+        return max(200, min(20000, v))
+    except Exception:
+        return default
+
+def chat_stable_ms():
+    return _env_ms("RELAY_CHAT_STABLE_MS", 1500)
+
+def chat_confirm_ms():
+    return _env_ms("RELAY_CHAT_CONFIRM_MS", 600)
+
+def chat_stop_stable_ms():
+    return _env_ms("RELAY_CHAT_STOP_STABLE_MS", 400)
+
+class AssistantCompletionDetector:
+    WAITING_FIRST_DELTA = "WAITING_FIRST_DELTA"
+    STREAMING = "STREAMING"
+    POSSIBLY_COMPLETE = "POSSIBLY_COMPLETE"
+    CONFIRMED_COMPLETE = "CONFIRMED_COMPLETE"
+    RESULT_UNCERTAIN = "RESULT_UNCERTAIN"
+
+    def __init__(self, stable_ms=None, confirm_ms=None, stop_stable_ms=None):
+        self.stable_ms = int(stable_ms if stable_ms is not None else chat_stable_ms())
+        self.confirm_ms = int(confirm_ms if confirm_ms is not None else chat_confirm_ms())
+        self.stop_stable_ms = int(stop_stable_ms if stop_stable_ms is not None else chat_stop_stable_ms())
+        self.state = self.WAITING_FIRST_DELTA
+        self.send_ack_at = 0
+        self.assistant_node_created_at = 0
+        self.first_delta_at = 0
+        self.last_delta_at = 0
+        self.stop_seen = False
+        self.stop_now = False
+        self.stop_gone_at = 0
+        self.network_request_seen = False
+        self.network_response_seen = False
+        self.network_finished = False
+        self.network_finished_at = 0
+        self.semantic_complete = False
+        self.streamed_text = ""
+        self.candidate_text = ""
+        self.possibly_at = 0
+        self.completion_signal = ""
+        self.final_text_replaced = False
+        self.premature_guard_triggered = False
+        self.very_short_completion = False
+
+    def on_submit(self, now=None):
+        self.send_ack_at = now if now is not None else time.time()
+
+    def on_assistant_node(self, now=None):
+        if not self.assistant_node_created_at:
+            self.assistant_node_created_at = now if now is not None else time.time()
+
+    def on_network_request(self, now=None):
+        self.network_request_seen = True
+
+    def on_network_response(self, now=None):
+        self.network_response_seen = True
+
+    def on_network_finished(self, now=None):
+        self.network_finished = True
+        if not self.network_finished_at:
+            self.network_finished_at = now if now is not None else time.time()
+
+    def on_semantic_complete(self, now=None):
+        self.semantic_complete = True
+
+    def on_stop(self, visible, now=None):
+        now = now if now is not None else time.time()
+        vis = bool(visible)
+        if vis:
+            self.stop_seen = True
+            self.stop_now = True
+            self.stop_gone_at = 0
+            if self.state == self.POSSIBLY_COMPLETE:
+                self.state = self.STREAMING
+                self.possibly_at = 0
+                self.candidate_text = ""
+        else:
+            if self.stop_now and self.stop_seen and not self.stop_gone_at:
+                self.stop_gone_at = now
+            self.stop_now = False
+
+    def on_delta(self, text, now=None):
+        now = now if now is not None else time.time()
+        t = text or ""
+        if not t or t == self.streamed_text:
+            return self.state
+        self.streamed_text = t
+        if not self.first_delta_at:
+            self.first_delta_at = now
+        self.last_delta_at = now
+        if self.state in (self.WAITING_FIRST_DELTA, self.POSSIBLY_COMPLETE):
+            if self.state == self.POSSIBLY_COMPLETE:
+                self.premature_guard_triggered = True
+            self.state = self.STREAMING
+            self.possibly_at = 0
+            self.candidate_text = ""
+        return self.state
+
+    def _idle_ms(self, now):
+        if not self.last_delta_at:
+            return 0
+        return int(round((now - self.last_delta_at) * 1000.0))
+
+    def tick(self, now=None):
+        now = now if now is not None else time.time()
+        if self.state in (self.CONFIRMED_COMPLETE, self.WAITING_FIRST_DELTA):
+            return self.state
+        idle_ms = self._idle_ms(now)
+        if self.state == self.STREAMING:
+            signal = "fallback_stable"
+            need = self.stable_ms
+            if self.stop_seen and (not self.stop_now):
+                need = self.stop_stable_ms
+                signal = "stop_cycle"
+            elif self.network_finished:
+                need = min(need, max(self.stop_stable_ms, 800))
+                signal = "network_finished"
+            elif self.semantic_complete:
+                need = min(need, max(self.stop_stable_ms, 800))
+                signal = "semantic"
+            if idle_ms >= need and self.streamed_text:
+                self.state = self.POSSIBLY_COMPLETE
+                self.possibly_at = now
+                self.candidate_text = self.streamed_text
+                self.completion_signal = signal
+        if self.state == self.POSSIBLY_COMPLETE:
+            if self.streamed_text != self.candidate_text:
+                self.premature_guard_triggered = True
+                self.state = self.STREAMING
+                self.possibly_at = 0
+                return self.state
+            if self.stop_now:
+                self.state = self.STREAMING
+                self.possibly_at = 0
+                return self.state
+            held = int(round((now - self.possibly_at) * 1000.0)) if self.possibly_at else 0
+            if held >= self.confirm_ms:
+                self.state = self.CONFIRMED_COMPLETE
+                if len((self.streamed_text or "").strip()) < 8:
+                    self.very_short_completion = True
+        return self.state
+
+    def report(self, final_dom=""):
+        now = time.time()
+        return {
+            "chat_stop_seen": bool(self.stop_seen),
+            "chat_completion_signal": self.completion_signal,
+            "chat_stable_ms": self._idle_ms(now) if self.last_delta_at else 0,
+            "chat_final_dom_length": len(final_dom or self.streamed_text or ""),
+            "chat_streamed_length": len(self.streamed_text or ""),
+            "chat_final_text_replaced": bool(self.final_text_replaced),
+            "chat_premature_guard_triggered": bool(self.premature_guard_triggered),
+            "completion_without_stop_seen": bool(self.state == self.CONFIRMED_COMPLETE and not self.stop_seen),
+            "very_short_completion": bool(self.very_short_completion),
+            "state": self.state,
+        }
+
+
+def stop_generating_visible(page, stop_sels=None):
+    names = []
+    for s in (stop_sels or []):
+        if s and s not in names:
+            names.append(s)
+    for s in (
+        "button[data-testid='stop-button']",
+        "button[aria-label*='Stop generating']",
+        "button[aria-label*='Stop streaming']",
+        "button[aria-label*='Stop']",
+        "button[aria-label*='停止']",
+    ):
+        if s not in names:
+            names.append(s)
+    try:
+        loc = page.locator(",".join(names[:6])).first
+        return bool(loc.count() > 0 and loc.is_visible())
+    except Exception:
+        return False
+
+def read_assistant_full(page):
+    try:
+        return (page.evaluate(
+            """() => {
+              const nodes = document.querySelectorAll('[data-message-author-role="assistant"]');
+              const before = window.__relayBefore || 0;
+              if (nodes.length <= before) return '';
+              return (nodes[nodes.length - 1].innerText || '').trim();
+            }"""
+        ) or "").strip()
+    except Exception:
+        return ""
+
+def last_assistant_complete_signal(page):
+    try:
+        return bool(page.evaluate(
+            """() => {
+              const nodes = document.querySelectorAll('[data-message-author-role="assistant"]');
+              const before = window.__relayBefore || 0;
+              if (nodes.length <= before) return false;
+              const n = nodes[nodes.length - 1];
+              const q = (s) => n.querySelector(s);
+              return !!(
+                q('[data-testid="copy-turn-action-button"]') ||
+                q('[data-testid="good-response"]') ||
+                q('button[aria-label*="Copy"]') ||
+                q('button[aria-label*="Good response"]') ||
+                q('button[data-testid="voice-play-turn-action-button"]')
+              );
+            }"""
+        ))
+    except Exception:
+        return False
+
+
 def detect_page_state(page, provider="chatgpt"):
     url = ""
     html = ""
@@ -2295,7 +2512,7 @@ def run_chat(body, ctx=None):
     inp = (sel.get("input") or ["#prompt-textarea", "textarea#prompt-textarea"])[:4]
     send = (sel.get("send") or ["button[data-testid='send-button']", "button[aria-label='Send prompt']"])[:4]
     assistant = (sel.get("assistant") or ["div[data-message-author-role='assistant']"])[:4]
-    stop = (sel.get("streamingStop") or ["button[aria-label='Stop streaming']", "button[data-testid='stop-button']"])[:4]
+    stop = (sel.get("streamingStop") or ["button[aria-label='Stop streaming']", "button[aria-label='Stop generating']", "button[data-testid='stop-button']"])[:4]
     pack_version = body.get("selectorPackVersion") or sel.get("version") or "chatgpt-v1"
     timeout_ms = int(body.get("timeoutMs") or 90000)
     model = (body.get("model") or "gpt-5.6").strip()
@@ -2325,7 +2542,7 @@ def run_chat(body, ctx=None):
         except Exception:
             pass
         arm_page(page)
-        net = {"req": None, "res": None}
+        net = {"req": None, "res": None, "finished": False}
         def on_req(req):
             u = req.url or ""
             if net["req"] is None and any(x in u for x in ("/backend-api/", "/conversation")):
@@ -2334,9 +2551,14 @@ def run_chat(body, ctx=None):
             u = res.url or ""
             if net["res"] is None and any(x in u for x in ("/backend-api/", "/conversation")):
                 net["res"] = time.time()
+        def on_req_done(req):
+            u = req.url or ""
+            if any(x in u for x in ("/backend-api/", "/conversation")):
+                net["finished"] = True
         try:
             page.on("request", on_req)
             page.on("response", on_res)
+            page.on("requestfinished", on_req_done)
         except Exception:
             pass
         mark("T2")
@@ -2443,56 +2665,81 @@ def run_chat(body, ctx=None):
         post_phase("generating", ctx)
         if ctx and ctx.submission_state == "SUBMITTED":
             set_submission_state(ctx, "GENERATING")
-        stop_sel = ",".join(stop)
         want_fast = "thinking" not in (model or "").lower()
         has_images = bool(images)
         first_wait = (40 if has_images else 18) if want_fast else min(120, timeout_ms / 1000.0)
         deadline = time.time() + ((75 if has_images else 45) if want_fast else timeout_ms / 1000.0)
         token_deadline = time.time() + first_wait
         text = ""
-        last_change = time.time()
-        stop_seen = False
         first_delta = False
+        stable_ms = max(chat_stable_ms(), 2000) if has_images else chat_stable_ms()
+        det = AssistantCompletionDetector(stable_ms=stable_ms, confirm_ms=chat_confirm_ms(), stop_stable_ms=chat_stop_stable_ms())
+        det.on_submit(time.time())
         while time.time() < deadline:
-            generating = False
             try:
-                generating = bool(page.locator(stop_sel).first.is_visible())
-                if generating:
-                    stop_seen = True
+                det.on_stop(stop_generating_visible(page, stop), time.time())
             except Exception:
-                generating = False
+                det.on_stop(False, time.time())
+            if net.get("req"):
+                det.on_network_request()
+            if net.get("res"):
+                det.on_network_response()
+            if net.get("finished"):
+                det.on_network_finished(time.time())
+            try:
+                if last_assistant_complete_signal(page):
+                    det.on_semantic_complete(time.time())
+            except Exception:
+                pass
             drained = drain_deltas(page)
             full = (drained.get("full") or "").strip()
             if usable_assistant_text(full):
+                det.on_assistant_node(time.time())
                 piece = "".join(drained.get("deltas") or [])
-                if full != text:
-                    last_change = time.time()
                 if piece:
                     if not first_delta:
                         first_delta = True
                         mark("T8")
-                    post_chunk(piece, "", ctx)
+                    post_chunk(piece, "streaming", ctx)
                 elif not text:
                     if not first_delta:
                         first_delta = True
                         mark("T8")
-                    post_chunk(full, "", ctx)
+                    post_chunk(full, "streaming", ctx)
+                det.on_delta(full, time.time())
                 text = full
-            idle = time.time() - last_change
-            if text and not generating and idle >= (0.6 if has_images else 0.35):
+            st = det.tick(time.time())
+            if st == det.CONFIRMED_COMPLETE:
                 break
-            if text and idle >= (2.2 if has_images else 1.2):
-                break
-            if not first_delta and time.time() > token_deadline:
+            if (not first_delta) and time.time() > token_deadline:
                 break
             time.sleep(0.06)
         mark("T9")
-        if not usable_assistant_text(text):
+        final_dom = read_assistant_full(page)
+        if usable_assistant_text(final_dom) and final_dom != text:
+            det.final_text_replaced = True
+            if final_dom.startswith(text or ""):
+                gap = final_dom[len(text or ""):]
+                if gap:
+                    post_chunk(gap, "streaming", ctx)
+            text = final_dom
+            det.on_delta(final_dom, time.time())
+        chat_obs = det.report(text)
+        print("CHAT_COMPLETION", json.dumps(chat_obs, ensure_ascii=False), flush=True)
+        if det.very_short_completion:
+            print("CHAT_WARN very_short_completion len", len(text or ""), flush=True)
+        if det.state != det.CONFIRMED_COMPLETE:
             pst = detect_page_state(page, "chatgpt")
+            extra = {"pageState": pst, "timing": marks, "profile": profile, "recoveryLevel": recovery_level, "chatCompletion": chat_obs}
+            if usable_assistant_text(text):
+                extra["text"] = text
+                if ctx:
+                    set_submission_state(ctx, "RESULT_UNCERTAIN")
+                return fail_job(ctx, "RESULT_UNCERTAIN: assistant stream ended without confirmed completion", "provider", extra)
             if ctx and ctx.submission_state in POST_SUBMIT_STATES:
                 set_submission_state(ctx, "RESULT_UNCERTAIN")
-                return fail_job(ctx, "RESULT_UNCERTAIN: TIMEOUT empty assistant after submit", "provider", {"pageState": pst, "timing": marks, "profile": profile, "recoveryLevel": recovery_level})
-            return fail_job(ctx, "TIMEOUT: empty assistant", "provider", {"pageState": pst, "timing": marks, "profile": profile})
+                return fail_job(ctx, "RESULT_UNCERTAIN: TIMEOUT empty assistant after submit", "provider", extra)
+            return fail_job(ctx, "TIMEOUT: empty assistant", "provider", extra)
         if ctx:
             set_submission_state(ctx, "RESULT_VALIDATED")
         if "sol" in text.lower() or "reasoning" in text.lower() or "推理" in text:
@@ -2525,6 +2772,13 @@ def run_chat(body, ctx=None):
             "recovery_ms": 0,
             "total_ms": g("T10"),
             "warm_page": bool(already),
+            "chat_stop_seen": bool(chat_obs.get("chat_stop_seen")),
+            "chat_completion_signal": chat_obs.get("chat_completion_signal") or "",
+            "chat_stable_ms": chat_obs.get("chat_stable_ms") or 0,
+            "chat_final_dom_length": len(text or ""),
+            "chat_streamed_length": chat_obs.get("chat_streamed_length") or 0,
+            "chat_final_text_replaced": bool(chat_obs.get("chat_final_text_replaced")),
+            "chat_premature_guard_triggered": bool(chat_obs.get("chat_premature_guard_triggered")),
         }
         print("TIMING", json.dumps(timing, ensure_ascii=False), flush=True)
         return {
@@ -2540,6 +2794,7 @@ def run_chat(body, ctx=None):
             "pageState": "RESULT_READY",
             "latencyMs": timing["total_ms"],
             "timing": timing,
+            "chatCompletion": chat_obs,
             "profile": profile,
             "recoveryLevel": recovery_level,
         }

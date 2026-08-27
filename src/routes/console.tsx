@@ -7,6 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { ImageInput } from "@/components/image-input";
 import { ASPECT_PRESETS, resolutionOptionsFor, type ImageAspect, type ImageK } from "@/lib/provider/image-size";
+import {
+  historyBadgeOk,
+  phaseFromLogical,
+  readSse,
+  type LogicalStatus,
+} from "@/lib/sse-client";
 
 export const Route = createFileRoute("/console")({ component: Page });
 
@@ -33,8 +39,10 @@ type HistoryItem = {
   model: string;
   prompt: string;
   status: number;
+  logicalStatus: LogicalStatus;
   latencyMs: number;
   content: string;
+  errorMessage: string;
   imageUrl: string;
   mode?: string;
   account?: string;
@@ -66,7 +74,9 @@ function Console() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [status, setStatus] = useState<number | null>(null);
+  const [logicalStatus, setLogicalStatus] = useState<LogicalStatus | null>(null);
   const [content, setContent] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [account, setAccount] = useState("");
   const [mode, setMode] = useState("");
@@ -165,7 +175,9 @@ function Console() {
     setElapsed(0);
     setPhase("sending");
     setStatus(null);
+    setLogicalStatus(null);
     setContent("");
+    setErrorMessage("");
     setImageUrl("");
     setAccount("");
     setMode("");
@@ -206,6 +218,8 @@ function Console() {
         });
         const latencyMs = Date.now() - started.current;
         setElapsed(latencyMs);
+        const err = assembled.error?.message || "";
+        const logical = assembled.logicalStatus;
         const finalJson = {
           id: assembled.id || `chatcmpl-${Date.now()}`,
           object: "chat.completion",
@@ -213,25 +227,27 @@ function Console() {
           choices: [
             {
               index: 0,
-              message: { role: "assistant", content: assembled.text || "" },
-              finish_reason: "stop",
+              message: { role: "assistant", content: assembled.text || assembled.partialText || "" },
+              finish_reason: assembled.finishReason || (logical === "success" ? "stop" : logical),
             },
           ],
           relay: {
             accountEmail: assembled.accountEmail,
             mode: assembled.mode,
-            jobId: assembled.id,
+            jobId: assembled.jobId || assembled.id,
+            logicalStatus: logical,
+            transportStatus: assembled.transportStatus,
+            completed: assembled.completed,
           },
           ...(assembled.error ? { error: assembled.error } : {}),
         };
         setRawRes(JSON.stringify(finalJson, null, 2));
-        setContent(assembled.text || assembled.error?.message || "");
-        const err = assembled.error?.message;
-        if (!res.ok || err) {
-          setPhase("error");
-          toast.error(err || `HTTP ${res.status}`);
-        } else {
-          setPhase("done");
+        setContent(assembled.text || assembled.partialText || "");
+        setErrorMessage(err);
+        setLogicalStatus(logical);
+        setPhase(phaseFromLogical(logical));
+        if (logical !== "success") {
+          toast.error(err || `业务失败 · SSE HTTP ${res.status}`);
         }
         pushHistory({
           id: assembled.id || String(Date.now()),
@@ -240,8 +256,10 @@ function Console() {
           model,
           prompt: prompt.trim(),
           status: res.status,
+          logicalStatus: logical,
           latencyMs,
-          content: assembled.text || err || "",
+          content: assembled.text || assembled.partialText || "",
+          errorMessage: err,
           imageUrl: "",
           mode: assembled.mode,
           account: assembled.accountEmail,
@@ -283,21 +301,31 @@ function Console() {
       setMode(json.relay?.mode || "");
       if (!res.ok || json.error) {
         setPhase("error");
-        setContent(json.error?.message || `HTTP ${res.status}`);
+        setLogicalStatus("error");
+        setContent(json.choices?.[0]?.message?.content || "");
+        setErrorMessage(json.error?.message || `HTTP ${res.status}`);
         toast.error(json.error?.message || `HTTP ${res.status}`);
       } else if (kind === "image") {
         const first = json.data?.[0];
         const url = first?.url || (first?.b64_json ? `data:image/png;base64,${first.b64_json}` : "");
         setImageUrl(url);
+        setLogicalStatus(url ? "success" : "error");
         setPhase(url ? "done" : "error");
-        if (!url) toast.error("未返回图片");
+        if (!url) {
+          setErrorMessage("未返回图片");
+          toast.error("未返回图片");
+        }
       } else {
         const text = json.choices?.[0]?.message?.content || "";
         setContent(text);
+        setLogicalStatus(text ? "success" : "error");
         setPhase(text ? "done" : "error");
+        if (!text) setErrorMessage("空响应");
       }
       const first = json.data?.[0];
       const histUrl = first?.url || (first?.b64_json ? `data:image/png;base64,${first.b64_json}` : "");
+      const jsonLogical: LogicalStatus =
+        !res.ok || json.error ? "error" : histUrl || json.choices?.[0]?.message?.content ? "success" : "error";
       pushHistory({
         id: String(Date.now()),
         at: new Date().toISOString(),
@@ -305,8 +333,10 @@ function Console() {
         model: kind === "chat" ? model : imageModel,
         prompt: prompt.trim(),
         status: res.status,
+        logicalStatus: jsonLogical,
         latencyMs,
-        content: json.choices?.[0]?.message?.content || json.error?.message || "",
+        content: json.choices?.[0]?.message?.content || "",
+        errorMessage: json.error?.message || "",
         imageUrl: histUrl,
         mode: json.relay?.mode,
         account: json.relay?.accountEmail,
@@ -315,11 +345,14 @@ function Console() {
     } catch (err) {
       if ((err as { name?: string }).name === "AbortError") {
         setPhase("error");
-        setContent("已停止");
+        setLogicalStatus("cancelled");
+        setErrorMessage("已停止");
+        setContent((c) => c);
         return;
       }
       setPhase("error");
-      setContent(err instanceof Error ? err.message : "请求失败");
+      setLogicalStatus("error");
+      setErrorMessage(err instanceof Error ? err.message : "请求失败");
       toast.error("请求失败");
     }
   }
@@ -334,9 +367,13 @@ function Console() {
       : phase === "streaming"
         ? "正在回写"
         : phase === "done"
-          ? "完成"
+          ? "成功"
           : phase === "error"
-            ? "失败"
+            ? logicalStatus === "uncertain"
+              ? "业务不确定"
+              : logicalStatus === "cancelled"
+                ? "已取消"
+                : "业务失败"
             : "待发送";
 
   return (
@@ -520,7 +557,10 @@ function Console() {
             <Badge tone={phase === "done" ? "ok" : phase === "error" ? "danger" : phase === "idle" ? "default" : "warn"}>
               {phaseLabel}
             </Badge>
-            {status != null && <Badge>HTTP {status}</Badge>}
+            {status != null && <Badge>SSE HTTP {status}</Badge>}
+            {errorMessage && (
+              <Badge tone="danger">{errorMessage.split(":")[0].slice(0, 40)}</Badge>
+            )}
             <span className="font-mono text-xs tabular-nums text-muted">{(elapsed / 1000).toFixed(2)}s</span>
             {account && <span className="font-mono text-[11px] text-subtle">{account}</span>}
             {step && <span className="text-[11px] text-muted">{stepLabel(step)}</span>}
@@ -558,7 +598,19 @@ function Console() {
               {tab === "result" && (
                 <div>
                   {phase === "idle" && <p className="text-sm text-muted">发送后，这里实时显示接口返回。</p>}
+                  {content && phase === "error" && (
+                    <p className="mb-1 text-[11px] uppercase tracking-wide text-subtle">部分输出</p>
+                  )}
                   {content && <p className="whitespace-pre-wrap text-sm leading-relaxed">{content}</p>}
+                  {errorMessage && (
+                    <div className="mt-4 rounded-md border border-danger/30 bg-danger/5 p-3">
+                      <p className="text-[11px] uppercase tracking-wide text-danger">错误</p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-danger">{errorMessage}</p>
+                      {status != null && (
+                        <p className="mt-2 text-[11px] text-subtle">传输层 SSE HTTP {status}，不代表业务成功。</p>
+                      )}
+                    </div>
+                  )}
                   {imageUrl && (
                     <>
                       <img src={imageUrl} alt="生成结果" className="mt-3 max-h-96 w-full rounded-md object-contain" />
@@ -598,8 +650,8 @@ function Console() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge tone={h.status >= 200 && h.status < 300 && (h.content || h.imageUrl) ? "ok" : "danger"}>
-                    {h.status}
+                  <Badge tone={historyBadgeOk(h.logicalStatus) ? "ok" : "danger"}>
+                    {historyBadgeOk(h.logicalStatus) ? "成功" : "失败"} · HTTP {h.status}
                   </Badge>
                   <Button
                     size="sm"
@@ -610,13 +662,15 @@ function Console() {
                       setModel(h.kind === "chat" ? h.model : model);
                       setPrompt(h.prompt);
                       setContent(h.content);
+                      setErrorMessage(h.errorMessage || "");
                       setImageUrl(h.imageUrl);
                       setAccount(h.account || "");
                       setMode(h.mode || "");
                       setStatus(h.status);
+                      setLogicalStatus(h.logicalStatus);
                       setElapsed(h.latencyMs);
                       setRawRes(JSON.stringify(h.raw, null, 2));
-                      setPhase(h.status >= 200 && h.status < 300 ? "done" : "error");
+                      setPhase(phaseFromLogical(h.logicalStatus));
                       setTab("result");
                     }}
                   >
@@ -630,61 +684,6 @@ function Console() {
       )}
     </div>
   );
-}
-
-async function readSse(
-  res: Response,
-  onDelta: (delta: string, meta: { accountEmail?: string; mode?: string; phase?: string; replace?: boolean }) => void,
-) {
-  const reader = res.body?.getReader();
-  if (!reader) return { error: { message: "无法读取流" } } as { error?: { message?: string }; text?: string; id?: string; mode?: string; accountEmail?: string };
-  const decoder = new TextDecoder();
-  let buf = "";
-  let text = "";
-  let id = "";
-  let mode = "";
-  let accountEmail = "";
-  let error: { message?: string } | undefined;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    const parts = buf.split("\n\n");
-    buf = parts.pop() || "";
-    for (const part of parts) {
-      const line = part.split("\n").find((l) => l.startsWith("data:"));
-      if (!line) continue;
-      const data = line.slice(5).trim();
-      if (data === "[DONE]") continue;
-      try {
-        const json = JSON.parse(data) as {
-          id?: string;
-          error?: { message?: string };
-          choices?: { delta?: { content?: string } }[];
-          relay?: { accountEmail?: string; mode?: string; phase?: string; finalText?: string };
-        };
-        if (json.id) id = json.id;
-        if (json.relay?.accountEmail) accountEmail = json.relay.accountEmail;
-        if (json.relay?.mode) mode = json.relay.mode;
-        if (json.error?.message) error = json.error;
-        if (json.relay?.finalText) {
-          text = json.relay.finalText;
-          onDelta(json.relay.finalText, { accountEmail, mode, phase: json.relay.phase, replace: true });
-        } else {
-          const piece = json.choices?.[0]?.delta?.content || "";
-          if (piece) {
-            text += piece;
-            onDelta(piece, { accountEmail, mode, phase: json.relay?.phase });
-          } else {
-            onDelta("", { accountEmail, mode, phase: json.relay?.phase });
-          }
-        }
-      } catch {
-        /* skip malformed chunk */
-      }
-    }
-  }
-  return { id, text, mode, accountEmail, error };
 }
 
 function stepLabel(step: string) {

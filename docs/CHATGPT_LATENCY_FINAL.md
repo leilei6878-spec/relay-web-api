@@ -36,6 +36,19 @@ Total 7037ms
 
 Model dominates. Relay no longer waits for Stop or 30s clicks.
 
+## Completion confirmation (2026-08-27)
+
+The 0.35s “no Stop button ⇒ done” shortcut was **wrong** (truncation to `我是`). Completion now waits 1.5s stable + 0.6s confirm when Stop is never seen, or ~0.4+0.6s after a Stop cycle.
+
+| | Before (buggy) | After (protocol) | Live |
+|---|---|---|---|
+| P50 TTFT | 3753 ms | **unchanged** (deltas still immediate) | **NOT_EXECUTED** this round |
+| P95 TTFT | 5595 ms | **unchanged** | **NOT_EXECUTED** |
+| P50 complete | 7225 ms | previous + **~1.5–2.1s** confirmation when Stop never appears; **~1.0s** after Stop cycle | **NOT_EXECUTED** |
+| premature_completion | present | unit: 350ms pause no longer completes | live 30× **NOT_EXECUTED** |
+
+Do not treat the old 7.2s complete P50 as still valid until a new n≥30 live sample exists.
+
 ## Status of mandated volume
 
 - 50–100 live runs: **PARTIAL** (5 API successes + 8 worker timings after fix)

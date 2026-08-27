@@ -573,3 +573,107 @@ test("gemini and leonardo reuse warm idle pages", () => {
   assert.ok(s.indexOf("cleanup_leonardo(page)", leoStart) > 0);
 });
 
+test("chatgpt completion detector does not finish on 350ms pause", () => {
+  const s = localWorkerScript();
+  assert.match(s, /class AssistantCompletionDetector/);
+  assert.match(s, /RELAY_CHAT_STABLE_MS/);
+  assert.match(s, /RELAY_CHAT_CONFIRM_MS/);
+  assert.equal(s.includes("idle >= (0.6 if has_images else 0.35)"), false);
+  assert.equal(s.includes("idle >= (2.2 if has_images else 1.2)"), false);
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker-pause.py", s);
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      `
+import importlib.util
+spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker-pause.py')
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+d=m.AssistantCompletionDetector(stable_ms=1500, confirm_ms=600, stop_stable_ms=400)
+d.on_submit(0)
+d.on_delta('我是', 1.0)
+d.on_stop(False, 1.0)
+assert d.tick(1.5)=='STREAMING', d.state
+d.on_delta('我是GPT-5.6', 1.6)
+d.on_delta('我是GPT-5.6。三句话说明。', 2.0)
+assert d.tick(2.5)=='STREAMING', d.state
+assert d.tick(3.6)=='POSSIBLY_COMPLETE', d.state
+assert d.tick(4.3)=='CONFIRMED_COMPLETE', d.state
+assert 'GPT-5.6' in d.streamed_text
+print('pause-350-ok')
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /pause-350-ok/);
+});
+
+test("chatgpt completion waits through five chunks without stop button", () => {
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker-nostop.py", localWorkerScript());
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      `
+import importlib.util
+spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker-nostop.py')
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+d=m.AssistantCompletionDetector(stable_ms=1500, confirm_ms=600, stop_stable_ms=400)
+d.on_submit(0)
+chunks=['一','一二','一二三','一二三四','一二三四五完整']
+for i,c in enumerate(chunks):
+    t=1+i*0.2
+    d.on_delta(c, t)
+    d.on_stop(False, t)
+    st=d.tick(t+0.35)
+    assert st!='CONFIRMED_COMPLETE', (i, st)
+    if i==0:
+        assert st=='STREAMING'
+assert d.streamed_text=='一二三四五完整'
+last=1+4*0.2
+assert d.tick(last+1.6)=='POSSIBLY_COMPLETE', d.state
+assert d.tick(last+2.3)=='CONFIRMED_COMPLETE', d.state
+assert d.completion_signal=='fallback_stable'
+print('no-stop-five-ok')
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /no-stop-five-ok/);
+});
+
+test("chatgpt completion confirms after stop seen then gone", () => {
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker-stop.py", localWorkerScript());
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      `
+import importlib.util
+spec=importlib.util.spec_from_file_location('w','/tmp/relay-qa/worker-stop.py')
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+d=m.AssistantCompletionDetector(stable_ms=1500, confirm_ms=600, stop_stable_ms=400)
+d.on_submit(0)
+d.on_stop(True, 1.0)
+d.on_delta('hello ', 1.1)
+d.on_delta('hello world', 1.4)
+d.on_stop(False, 1.5)
+assert d.tick(1.6)=='STREAMING', d.state
+assert d.tick(1.85)=='POSSIBLY_COMPLETE', d.state
+assert d.tick(2.5)=='CONFIRMED_COMPLETE', d.state
+assert d.completion_signal=='stop_cycle'
+assert d.stop_seen is True
+print('stop-seen-ok')
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /stop-seen-ok/);
+});
+

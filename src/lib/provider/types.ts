@@ -84,6 +84,7 @@ export type VersionedSelectorPack = {
   send: string[];
   assistant: string[];
   streamingStop: string[];
+  generationComplete?: string[];
   modelSwitcher?: string[];
   fileInput?: string[];
   imageResult?: string[];

@@ -78,3 +78,14 @@ Status vocabulary: PASS | PARTIAL | FAIL | NOT_EXECUTED | BLOCKED_BY_ENVIRONMENT
 3. Operator-run 1h soak and post-submit crash injection on a real worker.
 
 Until those exist, the campaign is **code-complete** and **live-incomplete**. Do not ship a “certified” claim.
+
+## Follow-up 2026-08-27 — ChatGPT SSE truncation + status split
+
+| Item | Status |
+|---|---|
+| 0.35s early-break removed | **PASS** unit |
+| Stop-absent fallback 1.5s+confirm | **PASS** unit |
+| SSE HTTP 200 ≠ logical success | **PASS** unit (`sse-client.test.ts`) |
+| History vs header same logicalStatus | **PASS** unit |
+| 30× live Instant prompt | **NOT_EXECUTED** |
+

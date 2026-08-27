@@ -444,7 +444,20 @@ export function streamChat(
         const text = done?.text || assembled;
         if (!done || done.status !== "done" || !text || text.startsWith("MOCK:")) {
           const error = done?.error || "执行器未返回模型原文";
-          await send({ error: { message: error }, relay: { phase: "error" } });
+          const uncertain = /UNCERTAIN/i.test(error);
+          await send({
+            error: { message: error },
+            relay: {
+              phase: "error",
+              logicalStatus: uncertain ? "uncertain" : "error",
+              partialText: assembled || done?.text || "",
+              jobId: queued.job.id,
+              requestId: queued.job.requestId,
+              sse_transport_status: 200,
+              sse_logical_status: uncertain ? "uncertain" : "error",
+              sse_partial_before_error: Boolean(assembled || done?.text),
+            },
+          });
           await logUsage(key, model, { images }, prompt, started, { ok: false, status: 504, error });
           await finish();
           return;
@@ -466,6 +479,7 @@ export function streamChat(
           choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
           relay: {
             phase: "done",
+            logicalStatus: "success",
             accountEmail: queued.job.accountEmail,
             mode: "live",
             jobId: queued.job.id,
