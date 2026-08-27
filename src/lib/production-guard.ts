@@ -192,6 +192,9 @@ export function bootProductionGuard() {
   if (booted) return;
   booted = true;
   assertProductionFailClosed();
+  if (process.env.RELAY_TEST !== "1") {
+    void import("./provider-canary-scheduler").then((m) => m.startProviderCanaryScheduler()).catch(() => undefined);
+  }
 }
 
 export function resetProductionGuardForTests() {

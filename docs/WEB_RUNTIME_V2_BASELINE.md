@@ -94,7 +94,8 @@ Live Chat/Image E2E, soak, and chaos in this environment: **NOT_EXECUTED**.
 | 7 | Unified image validation and exact result contract | `f0a5f84` | NOT_LIVE_TESTED |
 | 8 | Stream image assets outside job JSON | `01bb629` | NOT_LIVE_TESTED |
 | 9 | Warm image provider runtime | `d443be6` | NOT_LIVE_TESTED |
-| 10 | Strict model truth and selector contract | this commit | NOT_LIVE_TESTED |
-| 11–12 | canary / E2E | pending | |
+| 10 | Strict model truth and selector contract | `c210e70` | NOT_LIVE_TESTED |
+| 11 | Automated provider canary and selector promotion | this commit | NOT_LIVE_TESTED |
+| 12 | Live acceptance campaign | pending | |
 
 Each remaining commit: relay unit tests before the next. Live E2E stays **NOT_EXECUTED** until actually run.

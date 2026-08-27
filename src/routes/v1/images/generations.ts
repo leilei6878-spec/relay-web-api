@@ -303,7 +303,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     });
     if (!queued.ok) {
       last = queued.error;
-      if (queued.error.includes("circuit OPEN")) break;
+      if (queued.error.includes("circuit OPEN") || queued.error.includes("QUEUE_FULL")) break;
       exclude.push(account.id);
       continue;
     }
@@ -335,7 +335,8 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
   }
   await completeRequest(reqId, { ok: false, finalError: last });
   await log({ ok: false, error: last });
-  return Response.json({ error: { message: last } }, { status: 504, headers: cors() });
+  const status = last.includes("QUEUE_FULL") ? 429 : 504;
+  return Response.json({ error: { message: last } }, { status, headers: cors() });
 }
 
 async function imagePayload(

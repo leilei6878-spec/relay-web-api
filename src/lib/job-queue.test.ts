@@ -157,3 +157,14 @@ test("wait deadline cancel is terminal and frees the account", async () => {
   const second = await enqueueChat("next", "gpt-5.6", 8000, [], { idempotencyKey: `next-${Date.now()}` });
   assert.equal(second.ok, true, second.ok ? "" : second.error);
 });
+
+test("queue cap returns QUEUE_FULL 429", async () => {
+  await seed();
+  process.env.RELAY_QUEUE_CAP = "1";
+  const a = await enqueueChat("one", "gpt-5.6", 8000, [], { idempotencyKey: `cap-a-${Date.now()}` });
+  assert.equal(a.ok, true);
+  const b = await enqueueChat("two", "gpt-5.6", 8000, [], { idempotencyKey: `cap-b-${Date.now()}` });
+  assert.equal(b.ok, false);
+  if (!b.ok) assert.match(b.error, /QUEUE_FULL: 429/);
+  delete process.env.RELAY_QUEUE_CAP;
+});

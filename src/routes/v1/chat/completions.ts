@@ -222,8 +222,8 @@ export async function runChat(
       selectorPackVersion,
     });
     if (!queued.ok) {
-      last = { ok: false, status: 503, error: queued.error };
-      if (queued.error.includes("circuit OPEN")) break;
+      last = { ok: false, status: queued.error.includes("QUEUE_FULL") ? 429 : 503, error: queued.error };
+      if (queued.error.includes("circuit OPEN") || queued.error.includes("QUEUE_FULL")) break;
       exclude.push(account.id);
       continue;
     }

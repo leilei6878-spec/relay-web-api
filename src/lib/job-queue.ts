@@ -304,6 +304,14 @@ async function enqueue(
   opts: EnqueueOpts = {},
 ) {
   return locked(async () => {
+    const cap = Number(process.env.RELAY_QUEUE_CAP || 200);
+    if ((opts.kind || "") !== "canary" && Number.isFinite(cap) && cap > 0) {
+      const peek = await load();
+      const depth = peek.jobs.filter((j) => j.status === "queued" || j.status === "running").length;
+      if (depth >= cap) {
+        return { ok: false as const, error: `QUEUE_FULL: 429 depth ${depth} cap ${cap}` };
+      }
+    }
     if (opts.idempotencyKey) {
       const idemKey = `idem:${opts.idempotencyKey}`;
       const holder = "__pending__";
