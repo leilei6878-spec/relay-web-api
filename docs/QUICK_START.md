@@ -8,7 +8,6 @@ You do not need the Grok workspace to run Relay.
 git clone git@github.com:leilei6878-spec/relay-web-api.git
 cd relay-web-api
 npm ci
-cp .env.example .env          # leave NODE_ENV unset for preview
 npm run dev                   # http://0.0.0.0:8080
 ```
 
@@ -23,11 +22,11 @@ curl http://127.0.0.1:8080/v1/models \
 
 ```
 cp .env.example .env
-# fill DATABASE_URL-equivalent via compose, RELAY_ADMIN_TOKEN, RELAY_WORKER_TOKEN,
-# RELAY_SECRETS_KEY, S3_* (or enable the minio profile)
+# fill POSTGRES_PASSWORD, RELAY_ADMIN_TOKEN, RELAY_WORKER_TOKEN,
+# RELAY_SECRETS_KEY, RELAY_PUBLIC_URL and S3_*; no required value has a default
 docker compose -f docker-compose.production.yml up -d --build
-curl -sf http://127.0.0.1:8080/healthz
-curl -sf http://127.0.0.1:8080/readyz
+curl -sf http://127.0.0.1:8088/healthz
+curl -sf http://127.0.0.1:8088/readyz
 ```
 
 `NODE_ENV=production` without Postgres, Redis, admin/worker secrets, encryption key, or object storage **will not become READY**.

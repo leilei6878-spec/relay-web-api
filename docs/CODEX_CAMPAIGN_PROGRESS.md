@@ -45,7 +45,8 @@ At takeover:
 | 4 | Image provenance/validator/media closure | COMPLETE | Commit `ac0ae39`; frozen refs, strict confidence/assets/history, DOM correlation, WebP, WARM_IDLE fail-closed. |
 | 5 | Canary + selector self-healing closure | COMPLETE | Commit `71fd1f1`; distributed dispatch lease, real paid canary, shared selector state, finish-path fingerprint/promotion. |
 | 6 | Provider/capability/key backpressure | COMPLETE | Commit `71fd1f1`; global/provider/chat/image/key caps, file + distributed PG admission, 429/Retry-After. |
-| 7 | Full local automated campaign | COMPLETE | Relay 207/207; core 96 pass + 1 environment skip; CI 16 pass + 1 environment skip; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
+| 7 | Full local automated campaign | COMPLETE | Relay 207/207; core 101/101; CI 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
+| 7B | Production recovery + Compose contract | COMPLETE | Versioned/checksummed backup includes secrets/sessions; DB backup/restore fail closed; Compose has no required-secret defaults and host health port is consistently 8088. CLI/contract tests 6/6 pass. |
 | 8 | Real providers + soak | BLOCKED_BY_ENVIRONMENT | Needs healthy sessions/accounts and reachable production worker/infrastructure. |
 | 9 | Final acceptance | PENDING | `CODEX_FINAL_ACCEPTANCE.md`, requirement-by-requirement completion audit. |
 
@@ -85,10 +86,9 @@ runs. No zero is inferred from unit tests:
 ## Phase 7 evidence (2026-08-28)
 
 - `npm run test:relay`: **207/207 PASS**.
-- `npm test`: **96 PASS**, 1 environment skip (`worker.py` bootstrap-only
-  template gate), 0 failures.
+- `npm test`: **101/101 PASS**.
 - `npm run test:ci`: Relay **207/207 PASS** plus multi-process/contract suite
-  **16 PASS**, 1 environment skip, 0 failures.
+  **21/21 PASS**.
 - `npm run test:chaos`: **18/18 PASS** across two gateways with shared PGlite
   and Redis, including process/database restarts and fenced stale results.
 - `npm run test:reliability`: 120,415 ms, **228/228**, lost requests 0,

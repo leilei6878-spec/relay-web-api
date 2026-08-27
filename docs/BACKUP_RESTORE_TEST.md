@@ -1,6 +1,6 @@
 # Backup / Restore Test
 
-Date: 2026-08-26
+Date: 2026-08-28
 
 ## What ran
 
@@ -12,14 +12,21 @@ Date: 2026-08-26
 4. Create PGlite B, apply the same migrations.
 5. Restore snapshot.
 6. Assert email, request status, and `relay_meta.schema_version = 4`.
+7. Run the real backup CLI against isolated filesystem state and verify that
+   encrypted secrets plus session cookies are present in the manifest.
+8. Dry-run and execute the real restore CLI; compare restored contents.
+9. Tamper with a backup and verify restore rejects its size/checksum.
+10. Simulate missing `pg_dump` in production and verify backup exits non-zero
+    with `complete=false`; verify restore rejects it.
+11. Verify required missing dumps and manifest path traversal are rejected.
 
 ## Result
 
-**PASS** (executed as part of `npm run test:ci` in this workspace).
+**PASS — 4/4 tests** (executed as part of `npm run test:ci`).
 
 ## What did not run
 
 | Test | Status |
 |---|---|
-| `pg_dump` / `psql` against Postgres 16 | NOT_EXECUTED (binaries + Docker absent) |
+| `pg_dump` / `pg_restore` against Postgres 16 | BLOCKED_BY_ENVIRONMENT (deployment host unreachable here) |
 | Restore then boot gateway + `/v1/models` | NOT_EXECUTED in this workspace; required on first production host |

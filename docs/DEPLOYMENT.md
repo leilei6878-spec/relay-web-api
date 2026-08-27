@@ -6,7 +6,7 @@ Two supported ways. Neither requires the Grok preview.
 
 Files: `Dockerfile`, `Dockerfile.worker`, `docker-compose.production.yml`.
 
-Services: `postgres`, `redis`, `gateway`, `worker`. Optional profile `minio`.
+Services: `postgres`, `redis`, bundled `minio`, `gateway`, and `worker`.
 
 ```
 cp .env.example .env
@@ -14,7 +14,8 @@ cp .env.example .env
 docker compose -f docker-compose.production.yml up -d --build
 ```
 
-Gateway entrypoint runs `npm run db:migrate` then `vite preview` on `0.0.0.0:8080`.
+Gateway entrypoint runs `npm run db:migrate` then `vite preview` on container
+port `8080`, published by default at host `127.0.0.1:8088`.
 Worker entrypoint runs the Playwright Python daemon against `RELAY_GATEWAY`.
 
 **Compose-up in the Grok workspace: NOT_EXECUTED** (no Docker daemon). Verify on the first real host before calling the install production.

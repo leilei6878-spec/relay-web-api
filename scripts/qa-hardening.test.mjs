@@ -1,14 +1,31 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
-test("worker python compiles", (t) => {
-  const path = existsSync("/workspace/storage/worker.py") ? "/workspace/storage/worker.py" : "";
-  if (!path) {
-    t.skip("worker.py not bootstrapped");
-    return;
-  }
-  const r = spawnSync("python3", ["-m", "py_compile", path], { encoding: "utf8" });
+const PYTHON = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
+
+test("exported worker python compiles", () => {
+  const path = existsSync("/workspace/storage/worker.py") ? "/workspace/storage/worker.py" : "workers/relay-worker.py";
+  assert.equal(existsSync(path), true, `worker script missing: ${path}`);
+  const r = spawnSync(PYTHON, ["-m", "py_compile", path], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr || r.stdout);
+});
+
+test("production Compose requires secrets and publishes the documented host port", () => {
+  const compose = readFileSync("docker-compose.production.yml", "utf8");
+  for (const name of [
+    "POSTGRES_PASSWORD",
+    "S3_ACCESS_KEY",
+    "S3_SECRET_KEY",
+    "S3_BUCKET",
+    "RELAY_ADMIN_TOKEN",
+    "RELAY_WORKER_TOKEN",
+    "RELAY_SECRETS_KEY",
+    "RELAY_PUBLIC_URL",
+  ]) {
+    assert.ok(compose.includes(`\${${name}:?`), `${name} must use required Compose interpolation`);
+  }
+  assert.doesNotMatch(compose, /POSTGRES_PASSWORD:-relay|S3_SECRET_KEY:-relayrelay1/);
+  assert.match(compose, /RELAY_BIND:-127\.0\.0\.1:8088/);
 });
