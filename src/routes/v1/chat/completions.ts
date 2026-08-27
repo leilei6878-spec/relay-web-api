@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { assertApiKey, pickAccount, readControlPlane } from "@/lib/control-plane";
 import { poolUnavailableMessage } from "@/lib/eligibility";
 import { getCircuit } from "@/lib/circuit";
-import { decide } from "@/lib/fault-matrix";
+import { decideWithSafety } from "@/lib/fault-matrix";
 import { enqueueChat, getJob, liveWorkerOnline, waitJob, cancelJob } from "@/lib/job-queue";
 import { nextSseDelta, subscribeJob } from "@/lib/job-events";
 import { parseMessageContent } from "@/lib/media";
@@ -247,10 +247,9 @@ export async function runChat(
       };
     }
     const err = done.ok ? "执行器未返回模型原文" : done.error;
-    const decision = decide(err, fresh.fault);
+    const decision = decideWithSafety(err, fresh.fault, fresh.retrySafety, fresh.submissionState);
     last = { ok: false, status: 504, error: err };
-    const safety = String(fresh.retrySafety || "");
-    if (safety === "UNSAFE" || safety === "UNKNOWN" || !decision.switch_account) {
+    if (!decision.switch_account) {
       break;
     }
     exclude.push(account.id);

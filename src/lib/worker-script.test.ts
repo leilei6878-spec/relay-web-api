@@ -412,3 +412,47 @@ print("ok")
   assert.equal(out.status, 0, out.stderr || out.stdout);
   assert.match(out.stdout, /ok/);
 });
+
+test("warmup_respects_account_proxy and shard owner", () => {
+  mkdirSync("/tmp/relay-qa", { recursive: true });
+  writeFileSync("/tmp/relay-qa/worker.py", localWorkerScript());
+  const out = spawnSync(
+    "python3",
+    [
+      "-c",
+      `
+import importlib.util
+spec = importlib.util.spec_from_file_location("w", "/tmp/relay-qa/worker.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+found = [("acc-A", "/s/acc-A.json"), ("acc-B", "/s/acc-B.json"), ("acc-C", "/s/acc-C.json")]
+proxies = {
+  "acc-A": {"id": "pA", "server": "socks5://10.0.0.1:1080"},
+  "acc-B": {"id": "pB", "server": "socks5://10.0.0.2:1080"},
+}
+plan0 = m.warmup_plan(found, 0, proxies, 3)
+plan1 = m.warmup_plan(found, 1, proxies, 3)
+plan2 = m.warmup_plan(found, 2, proxies, 3)
+all_rows = plan0 + plan1 + plan2
+ids = [r["accountId"] for r in all_rows]
+assert "acc-C" not in ids, ids
+assert "acc-A" in ids and "acc-B" in ids
+for r in all_rows:
+    assert r["proxy"]["id"] in ("pA", "pB")
+    if r["accountId"] == "acc-A":
+        assert r["proxy"]["server"].endswith("10.0.0.1:1080")
+    if r["accountId"] == "acc-B":
+        assert r["proxy"]["server"].endswith("10.0.0.2:1080")
+    assert r["shard"] == m.shard_for_account(r["accountId"]) if m.SHARD_COUNT == 3 else True
+from collections import Counter
+c = Counter(ids)
+assert all(v == 1 for v in c.values()), c
+none = m.warmup_plan(found, 0, {}, 3)
+assert none == []
+print("ok")
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /ok/);
+});

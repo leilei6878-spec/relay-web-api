@@ -1273,6 +1273,112 @@ def shard_for_account(aid):
         h = (h * 16777619) & 0xffffffff
     return h % n
 
+def proxy_from_plane_row(p):
+    if not isinstance(p, dict):
+        return None
+    if p.get("server"):
+        out = dict(p)
+        out["id"] = str(p.get("id") or "")
+        return out
+    typ = str(p.get("type") or "socks5").lower()
+    host = str(p.get("host") or "")
+    port = p.get("port")
+    if typ == "ss":
+        lp = p.get("localPort") or os.environ.get("RELAY_SS_LOCAL_PORT") or "18080"
+        server = "socks5://127.0.0.1:%s" % lp
+    elif host and port:
+        scheme = "http" if typ == "http" else "socks5"
+        server = "%s://%s:%s" % (scheme, host, port)
+    else:
+        return None
+    return {"id": str(p.get("id") or ""), "server": server, "username": p.get("username") or ""}
+
+def load_account_proxies():
+    out = {}
+    raw = os.environ.get("RELAY_ACCOUNT_PROXIES") or ""
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                for k, v in parsed.items():
+                    row = proxy_from_plane_row(v) if isinstance(v, dict) else None
+                    if row:
+                        out[str(k)] = row
+        except Exception:
+            pass
+    for name in ("account-proxies.json", "control-plane.json"):
+        path = os.path.join(HERE, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            continue
+        if name == "control-plane.json" and isinstance(data, dict):
+            proxies = {}
+            for p in data.get("proxies") or []:
+                row = proxy_from_plane_row(p)
+                if row and row.get("id"):
+                    proxies[row["id"]] = row
+            for acc in data.get("accounts") or []:
+                if not isinstance(acc, dict):
+                    continue
+                aid = str(acc.get("id") or "")
+                pid = acc.get("proxyId")
+                bound = proxies.get(pid) if pid else None
+                if aid and bound:
+                    out[aid] = bound
+        elif isinstance(data, dict):
+            for k, v in data.items():
+                row = proxy_from_plane_row(v) if isinstance(v, dict) else None
+                if row:
+                    out[str(k)] = row
+    sess_dir = os.path.join(HERE, "sessions")
+    if os.path.isdir(sess_dir):
+        for n in os.listdir(sess_dir):
+            if not n.endswith(".proxy.json"):
+                continue
+            aid = n[:-11]
+            try:
+                with open(os.path.join(sess_dir, n), "r", encoding="utf-8") as f:
+                    row = proxy_from_plane_row(json.load(f))
+                if aid and row:
+                    out[aid] = row
+            except Exception:
+                continue
+    return out
+
+def account_bound_proxy(aid, proxies=None):
+    table = proxies if isinstance(proxies, dict) else load_account_proxies()
+    row = table.get(str(aid or ""))
+    if isinstance(row, dict) and row.get("server"):
+        return row
+    return None
+
+def warmup_plan(found, shard_idx, proxies=None, shard_count=None):
+    n = max(1, int(shard_count if shard_count is not None else SHARD_COUNT))
+    idx = int(shard_idx)
+    table = proxies if isinstance(proxies, dict) else {}
+    out = []
+    seen = set()
+    for aid, path in found or []:
+        aid = str(aid or "")
+        if not aid or aid in seen:
+            continue
+        seen.add(aid)
+        h = 2166136261
+        for ch in aid:
+            h ^= ord(ch)
+            h = (h * 16777619) & 0xffffffff
+        if (h % n) != idx:
+            continue
+        proxy = account_bound_proxy(aid, table)
+        if not proxy:
+            continue
+        out.append({"accountId": aid, "path": path, "proxy": proxy, "shard": idx})
+    return out
+
 class PlaywrightShard:
     def __init__(self, idx):
         self.idx = idx
@@ -1411,28 +1517,32 @@ def arm_page(page):
     return
 
 def warm_sessions():
-    playwright_inst()
-    proxy = pick_proxy() or {"server": "socks5://127.0.0.1:18080"}
+    shard = current_shard()
+    if shard is None:
+        return
     sess_dir = os.path.join(HERE, "sessions")
     found = []
     if os.path.isdir(sess_dir):
         for n in os.listdir(sess_dir):
             path = os.path.join(sess_dir, n)
             try:
-                if n.endswith(".json") and os.path.getsize(path) > 5000:
+                if n.endswith(".json") and not n.endswith(".proxy.json") and os.path.getsize(path) > 5000:
                     found.append((n[:-5], path))
             except Exception:
                 continue
-    if not found:
-        get_pooled_context(proxy, None, "_warm")
-        print("browser warm", flush=True)
+    plan = warmup_plan(found, shard.idx, load_account_proxies())
+    if not plan:
+        print("warmup skip shard", shard.idx, "no shard-owned account with bound proxy", flush=True)
         return
-    for aid, path in found[:3]:
+    playwright_inst()
+    for row in plan:
+        aid = row["accountId"]
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(row["path"], "r", encoding="utf-8") as f:
                 state = json.load(f)
             if not (state.get("cookies") or []):
                 continue
+            proxy = row["proxy"]
             browser, ctx, page, key = get_pooled_context(proxy, state, aid)
             if page is None:
                 page = ctx.new_page()
@@ -1440,7 +1550,7 @@ def warm_sessions():
                 page.goto("https://chatgpt.com/?temporary-chat=true", wait_until="domcontentloaded", timeout=25000)
                 page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea", timeout=15000)
             remember_page(key, page)
-            print("session warm", aid[:8], flush=True)
+            print("session warm", aid[:8], "shard", shard.idx, "proxy", proxy.get("id") or proxy.get("server"), flush=True)
         except Exception as e:
             print("session warm fail", aid[:8], e, flush=True)
 

@@ -135,7 +135,7 @@ export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
   GENERATION_TIMEOUT: {
     code: "GENERATION_TIMEOUT",
     fault_domain: "infra",
-    retry_same_account: false,
+    retry_same_account: true,
     switch_account: false,
     switch_proxy: false,
     provider_circuit_effect: "none",
@@ -238,19 +238,11 @@ export const FAILURE_MATRIX: Record<ErrorCode, FaultDecision> = {
     provider_circuit_effect: "trip",
     account_health_effect: "none",
   },
-  LEONARDO_GENERATION_FAILED: {
-    code: "LEONARDO_GENERATION_FAILED",
-    fault_domain: "provider",
-    retry_same_account: false,
-    switch_account: false,
-    switch_proxy: false,
-    provider_circuit_effect: "none",
-    account_health_effect: "none",
-  },
+  LEONARDO_GENERATION_FAILED: accountSwitch("LEONARDO_GENERATION_FAILED", "failCount", "provider"),
   LEONARDO_GENERATION_TIMEOUT: {
     code: "LEONARDO_GENERATION_TIMEOUT",
     fault_domain: "infra",
-    retry_same_account: false,
+    retry_same_account: true,
     switch_account: false,
     switch_proxy: false,
     provider_circuit_effect: "none",
@@ -347,4 +339,47 @@ export function shouldTripCircuit(error?: string, faultHint?: string) {
 
 export function mutatesAccountHealth(error?: string, faultHint?: string) {
   return decide(error, faultHint).account_health_effect !== "none";
+}
+
+export const POST_SUBMIT_STATES = new Set([
+  "SUBMITTED",
+  "GENERATING",
+  "RESULT_DETECTED",
+  "RESULT_VALIDATED",
+  "COMPLETED",
+  "SUBMISSION_UNCERTAIN",
+  "RESULT_UNCERTAIN",
+]);
+
+export type RetrySafety = "SAFE" | "UNSAFE" | "UNKNOWN";
+
+export function resolveRetrySafety(
+  safety?: string | null,
+  submissionState?: string | null,
+  error?: string | null,
+): RetrySafety {
+  const s = String(safety || "").toUpperCase();
+  if (s === "SAFE" || s === "UNSAFE" || s === "UNKNOWN") return s as RetrySafety;
+  const st = String(submissionState || "").toUpperCase();
+  if (st === "SUBMISSION_UNCERTAIN" || st === "SUBMITTING") return "UNKNOWN";
+  if (POST_SUBMIT_STATES.has(st)) return "UNSAFE";
+  const t = String(error || "").toUpperCase();
+  if (t.includes("SUBMISSION_UNCERTAIN") || t.includes("SEND_NOT_ACKED")) return "UNKNOWN";
+  if (t.includes("RESULT_UNCERTAIN")) return "UNSAFE";
+  return "SAFE";
+}
+
+/** retrySafety beats submissionState beats fault code. UNKNOWN/UNSAFE never regenerate. */
+export function decideWithSafety(
+  error?: string,
+  faultHint?: string,
+  safety?: string | null,
+  submissionState?: string | null,
+): FaultDecision {
+  const base = decide(error, faultHint);
+  const resolved = resolveRetrySafety(safety, submissionState, error);
+  if (resolved === "UNSAFE" || resolved === "UNKNOWN") {
+    return { ...base, retry_same_account: false, switch_account: false, switch_proxy: false };
+  }
+  return base;
 }

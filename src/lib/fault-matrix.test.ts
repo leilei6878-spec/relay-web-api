@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decide, FAILURE_MATRIX, normalizeError } from "./fault-matrix.ts";
+import { decide, decideWithSafety, FAILURE_MATRIX, normalizeError, resolveRetrySafety } from "./fault-matrix.ts";
 
 test("every required error code has a decision", () => {
   const required = [
@@ -100,10 +100,25 @@ test("post-submit uncertain never switches account or retries generation", () =>
   assert.equal(result.code, "RESULT_UNCERTAIN");
   assert.equal(result.switch_account, false);
   assert.equal(result.retry_same_account, false);
-  const timeout = decide("GENERATION_TIMEOUT: wait");
-  assert.equal(timeout.retry_same_account, false);
-  assert.equal(timeout.switch_account, false);
-  const failed = decide("LEONARDO_GENERATION_FAILED: generate did not start");
-  assert.equal(failed.switch_account, false);
-  assert.equal(failed.retry_same_account, false);
+});
+
+test("retry_safety_precedes_fault_code", () => {
+  assert.equal(resolveRetrySafety("SAFE", "SUBMITTED"), "SAFE");
+  assert.equal(resolveRetrySafety("", "SUBMITTED"), "UNSAFE");
+  assert.equal(resolveRetrySafety("", "SUBMITTING"), "UNKNOWN");
+  const pre = decide("LEONARDO_GENERATION_FAILED: generate button missing");
+  assert.equal(pre.switch_account, true);
+  const safe = decideWithSafety("LEONARDO_GENERATION_FAILED: composer", undefined, "SAFE", "COMPOSER_READY");
+  assert.equal(safe.switch_account, true);
+  const unsafe = decideWithSafety("LEONARDO_GENERATION_FAILED: timeout", undefined, "UNSAFE", "GENERATING");
+  assert.equal(unsafe.switch_account, false);
+  assert.equal(unsafe.retry_same_account, false);
+  const unknown = decideWithSafety("GENERATION_TIMEOUT: wait", undefined, "UNKNOWN", "SUBMITTING");
+  assert.equal(unknown.switch_account, false);
+  assert.equal(unknown.retry_same_account, false);
+  const timeoutSafe = decideWithSafety("GENERATION_TIMEOUT: wait", undefined, "SAFE", "PREPARING");
+  assert.equal(timeoutSafe.retry_same_account, true);
+  const imageUnsafe = decideWithSafety("IMAGE_NOT_FOUND", undefined, "UNSAFE", "GENERATING");
+  assert.equal(imageUnsafe.switch_account, false);
+  assert.equal(imageUnsafe.retry_same_account, false);
 });

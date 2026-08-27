@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertApiKey, pickAccount, readControlPlane } from "@/lib/control-plane";
 import { poolUnavailableMessage } from "@/lib/eligibility";
-import { decide } from "@/lib/fault-matrix";
+import { decideWithSafety } from "@/lib/fault-matrix";
 import { enqueueImage, getJob, liveWorkerOnline, waitJob } from "@/lib/job-queue";
 import { defaultPrompt, MAX_IMAGES_LEONARDO, parseImageRequest } from "@/lib/media";
 import { completeRequest, createRelayRequest } from "@/lib/requests";
@@ -304,9 +304,8 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
       );
     }
     last = done.ok ? "未返回图片" : done.error;
-    const decision = decide(last, fresh.fault);
-    const safety = String(fresh.retrySafety || "");
-    if (safety === "UNSAFE" || safety === "UNKNOWN" || !decision.switch_account) break;
+    const decision = decideWithSafety(last, fresh.fault, fresh.retrySafety, fresh.submissionState);
+    if (!decision.switch_account) break;
     exclude.push(account.id);
   }
   await completeRequest(reqId, { ok: false, finalError: last });

@@ -29,4 +29,12 @@ PROXY_IDENTITY_MISMATCH
 
 Stop. Do not continue on the provider page.
 
-`proxy_drift` must stay 0.
+Warmup is the same rule. A shard may open Account A only when:
+
+```
+shard_for_account(A) == current_shard
+AND Account A has a bound proxy
+```
+
+If the bound proxy is missing, skip warmup for that account. Never `pick_proxy()` into ChatGPT during warmup.
+
