@@ -682,12 +682,15 @@ export function finishJob(
       }
     }
     if (urls.length && result.ok && (job.platform === "gemini" || job.platform === "leonardo") && job.kind !== "canary") {
-      const stored = await persistImageUrls(urls);
-      if (stored.ok) {
-        urls = stored.urls;
-        url = stored.urls[0];
-      } else {
-        result = { ...result, ok: false, error: `IMAGE_NOT_FOUND: media store ${stored.error}` };
+      const needsPersist = urls.some((u) => u.startsWith("data:"));
+      if (needsPersist) {
+        const stored = await persistImageUrls(urls);
+        if (stored.ok) {
+          urls = stored.urls;
+          url = stored.urls[0];
+        } else {
+          result = { ...result, ok: false, error: `IMAGE_NOT_FOUND: media store ${stored.error}` };
+        }
       }
     }
     job.status = result.ok && has && !result.error ? "done" : "error";

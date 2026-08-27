@@ -22,7 +22,7 @@ export interface MediaStore {
 }
 
 const ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
-const MAX_BYTES = 12 * 1024 * 1024;
+const MAX_BYTES = 20 * 1024 * 1024;
 
 export function validateMedia(buf: Buffer, mime: string) {
   const normalized = (mime || "").split(";")[0]!.trim().toLowerCase();

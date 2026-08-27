@@ -395,11 +395,14 @@ export async function finishJobPg(
     }
   }
   if (urls.length && result.ok && (current.platform === "gemini" || current.platform === "leonardo")) {
-    const stored = await persistImageUrls(urls);
-    if (stored.ok) {
-      urls = stored.urls;
-      url = stored.urls[0];
-    } else result = { ...result, ok: false, error: `IMAGE_NOT_FOUND: media store ${stored.error}` };
+    const needsPersist = urls.some((u) => u.startsWith("data:"));
+    if (needsPersist) {
+      const stored = await persistImageUrls(urls);
+      if (stored.ok) {
+        urls = stored.urls;
+        url = stored.urls[0];
+      } else result = { ...result, ok: false, error: `IMAGE_NOT_FOUND: media store ${stored.error}` };
+    }
   }
 
   const status = result.ok && has ? "done" : "error";

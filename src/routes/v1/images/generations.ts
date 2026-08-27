@@ -100,6 +100,16 @@ function dataUrlB64(url: string) {
 export async function toB64(url: string) {
   const fromData = dataUrlB64(url);
   if (fromData) return fromData;
+  const media = url.match(/\/api\/media\/([^/?#]+)/);
+  if (media) {
+    try {
+      const { getMediaStore } = await import("@/lib/media-store");
+      const got = await getMediaStore().get(media[1]);
+      if (got) return got.buf.toString("base64");
+    } catch {
+      /* fall through */
+    }
+  }
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });
     if (!res.ok) return undefined;

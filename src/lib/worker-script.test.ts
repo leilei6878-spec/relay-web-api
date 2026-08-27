@@ -545,3 +545,13 @@ print("reference-verify-ok")
   assert.equal(out.status, 0, out.stderr || out.stdout);
   assert.match(out.stdout, /reference-verify-ok/);
 });
+
+test("worker uploads media before result JSON", () => {
+  const s = localWorkerScript();
+  assert.match(s, /def upload_result_media/);
+  assert.match(s, /def materialize_result_assets/);
+  assert.match(s, /\/api\/worker\/media/);
+  const mat = s.indexOf("materialize_result_assets(ctx");
+  const resultPost = s.indexOf('gw + "/api/worker/result"');
+  assert.ok(mat > 0 && mat < resultPost, "strip data URLs before posting job result");
+});

@@ -177,6 +177,13 @@ export async function loadImageBytes(url: string): Promise<{ ok: true } & ImageB
     if (!parsed) return { ok: false, error: "IMAGE_NOT_FOUND: bad data url" };
     return { ok: true, ...parsed };
   }
+  const media = url.match(/\/api\/media\/([^/?#]+)/);
+  if (media) {
+    const { getMediaStore } = await import("../media-store.ts");
+    const got = await getMediaStore().get(media[1]);
+    if (!got) return { ok: false, error: "IMAGE_NOT_FOUND: missing asset" };
+    return { ok: true, buf: got.buf, mime: got.mime, src: url, sha256: sha256Hex(got.buf) };
+  }
   if (url.startsWith("http://") || url.startsWith("https://")) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(20_000) });

@@ -337,12 +337,14 @@ def post_result(ctx, result):
     token = os.environ.get("RELAY_TOKEN") or ""
     if not (gw and token and ctx and ctx.job_id):
         return False
-    result = attach_runtime(ctx, result if isinstance(result, dict) else {})
+    result = materialize_result_assets(ctx, result if isinstance(result, dict) else {})
+    result = attach_runtime(ctx, result)
     payload = {
         "id": ctx.job_id,
         "ok": result.get("ok"),
         "text": result.get("text"),
         "url": result.get("url"),
+        "urls": result.get("urls"),
         "error": result.get("error"),
         "fault": result.get("fault"),
         "leaseId": result.get("leaseId") or ctx.lease_id,
@@ -366,6 +368,8 @@ def post_result(ctx, result):
         "requestId": ctx.request_id,
         "retrySafety": result.get("retrySafety") or ctx.retry_safety,
         "submissionState": result.get("submissionState") or ctx.submission_state,
+        "assetIds": result.get("assetIds"),
+        "workerMediaUploadMs": result.get("workerMediaUploadMs"),
     }
     try:
         import urllib.request
@@ -379,6 +383,93 @@ def post_result(ctx, result):
         return True
     except Exception:
         return False
+
+def image_magic_ok(raw):
+    if not raw or len(raw) < 2048:
+        return False
+    if len(raw) >= 8 and raw[0] == 0x89 and raw[1] == 0x50 and raw[2] == 0x4e and raw[3] == 0x47:
+        return True
+    if len(raw) >= 3 and raw[0] == 0xff and raw[1] == 0xd8 and raw[2] == 0xff:
+        return True
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return True
+    return False
+
+def data_url_parts(url):
+    if not isinstance(url, str) or not url.startswith("data:") or "," not in url:
+        return None, None
+    header, b64 = url.split(",", 1)
+    mime = header[5:].split(";")[0] if header.startswith("data:") else "image/png"
+    try:
+        raw = base64.b64decode(b64)
+    except Exception:
+        return None, None
+    return raw, mime or "image/png"
+
+def upload_result_media(ctx, raw, mime="image/png"):
+    gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
+    token = os.environ.get("RELAY_TOKEN") or ""
+    if not (gw and token and ctx and ctx.job_id):
+        return None
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            gw + "/api/worker/media",
+            data=raw,
+            headers={
+                "Authorization": "Bearer " + token,
+                "Content-Type": mime or "image/png",
+                "X-Job-Id": ctx.job_id,
+                "X-Attempt-Id": ctx.attempt_id or "",
+                "X-Lease-Id": ctx.lease_id or "",
+                "X-Fencing-Token": str(ctx.fencing_token or 0),
+                "X-Worker-Id": ctx.worker_id or "",
+            },
+            method="POST",
+        )
+        body = urllib.request.urlopen(req, timeout=60).read()
+        return json.loads(body.decode("utf-8") or "{}")
+    except Exception as e:
+        print("media upload fail", str(e)[:160], flush=True)
+        return None
+
+def materialize_result_assets(ctx, result):
+    if not result or not result.get("ok"):
+        return result
+    urls = result.get("urls") if isinstance(result.get("urls"), list) else []
+    if result.get("url") and result.get("url") not in urls:
+        urls = [result.get("url")] + list(urls)
+    if not any(isinstance(u, str) and u.startswith("data:image") for u in urls):
+        return result
+    t0 = time.time()
+    out = []
+    ids = []
+    for u in urls:
+        if isinstance(u, str) and u.startswith("data:image"):
+            raw, mime = data_url_parts(u)
+            if not raw or not image_magic_ok(raw):
+                result["ok"] = False
+                result["error"] = "IMAGE_NOT_FOUND: result magic rejected"
+                result.pop("url", None)
+                result.pop("urls", None)
+                return result
+            up = upload_result_media(ctx, raw, mime or "image/png")
+            if not up or not up.get("ok") or not up.get("url"):
+                result["ok"] = False
+                result["error"] = "IMAGE_NOT_FOUND: media upload failed"
+                result.pop("url", None)
+                result.pop("urls", None)
+                return result
+            out.append(up.get("url"))
+            if up.get("assetId"):
+                ids.append(up.get("assetId"))
+        elif isinstance(u, str) and u:
+            out.append(u)
+    result["urls"] = out
+    result["url"] = out[0] if out else ""
+    result["assetIds"] = ids
+    result["workerMediaUploadMs"] = int((time.time() - t0) * 1000)
+    return result
 
 def exit_ip(context):
     try:

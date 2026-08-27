@@ -91,7 +91,8 @@ Live Chat/Image E2E, soak, and chaos in this environment: **NOT_EXECUTED**.
 | 4.5 | Baseline + warmup proxy + safety precedence | `5c3e2b6` | NOT_LIVE_TESTED |
 | 5 | Request-scoped image generation boundary | `4ede14b` | NOT_LIVE_TESTED |
 | 6 | Exact reference attachment and hash isolation | `eef8fdd` | NOT_LIVE_TESTED |
-| 7 | Unified image validation and exact result contract | this commit | NOT_LIVE_TESTED |
-| 8–12 | media / warm / model / canary / E2E | pending | |
+| 7 | Unified image validation and exact result contract | `f0a5f84` | NOT_LIVE_TESTED |
+| 8 | Stream image assets outside job JSON | this commit | NOT_LIVE_TESTED |
+| 9–12 | warm / model / canary / E2E | pending | |
 
 Each remaining commit: relay unit tests before the next. Live E2E stays **NOT_EXECUTED** until actually run.

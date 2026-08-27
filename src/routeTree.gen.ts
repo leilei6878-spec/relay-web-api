@@ -37,6 +37,7 @@ import { Route as ApiAdminWorkerKitRouteImport } from './routes/api/admin/worker
 import { Route as ApiMediaIdRouteImport } from './routes/api/media/$id'
 import { Route as ApiWorkerChunkRouteImport } from './routes/api/worker/chunk'
 import { Route as ApiWorkerControlRouteImport } from './routes/api/worker/control'
+import { Route as ApiWorkerMediaRouteImport } from './routes/api/worker/media'
 import { Route as ApiWorkerNextRouteImport } from './routes/api/worker/next'
 import { Route as ApiWorkerResultRouteImport } from './routes/api/worker/result'
 import { Route as V1ChatCompletionsRouteImport } from './routes/v1/chat/completions'
@@ -184,6 +185,11 @@ const ApiWorkerControlRoute = ApiWorkerControlRouteImport.update({
   path: '/api/worker/control',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiWorkerMediaRoute = ApiWorkerMediaRouteImport.update({
+  id: '/api/worker/media',
+  path: '/api/worker/media',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiWorkerNextRoute = ApiWorkerNextRouteImport.update({
   id: '/api/worker/next',
   path: '/api/worker/next',
@@ -244,6 +250,7 @@ export interface FileRoutesByFullPath {
   '/api/media/$id': typeof ApiMediaIdRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
+  '/api/worker/media': typeof ApiWorkerMediaRoute
   '/api/worker/next': typeof ApiWorkerNextRoute
   '/api/worker/result': typeof ApiWorkerResultRoute
   '/v1/chat/completions': typeof V1ChatCompletionsRoute
@@ -280,6 +287,7 @@ export interface FileRoutesByTo {
   '/api/media/$id': typeof ApiMediaIdRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
+  '/api/worker/media': typeof ApiWorkerMediaRoute
   '/api/worker/next': typeof ApiWorkerNextRoute
   '/api/worker/result': typeof ApiWorkerResultRoute
   '/v1/chat/completions': typeof V1ChatCompletionsRoute
@@ -317,6 +325,7 @@ export interface FileRoutesById {
   '/api/media/$id': typeof ApiMediaIdRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
+  '/api/worker/media': typeof ApiWorkerMediaRoute
   '/api/worker/next': typeof ApiWorkerNextRoute
   '/api/worker/result': typeof ApiWorkerResultRoute
   '/v1/chat/completions': typeof V1ChatCompletionsRoute
@@ -355,6 +364,7 @@ export interface FileRouteTypes {
     | '/api/media/$id'
     | '/api/worker/chunk'
     | '/api/worker/control'
+    | '/api/worker/media'
     | '/api/worker/next'
     | '/api/worker/result'
     | '/v1/chat/completions'
@@ -391,6 +401,7 @@ export interface FileRouteTypes {
     | '/api/media/$id'
     | '/api/worker/chunk'
     | '/api/worker/control'
+    | '/api/worker/media'
     | '/api/worker/next'
     | '/api/worker/result'
     | '/v1/chat/completions'
@@ -427,6 +438,7 @@ export interface FileRouteTypes {
     | '/api/media/$id'
     | '/api/worker/chunk'
     | '/api/worker/control'
+    | '/api/worker/media'
     | '/api/worker/next'
     | '/api/worker/result'
     | '/v1/chat/completions'
@@ -464,6 +476,7 @@ export interface RootRouteChildren {
   ApiMediaIdRoute: typeof ApiMediaIdRoute
   ApiWorkerChunkRoute: typeof ApiWorkerChunkRoute
   ApiWorkerControlRoute: typeof ApiWorkerControlRoute
+  ApiWorkerMediaRoute: typeof ApiWorkerMediaRoute
   ApiWorkerNextRoute: typeof ApiWorkerNextRoute
   ApiWorkerResultRoute: typeof ApiWorkerResultRoute
   V1ChatCompletionsRoute: typeof V1ChatCompletionsRoute
@@ -670,6 +683,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiWorkerControlRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/worker/media': {
+      id: '/api/worker/media'
+      path: '/api/worker/media'
+      fullPath: '/api/worker/media'
+      preLoaderRoute: typeof ApiWorkerMediaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/worker/next': {
       id: '/api/worker/next'
       path: '/api/worker/next'
@@ -744,6 +764,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMediaIdRoute: ApiMediaIdRoute,
   ApiWorkerChunkRoute: ApiWorkerChunkRoute,
   ApiWorkerControlRoute: ApiWorkerControlRoute,
+  ApiWorkerMediaRoute: ApiWorkerMediaRoute,
   ApiWorkerNextRoute: ApiWorkerNextRoute,
   ApiWorkerResultRoute: ApiWorkerResultRoute,
   V1ChatCompletionsRoute: V1ChatCompletionsRoute,
