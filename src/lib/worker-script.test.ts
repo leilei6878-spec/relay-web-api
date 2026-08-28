@@ -181,7 +181,7 @@ test("leonardo img2img attaches refs before generate and fail-fasts", () => {
   assert.match(s, /reference image did not attach/);
   const attachIdx = s.indexOf("up_err = attach_leonardo_refs");
   const readyIdx = s.indexOf("wait_leonardo_generate_ready(page, 20000)");
-  const baselineIdx = s.lastIndexOf("create_generation_boundary(page, ctx, \"leonardo\")");
+  const baselineIdx = s.lastIndexOf("create_generation_boundary(page, ctx, \"leonardo\", prompt)");
   const clickIdx = s.indexOf('print("leonardo clicking generate"');
   const sizeAfter = s.indexOf("confirm_leonardo_image_size(page, want_size, aspect, tier, gpt)", attachIdx);
   assert.ok(attachIdx > 0 && readyIdx > attachIdx, "wait generate ready after attach");
@@ -544,10 +544,16 @@ new = {"src":"https://lh3.googleusercontent.com/gen-NEW","containerId":"resp-new
 hist = dict(new, src="https://lh3.googleusercontent.com/history-0", containerId="hist", createdAfterSubmit=False, isNewContainer=False, isNewSrc=False, historicalDuplicate=True)
 ref = dict(new, src="https://lh3.googleusercontent.com/ref-a", containerId="composer-ref", isNewContainer=False, referenceDuplicate=True)
 avatar = dict(new, src="https://lh3.googleusercontent.com/avatar.png", width=32, height=32, isNewContainer=False)
+reused = dict(new, src="https://cdn.leonardo.ai/reused-card.png", containerId="existing-card", createdAfterSubmit=False, isNewContainer=False, promptMatch=True, resultAction=True)
+unproven = dict(reused, src="https://cdn.leonardo.ai/lazy-history.png", resultAction=False)
+picked = m.pick_accepted_candidates([hist, ref, avatar, unproven, reused], 1)
+assert len(picked)==1 and picked[0]["src"].endswith("reused-card.png"), picked
 picked = m.pick_accepted_candidates([hist, ref, avatar, new], 1)
 assert len(picked)==1 and picked[0]["src"].endswith("gen-NEW"), picked
 assert m.score_result_candidate(hist)=="REJECT"
 assert m.score_result_candidate(ref)=="REJECT"
+assert m.score_result_candidate(reused)=="HIGH"
+assert m.score_result_candidate(unproven)=="MEDIUM"
 print("ok")
 `,
     ],

@@ -1883,6 +1883,8 @@ def score_result_candidate(c):
         return "VERIFIED"
     if c.get("isNewSrc") and c.get("domainMatch") and (c.get("isNewContainer") or c.get("createdAfterSubmit")):
         return "HIGH"
+    if c.get("isNewSrc") and c.get("domainMatch") and c.get("promptMatch") and c.get("resultAction") and w >= 256 and h >= 256:
+        return "HIGH"
     if c.get("isNewSrc"):
         return "MEDIUM"
     return "LOW"
@@ -1903,7 +1905,7 @@ def pick_accepted_candidates(cands, n=1):
     want = max(1, int(n or 1))
     return scored[:want]
 
-def create_generation_boundary(page, ctx=None, provider=""):
+def create_generation_boundary(page, ctx=None, provider="", prompt=""):
     snap = {"ids": [], "gens": [], "srcs": []}
     try:
         snap = page.evaluate("""() => {
@@ -1925,6 +1927,7 @@ def create_generation_boundary(page, ctx=None, provider=""):
         "request_id": getattr(ctx, "request_id", "") if ctx else "",
         "attempt_id": getattr(ctx, "attempt_id", "") if ctx else "",
         "provider": provider,
+        "prompt": str(prompt or "")[:4000],
         "submitted_at": time.time(),
         "baseline_result_container_ids": snap.get("ids") or [],
         "baseline_generation_ids": snap.get("gens") or [],
@@ -1943,6 +1946,9 @@ def collect_result_candidates(page, boundary, provider=""):
             """(args) => {
               const baseline = new Set(args.baseline || []);
               const baselineC = new Set(args.containers || []);
+              const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/g, '');
+              const promptNorm = normalize(args.prompt || '');
+              const promptNeedle = promptNorm.slice(0, 48);
               const domainRe = /googleusercontent|ggpht|leonardo\.ai|leonardocdn|leonardousercontent|oaidalle|data:image/;
               const uiRe = /favicon|avatar|logo|sprite|icon|emoji|\/static\/|profile/;
               const sel = 'model-response, .response-container, [data-message-author-role], [data-testid*="generation"], article, [class*="ImageCard"], [class*="result"]';
@@ -1956,6 +1962,12 @@ def collect_result_candidates(page, boundary, provider=""):
                   if (!src || seen.has(src)) continue;
                   seen.add(src);
                   const r = im.getBoundingClientRect();
+                  const alt = im.getAttribute('alt') || '';
+                  const altNorm = normalize(alt);
+                  const actionRoot = root === document.body ? im.closest(sel) : root;
+                  const actionBlob = actionRoot ? [...actionRoot.querySelectorAll('button, [role="button"]')]
+                    .map((el) => (el.getAttribute('aria-label') || '') + ' ' + (el.innerText || ''))
+                    .join(' ') : '';
                   out.push({
                     src,
                     containerId,
@@ -1970,6 +1982,8 @@ def collect_result_candidates(page, boundary, provider=""):
                     sha256: '',
                     referenceDuplicate: false,
                     historicalDuplicate: baseline.has(src),
+                    promptMatch: promptNeedle.length >= 6 && altNorm.includes(promptNeedle),
+                    resultAction: /download|remove|reuse prompt|copy prompt|make public|add to canva|positive feedback/i.test(actionBlob),
                     ui: uiRe.test(src),
                     fallback: containerId === 'page-fallback',
                   });
@@ -1983,7 +1997,7 @@ def collect_result_candidates(page, boundary, provider=""):
               if (!hasGood) push(document.body, 'page-fallback', false);
               return out;
             }""",
-            {"baseline": baseline, "containers": containers, "provider": provider},
+            {"baseline": baseline, "containers": containers, "provider": provider, "prompt": (boundary or {}).get("prompt") or ""},
         ) or []
     except Exception:
         raw = []
@@ -3133,7 +3147,7 @@ def run_image(body, ctx=None):
         if not fill_composer(page, box, prompt):
             return fail_job(ctx, "PROVIDER_DOM_CHANGED: cannot fill composer", "provider")
         apply_gemini_aspect(page, body.get("aspect") or size_to_aspect(body.get("size") or "1:1"))
-        boundary = create_generation_boundary(page, ctx, "gemini")
+        boundary = create_generation_boundary(page, ctx, "gemini", prompt)
         baseline = boundary.get("baseline_asset_urls") or snapshot_image_srcs(page)
         send_btn, _ = pick_locator(page, send, 4)
         if not set_submission_state(ctx, "SUBMITTING"):
@@ -4021,7 +4035,7 @@ def run_leonardo(body, ctx=None):
         size_ok, shown_w, shown_h, size_error = confirm_leonardo_image_size(page, want_size, aspect, tier, gpt)
         if not size_ok:
             return fail_job(ctx, size_error, "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": picked})
-        boundary = create_generation_boundary(page, ctx, "leonardo")
+        boundary = create_generation_boundary(page, ctx, "leonardo", prompt)
         baseline = boundary.get("baseline_asset_urls") or snapshot_image_srcs(page)
         captures = []
         captures_by_url = {}
