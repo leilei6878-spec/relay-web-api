@@ -45,12 +45,12 @@ At takeover:
 | 4 | Image provenance/validator/media closure | COMPLETE | Commit `ac0ae39`; frozen refs, strict confidence/assets/history, DOM correlation, WebP, WARM_IDLE fail-closed. |
 | 5 | Canary + selector self-healing closure | COMPLETE | Commit `71fd1f1`; distributed dispatch lease, real paid canary, shared selector state, finish-path fingerprint/promotion. |
 | 6 | Provider/capability/key backpressure | COMPLETE | Commit `71fd1f1`; global/provider/chat/image/key caps, file + distributed PG admission, 429/Retry-After. |
-| 7 | Full local automated campaign | COMPLETE | Relay 222/222; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
+| 7 | Full local automated campaign | COMPLETE | Relay 226/226; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
 | 7B | Production recovery + Compose contract | COMPLETE | Versioned/checksummed backup includes secrets/sessions; DB backup/restore fail closed; Compose has no required-secret defaults and host health port is consistently 8088. CLI/contract tests 6/6 pass. |
 | 7C | Release identity | COMPLETE | `0.9.0-rc2`; health/readiness/runtime expose exact commit and build time; production readiness rejects an unknown commit. |
 | 7D | Dev + production browser render | COMPLETE | Desktop and 390×844 mobile render with visible content, no horizontal overflow, and zero browser-console warnings/errors. Production-only partial runtime response crash was found, fixed, rebuilt, and retested. |
 | 7E | Production dependency audit | COMPLETE | Official npm audit 0 vulnerabilities after removing unpatched `image-size` and replacing it with bounded PNG/JPEG/WebP parsing. |
-| 8 | Real providers + soak | PARTIAL | Real Chat non-stream/SSE pass; one Leonardo request safely ended RESULT_UNCERTAIN and exposed a fixed size-control defect. 200 Chat, image matrices, five-account load and one-hour soak remain blocked. |
+| 8 | Real providers + soak | PARTIAL | Real Chat non-stream/SSE pass; Leonardo live WARM_IDLE/attach/cleanup and reused-card recovery pass; one real image-to-image request returned HTTP 200 with one 1024×1024 result. 200 Chat, full image matrices, five-account load and one-hour soak remain blocked. |
 | 9 | Final acceptance | COMPLETE | `CODEX_FINAL_ACCEPTANCE.md` answers all 30 required questions and preserves every external/live blocker. |
 | 10 | Controlled production deployment | COMPLETE | Verified backup, bundle import, Compose rebuild, exact release identity, readiness, anonymous-admin 401, real Chat, public metadata redaction, account add persistence and production UI add/reload/delete/reload. |
 
@@ -59,7 +59,7 @@ At takeover:
 | Blocker | Current evidence | Affected gates |
 |---|---|---|
 | `BLOCKED_BY_ACCOUNT_COUNT` | Production has one healthy ChatGPT account, one healthy Leonardo account and no Gemini account. | 200 mixed Chat at scale, full image matrices, 5-account × 20 concurrency. |
-| Leonardo live result unavailable | One real request reached SUBMITTED/UNSAFE then RESULT_UNCERTAIN; it was not retried. | Successful post-fix 1:1/16:9/9:16, reference and count matrices. |
+| Leonardo matrix coverage | A real 1024×1024 text-to-image result was recovered from a reused card and one image-to-image request passed end to end. | Remaining model, 16:9/9:16, 2/4/6 reference and count matrices. |
 | Server shell/deploy | Resolved: confirmed SSH host key, key authentication, port 246, verified backup and production bundle deployment. | None; host remains reachable. |
 | GitHub write unavailable | Connected GitHub identity has repository read but no push permission. | Push/PR/remote CI for new commits. |
 | Long soak prerequisites | Stable production exists, but the required account count and observation time were not available in this campaign. | ≥1h live soak and matrix-scale failure injection. |
@@ -101,10 +101,16 @@ runs. No zero is inferred from unit tests:
 - `c46eb82` — generate browser UIDs when public HTTP lacks crypto.randomUUID
 - `68bb245` — stop Leonardo login helper tab recreation and focus stealing
 - `4d4041a` — reset only the dedicated Leonardo login profile before launch
+- `9a6776d` — keep the Leonardo login phase manual until explicit export
+- `7566ddb` — scope Leonardo reference cleanup to the prompt container
+- `aa3f74a` — align image timeouts and prefer full-resolution CDN assets
+- `2425cb4` — recover prompt-correlated results from reused Leonardo cards
+- `e01bf54` — deduplicate the `image` / `images` reference aliases
+- `d49a371` — preserve PNG/JPEG/WebP extensions for frozen reference uploads
 
 ## Phase 7 evidence (2026-08-28)
 
-- `npm run test:relay`: **222/222 PASS**.
+- `npm run test:relay`: **226/226 PASS**.
 - `npm test`: **101/101 PASS**.
 - `npm run test:ci`: Relay **212/212 PASS** at the original full CI checkpoint plus multi-process/contract suite
   **21/21 PASS**.
@@ -126,17 +132,19 @@ Temporary dependency cache content is never committed.
 ## Phase 10 production evidence (2026-08-28)
 
 - Production health/readiness: HTTP 200, version 0.9.0-rc2, schema 4,
-  exact implementation commit 4d4041abc6884b044b6fb805de9bf22bacb9f0e5,
+  exact implementation commit d49a371213fe63a1022c8cd17190dc007ac7b371,
   zero blockers; Postgres, Redis, object media and Worker are ready.
 - Anonymous /api/admin/session: HTTP 401 and no Set-Cookie.
 - Real Chat: exact non-stream marker PASS; exact SSE marker plus done PASS;
   actual_model remained unknown and model_verified remained false.
 - Public metadata: account email plus worker/account/proxy IDs absent from real
   non-stream and SSE responses.
-- Real Leonardo: one request reached SUBMITTED/UNSAFE and ended
-  RESULT_UNCERTAIN with zero returned images and no automatic retry. Live logs
-  exposed malformed embedded JavaScript and an unreadable 0×0 size gate; both
-  were fixed and deployed.
+- Real Leonardo: an early request reached SUBMITTED/UNSAFE and ended
+  RESULT_UNCERTAIN with zero returned images and no automatic retry. The real
+  1024×1024 result was later found in history and the deployed reused-card
+  detector selected it HIGH. A separate image-to-image request attached one
+  deduplicated PNG reference and returned HTTP 200, one image and actual
+  1024×1024 dimensions.
 - Account management: local and production Chromium both completed add,
   reload persistence, delete and reload cleanup; console errors 0. A separate
   production API add/read/delete/read check also passed and restored the
@@ -155,9 +163,7 @@ Temporary dependency cache content is never committed.
 - Two healthy production accounts are marked Canary; Gemini remains without
   an account. The default structural interval is about seven minutes and paid
   image interval about three hours.
-- A post-deploy Leonardo structural Canary dispatched with
-  leonardo-gemini, entered the Worker and failed before submit with
-  LEONARDO_DOM_CHANGED because the page was not WARM_IDLE after cleanup. The
-  persisted state was PREPARING/SAFE; no Generate click or paid request
-  occurred. The scheduler/model-selection fix is therefore live-verified, and
-  the remaining blocker is the current provider DOM cleanup state.
+- Leonardo prompt-container cleanup is now live-verified WARM_IDLE → DIRTY →
+  WARM_IDLE. Pre-submit upload failures stayed PREPARING/SAFE. URL/hash
+  deduplication plus true file extensions closed the production upload path,
+  after which the real image-to-image request completed successfully.

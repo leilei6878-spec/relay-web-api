@@ -6,7 +6,7 @@ Overall status: **PARTIAL**
 
 Takeover HEAD: b30a9f7d52653344d8512f5479b8f882c88500d0
 
-Final implementation HEAD: 4d4041abc6884b044b6fb805de9bf22bacb9f0e5
+Final implementation HEAD: d49a371213fe63a1022c8cd17190dc007ac7b371
 
 Production currently serves the final implementation HEAD. No known P0 remains
 open in the deployed code. Overall acceptance stays PARTIAL because the
@@ -17,7 +17,7 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 | Gate | Status | Evidence |
 |---|---|---|
-| Relay unit/integration | **PASS** | 222/222 |
+| Relay unit/integration | **PASS** | 226/226 |
 | Core/template contract | **PASS** | 101/101 |
 | Multi-process/operations contract | **PASS** | 21/21 |
 | Two-gateway chaos | **PASS** | 18/18; fenced stale results and restart recovery pass |
@@ -27,11 +27,11 @@ five-account live concurrency, and one-hour live soak were not completed.
 | Production dependencies | **PASS** | npm audit --omit=dev reports 0 vulnerabilities |
 | Dev + built browser render | **PASS** | Desktop and 390×844 mobile; no overflow or error heading |
 | Pre-deploy backup | **PASS** | Verified checksummed DB, media, MinIO, configuration and Git metadata backup |
-| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit 4d4041a; DB/Redis/object media/worker ready |
+| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit d49a371; DB/Redis/object media/worker ready |
 | Anonymous admin boundary | **PASS** | External /api/admin/session returns HTTP 401 and no Set-Cookie |
 | Account add persistence | **PASS** | Public insecure HTTP UI add → refresh → delete → refresh passed without randomUUID; console errors 0; test record removed |
 | Live Chat | **PARTIAL** | Real non-stream and SSE marker requests succeeded; one earlier request ended RESULT_UNCERTAIN; 200-request matrix not run |
-| Live image | **PARTIAL** | One Leonardo request safely returned RESULT_UNCERTAIN after submit; no image or fake success returned; the resulting size-control defect was fixed and deployed |
+| Live image | **PARTIAL** | Leonardo text-to-image produced a real 1024×1024 upstream result and the reused-card recovery was live-verified; a separate image-to-image request completed end to end with HTTP 200, one returned image and actual 1024×1024 dimensions. Full model/aspect/count matrices remain open. |
 
 ## Required 30 answers
 
@@ -40,14 +40,15 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 2. **最终 HEAD — PASS.**
    Final implementation HEAD is
-   4d4041abc6884b044b6fb805de9bf22bacb9f0e5. The final report commit is
+   d49a371213fe63a1022c8cd17190dc007ac7b371. The final report commit is
    documentation-only and follows this implementation HEAD.
 
 3. **本次 commits — PASS.**
    6dc58a7, 5e2bb60, d0ba670, c429950, 1ff9844, 06cca41,
    ac0ae39, 71fd1f1, 68e60ed, 1035633, 47be2f3, 9e4fc8b,
    d9ccd60, 1e1c207, 9860071, 7206861, e286563, 9969bfa,
-   63c7708, 635f909, c46eb82, 68bb245 and 4d4041a.
+   63c7708, 635f909, c46eb82, 68bb245, 4d4041a, 9a6776d,
+   7566ddb, aa3f74a, 2425cb4, e01bf54 and d49a371.
 
 4. **还存在什么 P0 — PASS.**
    No known P0 remains open in the deployed candidate. The live anonymous
@@ -98,26 +99,32 @@ five-account live concurrency, and one-hour live soak were not completed.
 12. **duplicate paid image generation — PARTIAL.**
     The real Leonardo timeout was recorded as SUBMITTED plus UNSAFE and was not
     retried or failed over. This is direct evidence of the safety gate, but a
-    full paid crash/recovery campaign was not run.
+    full paid crash/recovery campaign was not run. Later pre-submit image-to-
+    image failures remained PREPARING/SAFE, and only the final corrected run
+    clicked Generate and returned one result.
 
 13. **Reference exact count — PARTIAL.**
     Exact 1/2/4/6 attachment and hash exclusion pass locally for Gemini and
-    Leonardo. Live reference matrices were not run.
+    Leonardo. One live Leonardo image-to-image request attached exactly one
+    deduplicated PNG reference and completed; the 2/4/6 live matrix remains.
 
 14. **GenerationBoundary — PARTIAL.**
     Request/attempt/time, prior container/URL/hash state, scoped new results,
     confidence and reference/history exclusion are implemented and tested.
-    The one live image attempt did not yield a validated result.
+    A live reused-card regression selected the real 1024×1024 text-to-image
+    result as HIGH confidence, and the image-to-image request returned a
+    validated 1024×1024 result. The full matrix remains incomplete.
 
 15. **false-positive image — PARTIAL.**
     Production only accepts HIGH/VERIFIED correlated results. The live
-    uncertain attempt returned zero images instead of a false success; the
-    full live matrix remains incomplete.
+    uncertain attempt returned zero images instead of a false success. The
+    corrected live paths selected the prompt-correlated result card and
+    rejected the attached reference; the full live matrix remains incomplete.
 
 16. **requested n / actual n — PARTIAL.**
     Count mismatch fails closed and unsupported provider counts are rejected.
-    The live request asked for one and returned no success after uncertainty;
-    no successful live count matrix exists.
+    A live image-to-image request asked for one and returned exactly one. The
+    n>1 live count matrix remains open.
 
 17. **requested size / actual size — PARTIAL.**
     Final image bytes are parsed and validated against aspect/tier/native size.
@@ -125,7 +132,9 @@ five-account live concurrency, and one-hour live soak were not completed.
     and that unreadable dimensions could previously reach Generate. The
     embedded script is now runtime-compiled in tests, dimensions must equal the
     selected native size before submit, and unknown dimensions fail closed.
-    Successful 1:1/16:9/9:16 live matrices remain unexecuted.
+    A live 1:1 image-to-image request returned actual 1024×1024, and the real
+    text-to-image history result is also 1024×1024. The 16:9/9:16 live matrix
+    remains unexecuted.
 
 18. **Job 是否还保存大 Base64 — PASS.**
     References are frozen into MediaStore and workers return asset
@@ -138,9 +147,10 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 20. **Leonardo warm runtime — PARTIAL.**
     The live session authenticated and selected Nano Banana 2. One real
-    generation became uncertain after submit. The size-control defect found by
-    that run is fixed; WARM_IDLE and reference isolation remain locally tested,
-    not yet proven by a successful live image matrix.
+    generation became uncertain after submit. Scoped prompt-container cleanup
+    now proves WARM_IDLE live; live attach/cleanup passed, reused-card recovery
+    selected the real result, and a later image-to-image request completed
+    end to end. The multi-model/aspect/count matrix remains open.
 
 21. **Model truth — PASS.**
     Requested and actual model/profile fields are distinct. Real Chat auto
@@ -174,8 +184,9 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 25. **Image matrices 是否真实完成 — BLOCKED_BY_ENVIRONMENT.**
     Production has one Leonardo account and no Gemini account. One Leonardo
-    request ended RESULT_UNCERTAIN and exposed a now-fixed defect. Required
-    model/reference/aspect/count matrices were not completed.
+    request ended RESULT_UNCERTAIN and exposed now-fixed defects. Leonardo
+    text-to-image recovery and one real image-to-image 1024×1024 request now
+    pass, but required model/reference/aspect/count matrices were not completed.
 
 26. **最长实际 soak — PARTIAL.**
     Longest automated scheduler run was 120,415 ms and the Chromium lifecycle
@@ -184,8 +195,8 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 27. **当前已验证账号数 — PARTIAL.**
     Production has two healthy accounts: one ChatGPT and one Leonardo. ChatGPT
-    completed real requests. Leonardo authenticated and submitted a request but
-    did not return a validated image. Gemini has zero accounts.
+    completed real requests. Leonardo authenticated and returned a validated
+    1024×1024 image-to-image result. Gemini has zero accounts.
 
 28. **当前已验证并发 — PARTIAL.**
     Local Chromium concurrency 4; distributed unique leases 7; same-account
@@ -197,7 +208,8 @@ five-account live concurrency, and one-hour live soak were not completed.
     **BLOCKED_BY_ENVIRONMENT**: 200 mixed live Chat requests; Gemini and both
     Leonardo model image matrices; five-account live concurrency; live
     proxy/session/DOM/crash injections at matrix scale; and one-hour live soak.
-    A successful post-fix Leonardo output-size matrix is also not executed.
+    The single post-fix Leonardo 1024×1024 image-to-image case passes; its full
+    output-size matrix is not executed.
 
 30. **是否建议进入正式部署测试 — PARTIAL.**
     The controlled production deployment test is already running and its
@@ -235,7 +247,7 @@ required full live campaigns.
 ## Production state at report time
 
 - **PASS:** external health and readiness return exact release
-  4d4041abc6884b044b6fb805de9bf22bacb9f0e5 with no blockers.
+  d49a371213fe63a1022c8cd17190dc007ac7b371 with no blockers.
 - **PASS:** Postgres, Redis, object media and the Worker are online; the Worker
   advertises capacity 2.
 - **PASS:** anonymous administrator session request returns HTTP 401 without a
@@ -246,9 +258,9 @@ required full live campaigns.
   port 246.
 - **PARTIAL:** two healthy canary accounts are configured; Gemini has no
   account.
-- **PARTIAL:** the live Leonardo structural Canary dispatched with the correct
-  model but reported a pre-submit WARM_IDLE/DOM cleanup failure. It remained
-  PREPARING/SAFE and did not generate a paid image.
+- **PASS:** live Leonardo prompt-container cleanup reaches WARM_IDLE; the real
+  reused-card result is selected HIGH at 1024×1024, and one image-to-image
+  request returned HTTP 200 with one 1024×1024 image.
 - **BLOCKED_BY_ENVIRONMENT:** the connected GitHub identity has pull but not
   push permission. Production was updated through verified Git bundles, so
   origin/main remains behind the deployed/local branch.
@@ -290,15 +302,27 @@ required full live campaigns.
    startup call and zero auto-click/focus-steal calls. Commit 4d4041a also
    wipes only the package-owned chrome-login profile before each run, so stale
    Canva/Stripe tabs from an aborted attempt cannot be restored.
+7. Global Leonardo Remove buttons and history thumbnails were counted as active
+   prompt references, so an empty page could never become WARM_IDLE. Commit
+   7566ddb scopes reference count/removal to the prompt container. A live empty,
+   attach and cleanup diagnostic then reached WARM_IDLE → DIRTY → WARM_IDLE.
+8. Leonardo can reuse an existing result-card container. The real generated
+   1024×1024 image was present in history but the old confidence gate ignored
+   its new URL. Commit 2425cb4 correlates the image alt text and result actions;
+   the live page now selects that card as HIGH while lazy history remains low.
+9. The API tester sent the first reference through both `image` and `images`,
+   and frozen remote references were downloaded as `.bin`. Commits e01bf54 and
+   d49a371 deduplicate by URL/hash and preserve PNG/JPEG/WebP extensions. A real
+   image-to-image request then attached one reference and returned one
+   1024×1024 image with HTTP 200.
 
 ## Remaining live blocker
 
-Leonardo currently cannot prove WARM_IDLE after cleanup on its live page. The
-new structural Canary detects this before submission and fails with
-LEONARDO_DOM_CHANGED while retry safety is still SAFE. This is not a fake
-success or duplicate-charge defect, but it blocks successful Leonardo image
-matrices until the provider DOM/session cleanup path is reconfirmed on the live
-account.
+The Leonardo WARM_IDLE, result recovery and single-reference image-to-image
+blockers are closed. Remaining blockers are coverage and environment scale:
+there is no Gemini account, only one Leonardo account, and the full
+model/aspect/count/reference matrices, 200-request Chat campaign, five-account
+concurrency run and one-hour live soak have not been completed.
 
 The correct final decision is therefore **PARTIAL**: the deployed candidate has
 no known open P0 and all locally automatable high-priority gaps are closed, but
