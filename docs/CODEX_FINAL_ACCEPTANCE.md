@@ -6,7 +6,7 @@ Overall status: **PARTIAL**
 
 Takeover HEAD: b30a9f7d52653344d8512f5479b8f882c88500d0
 
-Final implementation HEAD: 5c28abac594f3000b2d27bcb67929912d9c43f10
+Final implementation HEAD: aefc2b0f27c5e761ab6ee38c9b7a0580c84cdd66
 
 Production currently serves the final implementation HEAD. No known P0 remains
 open in the deployed code. Overall acceptance stays PARTIAL because the
@@ -19,7 +19,7 @@ single-result aspect/tier matrix is now live-verified 30/30.
 
 | Gate | Status | Evidence |
 |---|---|---|
-| Relay unit/integration | **PASS** | 235/235 |
+| Relay unit/integration | **PASS** | 247/247 |
 | Core/template contract | **PASS** | 101/101 |
 | Multi-process/operations contract | **PASS** | 21/21 |
 | Two-gateway chaos | **PASS** | 18/18; fenced stale results and restart recovery pass |
@@ -29,7 +29,7 @@ single-result aspect/tier matrix is now live-verified 30/30.
 | Production dependencies | **PASS** | npm audit --omit=dev reports 0 vulnerabilities |
 | Dev + built browser render | **PASS** | Desktop and 390×844 mobile; no overflow or error heading |
 | Pre-deploy backup | **PASS** | Verified checksummed DB, media, MinIO, configuration and Git metadata backup |
-| Production deployment | **PASS** | External health returns 0.9.0-rc2, schema 4 and exact commit 5c28aba; DB/Redis/object media/worker ready |
+| Production deployment | **PASS** | HTTPS health returns 0.9.0-rc2, schema 6 and exact commit aefc2b0; DB/Redis/object media/worker ready |
 | Anonymous admin boundary | **PASS** | External /api/admin/session returns HTTP 401 and no Set-Cookie |
 | Account add persistence | **PASS** | Public insecure HTTP UI add → refresh → delete → refresh passed without randomUUID; console errors 0; test record removed |
 | Live Chat | **PARTIAL** | Real non-stream and SSE marker requests succeeded; one earlier request ended RESULT_UNCERTAIN; 200-request matrix not run |
@@ -42,7 +42,7 @@ single-result aspect/tier matrix is now live-verified 30/30.
 
 2. **最终 HEAD — PASS.**
    Final implementation HEAD is
-   5c28abac594f3000b2d27bcb67929912d9c43f10. The final report commit is
+   aefc2b0f27c5e761ab6ee38c9b7a0580c84cdd66. The final report commit is
    documentation-only and follows this implementation HEAD.
 
 3. **本次 commits — PASS.**
@@ -253,7 +253,7 @@ required full live campaigns.
 ## Production state at report time
 
 - **PASS:** external health and readiness return exact release
-  5c28abac594f3000b2d27bcb67929912d9c43f10 with no blockers.
+  aefc2b0f27c5e761ab6ee38c9b7a0580c84cdd66 with no blockers.
 - **PASS:** Postgres, Redis, object media and the Worker are online; the Worker
   advertises capacity 2.
 - **PASS:** anonymous administrator session request returns HTTP 401 without a

@@ -2,7 +2,7 @@
 
 Started: 2026-08-27  
 Takeover HEAD: `b30a9f7d52653344d8512f5479b8f882c88500d0`  
-Current phase: Phase 10 — controlled production deployed; Leonardo Nano Banana 2 aspect/tier matrix complete
+Current phase: Phase 11 — account operations center deployed and live-verified
 
 ## Rules for this log
 
@@ -53,6 +53,7 @@ At takeover:
 | 8 | Real providers + soak | PARTIAL | Real Chat non-stream/SSE pass. Leonardo Nano Banana 2 one-reference/one-result matrix passed all 10 aspects × 3 tiers (30/30), exact pixels and WARM_IDLE cleanup. 200 Chat, Gemini/additional-model/reference-count/result-count matrices, five-account load and one-hour soak remain open. |
 | 9 | Final acceptance | COMPLETE | `CODEX_FINAL_ACCEPTANCE.md` answers all 30 required questions and preserves every external/live blocker. |
 | 10 | Controlled production deployment | COMPLETE | Verified backup, bundle import, Compose rebuild, exact release identity, readiness, anonymous-admin 401, real Chat, public metadata redaction, account add persistence and production UI add/reload/delete/reload. |
+| 11 | Account operations center | COMPLETE | Schema 6; lifecycle metadata, combined search/bulk edit, 3-layer checks, IP drift, hourly/daily capacity and HTTPS-only interactive Session inspection deployed. Production static/proxy/live checks and inspection frame/scroll/close pass. |
 
 ## Environment blockers (do not stop local phases)
 
@@ -118,6 +119,11 @@ runs. No zero is inferred from unit tests:
 - `dfc6438` — make Leonardo model restoration idempotent
 - `ccee7b3` — click only visible Leonardo Generate controls
 - `5c28aba` — use a trusted Playwright Generate click and full deadline
+- `e66523f` — add account operations schema and management API foundation
+- `03d5369` — build the account operations UI, check engine, analytics and secure inspection channel
+- `6d9f133` — keep inspection commands ephemeral and enforce token/cleanup lifecycle
+- `c860988` — allow the dedicated Relay HTTPS host
+- `aefc2b0` — close account inspection jobs and frames reliably
 
 ## Phase 7 evidence (2026-08-28)
 
@@ -171,9 +177,9 @@ Temporary dependency cache content is never committed.
 - The dedicated chrome-login profile is now removed and recreated before each
   run, preventing aborted Canva/Stripe tabs from being restored without
   touching the user's daily Chrome profile.
-- Two healthy production accounts are marked Canary; Gemini remains without
-  an account. The default structural interval is about seven minutes and paid
-  image interval about three hours.
+- At this Phase 10 checkpoint the configured canary set was still being tuned;
+  Gemini remained without an account. The default provider structural interval
+  was about seven minutes and paid image interval about three hours.
 - Leonardo prompt-container cleanup is now live-verified WARM_IDLE → DIRTY →
   WARM_IDLE. Pre-submit upload failures stayed PREPARING/SAFE. URL/hash
   deduplication plus true file extensions closed the production upload path,
@@ -201,3 +207,23 @@ Temporary dependency cache content is never committed.
 - Final production accounts used by the matrix are healthy with failCount=0
   and lastPageState=WARM_IDLE. The latest Worker heartbeat reports zero active
   jobs after completion.
+
+## Phase 11 account operations evidence (2026-08-29)
+
+- Production health is HTTP 200 at the dedicated HTTPS origin with schema 6
+  and exact implementation commit `aefc2b0f27c5e761ab6ee38c9b7a0580c84cdd66`.
+- Migrations `0005_account_operations.sql` and
+  `0006_account_availability_samples.sql` applied once. The pre-existing one
+  ChatGPT and four Leonardo accounts and all five Session paths remained.
+- Relay tests **247/247**, core/template **101/101**, CI operations **21/21**,
+  TypeScript, production build and Lint error gate pass.
+- Desktop and 390px mobile browser renders contain all account operations
+  controls, have no document-width overflow and report no console errors.
+- Production check run: `SESSION_OK`, `PROXY_OK` with `matched`, and `LIVE_OK`
+  with `IMAGE_GENERATOR_READY`; the live check made no paid generation.
+- Production HTTPS inspection: 202 start, active frame 200, authenticated JPEG,
+  real exit IP, `app.leonardo.ai`, read-only scroll 200 and final
+  `closed_by_admin`. PostgreSQL contains no command, frame count is zero and
+  account/inspection lock count is zero after close.
+- The checksummed pre-deploy backup is
+  `/opt/backups/relay-pre-account-ops-20260829-025617`.
