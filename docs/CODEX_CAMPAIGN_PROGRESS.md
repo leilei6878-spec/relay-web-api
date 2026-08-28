@@ -2,7 +2,7 @@
 
 Started: 2026-08-27  
 Takeover HEAD: `b30a9f7d52653344d8512f5479b8f882c88500d0`  
-Current phase: Phase 10 — controlled production deployed; large live matrices and soak remain
+Current phase: Phase 10 — controlled production deployed; Leonardo Nano Banana 2 aspect/tier matrix complete
 
 ## Rules for this log
 
@@ -45,12 +45,12 @@ At takeover:
 | 4 | Image provenance/validator/media closure | COMPLETE | Commit `ac0ae39`; frozen refs, strict confidence/assets/history, DOM correlation, WebP, WARM_IDLE fail-closed. |
 | 5 | Canary + selector self-healing closure | COMPLETE | Commit `71fd1f1`; distributed dispatch lease, real paid canary, shared selector state, finish-path fingerprint/promotion. |
 | 6 | Provider/capability/key backpressure | COMPLETE | Commit `71fd1f1`; global/provider/chat/image/key caps, file + distributed PG admission, 429/Retry-After. |
-| 7 | Full local automated campaign | COMPLETE | Relay 234/234; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
+| 7 | Full local automated campaign | COMPLETE | Relay 235/235; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
 | 7B | Production recovery + Compose contract | COMPLETE | Versioned/checksummed backup includes secrets/sessions; DB backup/restore fail closed; Compose has no required-secret defaults and host health port is consistently 8088. CLI/contract tests 6/6 pass. |
 | 7C | Release identity | COMPLETE | `0.9.0-rc2`; health/readiness/runtime expose exact commit and build time; production readiness rejects an unknown commit. |
 | 7D | Dev + production browser render | COMPLETE | Desktop and 390×844 mobile render with visible content, no horizontal overflow, and zero browser-console warnings/errors. Production-only partial runtime response crash was found, fixed, rebuilt, and retested. |
 | 7E | Production dependency audit | COMPLETE | Official npm audit 0 vulnerabilities after removing unpatched `image-size` and replacing it with bounded PNG/JPEG/WebP parsing. |
-| 8 | Real providers + soak | PARTIAL | Real Chat non-stream/SSE pass; Leonardo live WARM_IDLE/attach/cleanup and reused-card recovery pass; one real image-to-image request returned HTTP 200 with one 1024×1024 result. 200 Chat, full image matrices, five-account load and one-hour soak remain blocked. |
+| 8 | Real providers + soak | PARTIAL | Real Chat non-stream/SSE pass. Leonardo Nano Banana 2 one-reference/one-result matrix passed all 10 aspects × 3 tiers (30/30), exact pixels and WARM_IDLE cleanup. 200 Chat, Gemini/additional-model/reference-count/result-count matrices, five-account load and one-hour soak remain open. |
 | 9 | Final acceptance | COMPLETE | `CODEX_FINAL_ACCEPTANCE.md` answers all 30 required questions and preserves every external/live blocker. |
 | 10 | Controlled production deployment | COMPLETE | Verified backup, bundle import, Compose rebuild, exact release identity, readiness, anonymous-admin 401, real Chat, public metadata redaction, account add persistence and production UI add/reload/delete/reload. |
 
@@ -58,8 +58,8 @@ At takeover:
 
 | Blocker | Current evidence | Affected gates |
 |---|---|---|
-| `BLOCKED_BY_ACCOUNT_COUNT` | Production has one healthy ChatGPT account, one healthy Leonardo account and no Gemini account. | 200 mixed Chat at scale, full image matrices, 5-account × 20 concurrency. |
-| Leonardo matrix coverage | A real 1024×1024 text-to-image result was recovered from a reused card and one image-to-image request passed end to end. | Remaining model, 16:9/9:16, 2/4/6 reference and count matrices. |
+| `BLOCKED_BY_ACCOUNT_COUNT` | Production has one healthy ChatGPT account, four healthy Leonardo accounts and no Gemini account. | 200 mixed Chat at scale, cross-provider matrices, 5-account × 20 concurrency. |
+| Leonardo matrix coverage | Nano Banana 2 one-reference/one-result aspect/tier matrix passed structurally 30/30 and live 30/30. | Additional models, 2/4/6 reference and result-count matrices. |
 | Server shell/deploy | Resolved: confirmed SSH host key, key authentication, port 246, verified backup and production bundle deployment. | None; host remains reachable. |
 | GitHub write unavailable | Connected GitHub identity has repository read but no push permission. | Push/PR/remote CI for new commits. |
 | Long soak prerequisites | Stable production exists, but the required account count and observation time were not available in this campaign. | ≥1h live soak and matrix-scale failure injection. |
@@ -112,10 +112,16 @@ runs. No zero is inferred from unit tests:
 - `8b9ef5e` — keep administrator log history visible after password login
 - `307d83e` — restore the requested Leonardo model after reference upload
 - `d1811e6` — target the Leonardo model drawer by its stable model ID
+- `3692b67` — record successful 16:9 image validation
+- `2eaeb4d` — stabilize all Leonardo aspect controls and close custom drawers
+- `2c9dde3` — normalize account scheduling timestamps
+- `dfc6438` — make Leonardo model restoration idempotent
+- `ccee7b3` — click only visible Leonardo Generate controls
+- `5c28aba` — use a trusted Playwright Generate click and full deadline
 
 ## Phase 7 evidence (2026-08-28)
 
-- `npm run test:relay`: **234/234 PASS**.
+- `npm run test:relay`: **235/235 PASS**.
 - `npm test`: **101/101 PASS**.
 - `npm run test:ci`: Relay **212/212 PASS** at the original full CI checkpoint plus multi-process/contract suite
   **21/21 PASS**.
@@ -134,10 +140,10 @@ runs. No zero is inferred from unit tests:
 
 Temporary dependency cache content is never committed.
 
-## Phase 10 production evidence (2026-08-28)
+## Phase 10 production evidence (2026-08-29)
 
 - Production health/readiness: HTTP 200, version 0.9.0-rc2, schema 4,
-  exact implementation commit d1811e62cfbabd360a542ea93a1cd29d85277df0,
+  exact implementation commit 5c28abac594f3000b2d27bcb67929912d9c43f10,
   zero blockers; Postgres, Redis, object media and Worker are ready.
 - Anonymous /api/admin/session: HTTP 401 and no Set-Cookie.
 - Real Chat: exact non-stream marker PASS; exact SSE marker plus done PASS;
@@ -184,3 +190,14 @@ Temporary dependency cache content is never committed.
   16:9 Medium request completed with HTTP 200, one result and actual
   2752×1536; its final job state is RESULT_VALIDATED and the account is
   healthy/WARM_IDLE.
+- The complete Nano Banana 2 one-reference/one-result aspect/tier matrix now
+  passes: 10 supported ratios × Small/Medium/Large = 30/30 real paid outputs.
+  Every response was HTTP 200 with exactly one HIGH-confidence image, parsed
+  dimensions exactly matched the selected native pixels, and each durable job
+  ended `done` / `RESULT_VALIDATED`.
+- A separate no-charge structural matrix also passed all 30 combinations. It
+  verified exact model restoration, reference attachment, deterministic aspect
+  slider positions, all three exact dimension tiers, cleanup and WARM_IDLE.
+- Final production accounts used by the matrix are healthy with failCount=0
+  and lastPageState=WARM_IDLE. The latest Worker heartbeat reports zero active
+  jobs after completion.

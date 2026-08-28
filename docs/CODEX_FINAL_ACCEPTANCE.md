@@ -1,23 +1,25 @@
 # Codex Final Acceptance — relay-web-api 0.9.0-rc2
 
-Date: 2026-08-28
+Date: 2026-08-29
 
 Overall status: **PARTIAL**
 
 Takeover HEAD: b30a9f7d52653344d8512f5479b8f882c88500d0
 
-Final implementation HEAD: d1811e62cfbabd360a542ea93a1cd29d85277df0
+Final implementation HEAD: 5c28abac594f3000b2d27bcb67929912d9c43f10
 
 Production currently serves the final implementation HEAD. No known P0 remains
 open in the deployed code. Overall acceptance stays PARTIAL because the
-required 200-request Chat campaign, complete Gemini/Leonardo image matrices,
-five-account live concurrency, and one-hour live soak were not completed.
+required 200-request Chat campaign, Gemini and multi-model/reference/count image
+matrices, five-account live concurrency, and one-hour live soak were not
+completed. The complete Leonardo Nano Banana 2 single-reference,
+single-result aspect/tier matrix is now live-verified 30/30.
 
 ## Current evidence
 
 | Gate | Status | Evidence |
 |---|---|---|
-| Relay unit/integration | **PASS** | 234/234 |
+| Relay unit/integration | **PASS** | 235/235 |
 | Core/template contract | **PASS** | 101/101 |
 | Multi-process/operations contract | **PASS** | 21/21 |
 | Two-gateway chaos | **PASS** | 18/18; fenced stale results and restart recovery pass |
@@ -27,11 +29,11 @@ five-account live concurrency, and one-hour live soak were not completed.
 | Production dependencies | **PASS** | npm audit --omit=dev reports 0 vulnerabilities |
 | Dev + built browser render | **PASS** | Desktop and 390×844 mobile; no overflow or error heading |
 | Pre-deploy backup | **PASS** | Verified checksummed DB, media, MinIO, configuration and Git metadata backup |
-| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit d1811e6; DB/Redis/object media/worker ready |
+| Production deployment | **PASS** | External health returns 0.9.0-rc2, schema 4 and exact commit 5c28aba; DB/Redis/object media/worker ready |
 | Anonymous admin boundary | **PASS** | External /api/admin/session returns HTTP 401 and no Set-Cookie |
 | Account add persistence | **PASS** | Public insecure HTTP UI add → refresh → delete → refresh passed without randomUUID; console errors 0; test record removed |
 | Live Chat | **PARTIAL** | Real non-stream and SSE marker requests succeeded; one earlier request ended RESULT_UNCERTAIN; 200-request matrix not run |
-| Live image | **PARTIAL** | Leonardo text-to-image produced a real 1024×1024 upstream result and the reused-card recovery was live-verified; a separate image-to-image request completed end to end with HTTP 200, one returned image and actual 1024×1024 dimensions. Full model/aspect/count matrices remain open. |
+| Live image | **PARTIAL** | Leonardo Nano Banana 2 image-to-image completed 30/30 live cases: all 10 supported aspect ratios × Small/Medium/Large, HTTP 200, exactly one HIGH-confidence result and exact requested pixels. Gemini, additional models, reference-count 2/4/6 and result-count >1 remain open. |
 
 ## Required 30 answers
 
@@ -40,7 +42,7 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 2. **最终 HEAD — PASS.**
    Final implementation HEAD is
-   d1811e62cfbabd360a542ea93a1cd29d85277df0. The final report commit is
+   5c28abac594f3000b2d27bcb67929912d9c43f10. The final report commit is
    documentation-only and follows this implementation HEAD.
 
 3. **本次 commits — PASS.**
@@ -49,7 +51,8 @@ five-account live concurrency, and one-hour live soak were not completed.
    d9ccd60, 1e1c207, 9860071, 7206861, e286563, 9969bfa,
    63c7708, 635f909, c46eb82, 68bb245, 4d4041a, 9a6776d,
    7566ddb, aa3f74a, 2425cb4, e01bf54, d49a371, 0adce26 and
-   186ace9, 8b9ef5e, 307d83e and d1811e6.
+   186ace9, 8b9ef5e, 307d83e, d1811e6, 3692b67, 2eaeb4d,
+   2c9dde3, dfc6438, ccee7b3 and 5c28aba.
 
 4. **还存在什么 P0 — PASS.**
    No known P0 remains open in the deployed candidate. The live anonymous
@@ -75,8 +78,8 @@ five-account live concurrency, and one-hour live soak were not completed.
 7. **多账号实际最大并发 — PARTIAL.**
    Locally verified: four concurrent real Chromium lifecycles, seven unique
    simultaneous leases, and distinct-account shards in parallel. Production
-   has one ChatGPT and one Leonardo account, so five-account live concurrency
-   was not available.
+   currently has one healthy ChatGPT and four healthy Leonardo accounts. A
+   five-account mixed live concurrency campaign was not run.
 
 8. **同账号实际最大并发 — PARTIAL.**
    Account locks, leases and shard tests keep the local maximum at 1.
@@ -127,15 +130,16 @@ five-account live concurrency, and one-hour live soak were not completed.
     A live image-to-image request asked for one and returned exactly one. The
     n>1 live count matrix remains open.
 
-17. **requested size / actual size — PARTIAL.**
+17. **requested size / actual size — PASS for Leonardo Nano Banana 2.**
     Final image bytes are parsed and validated against aspect/tier/native size.
     Live testing found that a Python-embedded JavaScript newline was malformed
     and that unreadable dimensions could previously reach Generate. The
     embedded script is now runtime-compiled in tests, dimensions must equal the
     selected native size before submit, and unknown dimensions fail closed.
-    Live image-to-image requests returned actual 1024×1024 and 16:9 Medium
-    2752×1536, and the real text-to-image history result is 1024×1024. The
-    9:16 and remaining matrix combinations remain unexecuted.
+    Live image-to-image verification now covers all 10 supported aspect ratios
+    at Small/Medium/Large: 30/30 returned exact requested pixels. This includes
+    the formerly failing 9:16 and 5:4 transitions. Other providers/models and
+    non-single-result matrices remain outside this PASS scope.
 
 18. **Job 是否还保存大 Base64 — PASS.**
     References are frozen into MediaStore and workers return asset
@@ -146,12 +150,14 @@ five-account live concurrency, and one-hour live soak were not completed.
     WARM_IDLE reuse, cleanup and reference isolation pass locally. Production
     has no Gemini account.
 
-20. **Leonardo warm runtime — PARTIAL.**
+20. **Leonardo warm runtime — PASS for the completed matrix.**
     The live session authenticated and selected Nano Banana 2. One real
     generation became uncertain after submit. Scoped prompt-container cleanup
     now proves WARM_IDLE live; live attach/cleanup passed, reused-card recovery
-    selected the real result, and a later image-to-image request completed
-    end to end. The multi-model/aspect/count matrix remains open.
+    selected the real result, and 30 matrix cases completed end to end. All
+    participating accounts ended healthy with failCount=0 and
+    lastPageState=WARM_IDLE. Multi-model/reference-count/result-count coverage
+    remains open.
 
 21. **Model truth — PASS.**
     Requested and actual model/profile fields are distinct. Real Chat auto
@@ -163,8 +169,7 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 22. **Canary 自动运行 — PARTIAL.**
     Distributed scheduling, structural probes, low-frequency paid image
-    probes and selector promotion are deployed. The healthy ChatGPT and
-    Leonardo accounts are marked as canary accounts. Leonardo structural
+    probes and selector promotion are deployed. Leonardo structural
     probes now validate the size selector without clicking Generate, and the
     scheduler selects a logical Leonardo model verified on its assigned
     account instead of blindly choosing the provider's first model. A real
@@ -183,11 +188,11 @@ five-account live concurrency, and one-hour live soak were not completed.
     production ChatGPT account is available and no one-hour observation window
     was completed.
 
-25. **Image matrices 是否真实完成 — BLOCKED_BY_ENVIRONMENT.**
-    Production has one Leonardo account and no Gemini account. One Leonardo
-    request ended RESULT_UNCERTAIN and exposed now-fixed defects. Leonardo
-    text-to-image recovery and one real image-to-image 1024×1024 request now
-    pass, but required model/reference/aspect/count matrices were not completed.
+25. **Image matrices 是否真实完成 — PARTIAL.**
+    The Leonardo Nano Banana 2 single-reference/single-result aspect-resolution
+    matrix is complete: a no-charge structural run passed 30/30 and the paid
+    live run passed 30/30 with exact dimensions. Gemini, additional Leonardo
+    models, 2/4/6 references and result-count >1 remain incomplete.
 
 26. **最长实际 soak — PARTIAL.**
     Longest automated scheduler run was 120,415 ms and the Chromium lifecycle
@@ -195,9 +200,9 @@ five-account live concurrency, and one-hour live soak were not completed.
     not executed.
 
 27. **当前已验证账号数 — PARTIAL.**
-    Production has two healthy accounts: one ChatGPT and one Leonardo. ChatGPT
-    completed real requests. Leonardo authenticated and returned a validated
-    1024×1024 image-to-image result. Gemini has zero accounts.
+    Production currently has five healthy accounts: one ChatGPT and four
+    Leonardo. The Leonardo accounts used by the matrix are healthy with zero
+    failures and WARM_IDLE final state. Gemini has zero accounts.
 
 28. **当前已验证并发 — PARTIAL.**
     Local Chromium concurrency 4; distributed unique leases 7; same-account
@@ -206,18 +211,18 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 29. **所有 NOT_EXECUTED — PASS.**
     No known locally automatable high-priority code gate remains. Still
-    **BLOCKED_BY_ENVIRONMENT**: 200 mixed live Chat requests; Gemini and both
-    Leonardo model image matrices; five-account live concurrency; live
-    proxy/session/DOM/crash injections at matrix scale; and one-hour live soak.
-    The single post-fix Leonardo 1024×1024 image-to-image case passes; its full
-    output-size matrix is not executed.
+    **BLOCKED_BY_ENVIRONMENT**: 200 mixed live Chat requests; Gemini and
+    additional Leonardo model/reference/count matrices; five-account live
+    concurrency; live proxy/session/DOM/crash injections at matrix scale; and
+    one-hour live soak. The Nano Banana 2 aspect/tier output-size matrix is
+    complete 30/30.
 
 30. **是否建议进入正式部署测试 — PARTIAL.**
     The controlled production deployment test is already running and its
     health, readiness, anonymous-admin boundary, responsive UI and real Chat
     path pass. Do not yet claim unrestricted commercial reliability until the
-    image matrices, 200 Chat campaign, five-account concurrency and one-hour
-    soak pass.
+    remaining provider/model/reference/count matrices, 200 Chat campaign,
+    five-account concurrency and one-hour soak pass.
 
 ## Hard correctness counters
 
@@ -239,7 +244,7 @@ required full live campaigns.
 | ui_image_returned | **PARTIAL** |
 | reference_missed | **BLOCKED_BY_ENVIRONMENT** |
 | wrong_result_count | **BLOCKED_BY_ENVIRONMENT** |
-| wrong_size | **BLOCKED_BY_ENVIRONMENT** |
+| wrong_size | **PASS for Leonardo Nano Banana 2 30-case matrix** |
 | stale_result_accepted | **BLOCKED_BY_ENVIRONMENT** |
 | model_false_confirmation | **PARTIAL** |
 | lost_request | **BLOCKED_BY_ENVIRONMENT** |
@@ -248,7 +253,7 @@ required full live campaigns.
 ## Production state at report time
 
 - **PASS:** external health and readiness return exact release
-  d1811e62cfbabd360a542ea93a1cd29d85277df0 with no blockers.
+  5c28abac594f3000b2d27bcb67929912d9c43f10 with no blockers.
 - **PASS:** Postgres, Redis, object media and the Worker are online; the Worker
   advertises capacity 2.
 - **PASS:** anonymous administrator session request returns HTTP 401 without a
@@ -257,11 +262,11 @@ required full live campaigns.
   /opt/backups/relay-pre-rc2-20260828-130046.
 - **PASS:** SSH key authentication is working on the confirmed host key and
   port 246.
-- **PARTIAL:** two healthy canary accounts are configured; Gemini has no
-  account.
-- **PASS:** live Leonardo prompt-container cleanup reaches WARM_IDLE; the real
-  reused-card result is selected HIGH at 1024×1024, and one image-to-image
-  request returned HTTP 200 with one 1024×1024 image.
+- **PARTIAL:** one healthy ChatGPT and four healthy Leonardo accounts are
+  configured; Gemini has no account.
+- **PASS:** live Leonardo prompt-container cleanup reaches WARM_IDLE; the Nano
+  Banana 2 single-reference/single-result aspect/tier matrix passed 30/30 with
+  exact dimensions and HIGH-confidence results.
 - **BLOCKED_BY_ENVIRONMENT:** the connected GitHub identity has pull but not
   push permission. Production was updated through verified Git bundles, so
   origin/main remains behind the deployed/local branch.
@@ -338,13 +343,49 @@ required full live campaigns.
     then reapply dimensions. A real request returned HTTP 200, one image and
     actual 2752×1536; the account returned to healthy/WARM_IDLE.
 
+13. Ratios that Leonardo exposes only through the custom aspect slider (for
+    example 5:4) retained the preceding ratio, while an open custom drawer
+    could block the reference menu. Commit 2eaeb4d maps all 10 slider positions
+    deterministically, verifies the exact displayed pixel dimensions and
+    closes the drawer before reference attachment. The no-charge structural
+    matrix then passed 30/30.
+14. PostgreSQL returned account timestamps as Date values, but the scheduler
+    sorted them with string-only localeCompare. Commit 2c9dde3 normalizes the
+    timestamps and makes the sort numeric/defensive.
+15. Reference attachment can redraw the model selector. Commit dfc6438 makes
+    exact Nano Banana 2 restoration idempotent and polls the stable model ID
+    until the sidebar confirms it.
+16. A synthetic DOM click could log success without React accepting Generate,
+    and the old 28-second image-to-image fail-fast was too short for Large.
+    Commits ccee7b3 and 5c28aba require a visible/enabled Generate control,
+    prefer a real Playwright click, remove the unsafe Enter fallback and wait
+    the full request deadline. The paid live matrix then passed 30/30.
+
+## Leonardo Nano Banana 2 live matrix
+
+Every row passed Small, Medium and Large with one reference, one requested
+result, HTTP 200, exact parsed pixels, HIGH confidence and RESULT_VALIDATED.
+
+| Aspect | Small | Medium | Large |
+|---|---:|---:|---:|
+| 1:1 | 1024×1024 | 2048×2048 | 4096×4096 |
+| 3:2 | 1264×848 | 2528×1696 | 5056×3392 |
+| 2:3 | 848×1264 | 1696×2528 | 3392×5056 |
+| 4:3 | 1200×896 | 2400×1792 | 4800×3584 |
+| 3:4 | 896×1200 | 1792×2400 | 3584×4800 |
+| 16:9 | 1376×768 | 2752×1536 | 5504×3072 |
+| 9:16 | 768×1376 | 1536×2752 | 3072×5504 |
+| 4:5 | 928×1152 | 1856×2304 | 3712×4608 |
+| 5:4 | 1152×928 | 2304×1856 | 4608×3712 |
+| 21:9 | 1584×672 | 3168×1344 | 6336×2688 |
+
 ## Remaining live blocker
 
-The Leonardo WARM_IDLE, result recovery and single-reference image-to-image
-blockers are closed. Remaining blockers are coverage and environment scale:
-there is no Gemini account, only one Leonardo account, and the full
-model/aspect/count/reference matrices, 200-request Chat campaign, five-account
-concurrency run and one-hour live soak have not been completed.
+The Leonardo WARM_IDLE, result recovery and Nano Banana 2 aspect/tier blockers
+are closed. Remaining blockers are coverage and environment scale: there is no
+Gemini account, and the additional-model/reference-count/result-count matrices,
+200-request Chat campaign, five-account concurrency run and one-hour live soak
+have not been completed.
 
 The correct final decision is therefore **PARTIAL**: the deployed candidate has
 no known open P0 and all locally automatable high-priority gaps are closed, but
