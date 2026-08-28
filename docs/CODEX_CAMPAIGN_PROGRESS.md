@@ -110,6 +110,8 @@ runs. No zero is inferred from unit tests:
 - `0adce26` — add a standalone administrator username/password login page
 - `186ace9` — use a Compose-safe scrypt password-hash representation
 - `8b9ef5e` — keep administrator log history visible after password login
+- `307d83e` — restore the requested Leonardo model after reference upload
+- `d1811e6` — target the Leonardo model drawer by its stable model ID
 
 ## Phase 7 evidence (2026-08-28)
 
@@ -135,7 +137,7 @@ Temporary dependency cache content is never committed.
 ## Phase 10 production evidence (2026-08-28)
 
 - Production health/readiness: HTTP 200, version 0.9.0-rc2, schema 4,
-  exact implementation commit 8b9ef5e2574c708d90bc6204032a68cc58658197,
+  exact implementation commit d1811e62cfbabd360a542ea93a1cd29d85277df0,
   zero blockers; Postgres, Redis, object media and Worker are ready.
 - Anonymous /api/admin/session: HTTP 401 and no Set-Cookie.
 - Real Chat: exact non-stream marker PASS; exact SSE marker plus done PASS;
@@ -177,3 +179,8 @@ Temporary dependency cache content is never committed.
 - The post-login log-history regression is closed. Empty Bearer headers no
   longer shadow the administrator cookie, failed fetches no longer erase the
   visible table, and production returned 129 retained usage rows over HTTP 200.
+- Leonardo image-to-image now reselects the exact Nano Banana 2 drawer item
+  after reference upload, then rechecks attachment and dimensions. A real
+  16:9 Medium request completed with HTTP 200, one result and actual
+  2752×1536; its final job state is RESULT_VALIDATED and the account is
+  healthy/WARM_IDLE.

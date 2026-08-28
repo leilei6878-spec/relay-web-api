@@ -6,7 +6,7 @@ Overall status: **PARTIAL**
 
 Takeover HEAD: b30a9f7d52653344d8512f5479b8f882c88500d0
 
-Final implementation HEAD: 8b9ef5e2574c708d90bc6204032a68cc58658197
+Final implementation HEAD: d1811e62cfbabd360a542ea93a1cd29d85277df0
 
 Production currently serves the final implementation HEAD. No known P0 remains
 open in the deployed code. Overall acceptance stays PARTIAL because the
@@ -27,7 +27,7 @@ five-account live concurrency, and one-hour live soak were not completed.
 | Production dependencies | **PASS** | npm audit --omit=dev reports 0 vulnerabilities |
 | Dev + built browser render | **PASS** | Desktop and 390×844 mobile; no overflow or error heading |
 | Pre-deploy backup | **PASS** | Verified checksummed DB, media, MinIO, configuration and Git metadata backup |
-| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit 8b9ef5e; DB/Redis/object media/worker ready |
+| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit d1811e6; DB/Redis/object media/worker ready |
 | Anonymous admin boundary | **PASS** | External /api/admin/session returns HTTP 401 and no Set-Cookie |
 | Account add persistence | **PASS** | Public insecure HTTP UI add → refresh → delete → refresh passed without randomUUID; console errors 0; test record removed |
 | Live Chat | **PARTIAL** | Real non-stream and SSE marker requests succeeded; one earlier request ended RESULT_UNCERTAIN; 200-request matrix not run |
@@ -40,7 +40,7 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 2. **最终 HEAD — PASS.**
    Final implementation HEAD is
-   8b9ef5e2574c708d90bc6204032a68cc58658197. The final report commit is
+   d1811e62cfbabd360a542ea93a1cd29d85277df0. The final report commit is
    documentation-only and follows this implementation HEAD.
 
 3. **本次 commits — PASS.**
@@ -49,7 +49,7 @@ five-account live concurrency, and one-hour live soak were not completed.
    d9ccd60, 1e1c207, 9860071, 7206861, e286563, 9969bfa,
    63c7708, 635f909, c46eb82, 68bb245, 4d4041a, 9a6776d,
    7566ddb, aa3f74a, 2425cb4, e01bf54, d49a371, 0adce26 and
-   186ace9 and 8b9ef5e.
+   186ace9, 8b9ef5e, 307d83e and d1811e6.
 
 4. **还存在什么 P0 — PASS.**
    No known P0 remains open in the deployed candidate. The live anonymous
@@ -133,9 +133,9 @@ five-account live concurrency, and one-hour live soak were not completed.
     and that unreadable dimensions could previously reach Generate. The
     embedded script is now runtime-compiled in tests, dimensions must equal the
     selected native size before submit, and unknown dimensions fail closed.
-    A live 1:1 image-to-image request returned actual 1024×1024, and the real
-    text-to-image history result is also 1024×1024. The 16:9/9:16 live matrix
-    remains unexecuted.
+    Live image-to-image requests returned actual 1024×1024 and 16:9 Medium
+    2752×1536, and the real text-to-image history result is 1024×1024. The
+    9:16 and remaining matrix combinations remain unexecuted.
 
 18. **Job 是否还保存大 Base64 — PASS.**
     References are frozen into MediaStore and workers return asset
@@ -248,7 +248,7 @@ required full live campaigns.
 ## Production state at report time
 
 - **PASS:** external health and readiness return exact release
-  8b9ef5e2574c708d90bc6204032a68cc58658197 with no blockers.
+  d1811e62cfbabd360a542ea93a1cd29d85277df0 with no blockers.
 - **PASS:** Postgres, Redis, object media and the Worker are online; the Worker
   advertises capacity 2.
 - **PASS:** anonymous administrator session request returns HTTP 401 without a
@@ -330,6 +330,13 @@ required full live campaigns.
     empty authorization headers, treats an empty Bearer scheme as absent and
     keeps prior rows visible on fetch failure. Production returned 129 retained
     usage rows with HTTP 200 after the fix.
+12. Uploading an image reference could silently move the Leonardo composer
+    away from Nano Banana 2, leaving the old Nano Banana 1344×768 dimensions
+    while a 16:9 Medium request required 2752×1536. Commits 307d83e and
+    d1811e6 restore the exact model after attachment using the live drawer's
+    stable `data-testid="nano-banana-2"`, recheck the reference count, and only
+    then reapply dimensions. A real request returned HTTP 200, one image and
+    actual 2752×1536; the account returned to healthy/WARM_IDLE.
 
 ## Remaining live blocker
 
