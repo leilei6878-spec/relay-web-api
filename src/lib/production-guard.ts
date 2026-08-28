@@ -209,6 +209,7 @@ export function bootProductionGuard() {
     void import("./provider-canary-scheduler").then((m) => m.startProviderCanaryScheduler()).catch(() => undefined);
     void import("./account-check-scheduler").then((m) => m.startAccountCheckScheduler()).catch(() => undefined);
     void import("./account-analytics").then((m) => m.startAvailabilitySnapshotScheduler()).catch(() => undefined);
+    void import("./account-inspections").then((m) => m.startInspectionCleanupScheduler()).catch(() => undefined);
   }
 }
 

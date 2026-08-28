@@ -605,8 +605,15 @@ export async function finishJobPg(
           inspectionId: null,
           lastError: result.ok ? null : result.error || "登录态查看异常结束",
         });
+      } else if (current.kind === "canary") {
+        await patchAccount(acc.id, {
+          failCount: result.ok ? 0 : acc.failCount,
+          lastError: result.ok ? null : result.error || "canary",
+          lockedUntil: null,
+          status: result.ok ? "healthy" : acc.status,
+        });
       } else if (result.ok && has) {
-        if (current.kind !== "canary" && isCanaryAccount(acc)) await recordCanaryResult(current.platform, true);
+        if (isCanaryAccount(acc)) await recordCanaryResult(current.platform, true);
         await patchAccount(acc.id, {
           failCount: 0,
           totalRequests: (acc.totalRequests || 0) + 1,
@@ -621,10 +628,8 @@ export async function finishJobPg(
         });
         markResilience("success");
       } else if (decision.provider_circuit_effect === "trip") {
-        if (current.kind !== "canary") {
-          if (isCanaryAccount(acc)) await recordCanaryResult(current.platform, false);
-          else await recordProviderFault(current.platform, decision.code, acc.id);
-        }
+        if (isCanaryAccount(acc)) await recordCanaryResult(current.platform, false);
+        else await recordProviderFault(current.platform, decision.code, acc.id);
         await patchAccount(acc.id, {
           totalRequests: (acc.totalRequests || 0) + 1,
           lastUsedAt: new Date().toISOString(),

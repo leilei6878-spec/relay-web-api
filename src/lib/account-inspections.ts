@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { audit } from "./audit";
 import { patchAccount, readControlPlane } from "./control-plane";
 import { getSql } from "./db";
+import { coordGet, coordSet } from "./coord";
 import { enqueueChat, enqueueImage } from "./job-queue";
 import { activeSelectorPack } from "./selector-promotion";
 import { uid } from "./utils";
@@ -94,7 +95,29 @@ async function authorizedInspection(id: string, token: string) {
   const db = await getSql();
   const rows = await db.query<Record<string, unknown>>("select * from relay_account_inspections where id=$1", [id]);
   if (!rows[0] || !sameHash(String(rows[0].token_hash || ""), tokenHash(token))) return null;
-  return mapInspection(rows[0]);
+  const row = mapInspection(rows[0]);
+  if (Date.parse(row.expiresAt) <= Date.now()) return null;
+  return row;
+}
+
+function normalizedCommand(command: InspectionCommand): InspectionCommand | null {
+  if (!command || typeof command !== "object") return null;
+  if (command.type === "click") {
+    const x = Number(command.x);
+    const y = Number(command.y);
+    return Number.isFinite(x) && Number.isFinite(y) ? { type: "click", x: Math.max(0, Math.min(1365, x)), y: Math.max(0, Math.min(900, y)) } : null;
+  }
+  if (command.type === "type") return { type: "type", text: String(command.text || "").slice(0, 4000) };
+  if (command.type === "scroll") {
+    const deltaY = Number(command.deltaY);
+    return Number.isFinite(deltaY) ? { type: "scroll", deltaY: Math.max(-2400, Math.min(2400, deltaY)) } : null;
+  }
+  if (command.type === "key") {
+    const key = String(command.key || "");
+    const allowed = new Set(["Enter", "Escape", "Tab", "Backspace", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"]);
+    return allowed.has(key) ? { type: "key", key } : null;
+  }
+  return ["reload", "back", "forward", "close"].includes(command.type) ? command : null;
 }
 
 export async function createAccountInspection(input: {
@@ -103,6 +126,7 @@ export async function createAccountInspection(input: {
   secure: boolean;
   requestedBy?: string;
 }) {
+  await expireAccountInspections();
   if (!input.secure) {
     return { ok: false as const, status: 409, error: "安全登录态查看要求 HTTPS；当前连接不是安全连接" };
   }
@@ -177,17 +201,21 @@ export async function commandAccountInspection(id: string, token: string, comman
   const row = await authorizedInspection(safeId(id), token);
   if (!row) return { ok: false as const, status: 404, error: "查看会话不存在或令牌无效" };
   if (!["queued", "active", "closing"].includes(row.status)) return { ok: false as const, status: 409, error: "查看会话已经结束" };
-  if (row.mode === "view" && !["scroll", "reload", "back", "forward", "close"].includes(command.type)) {
+  const safeCommand = normalizedCommand(command);
+  if (!safeCommand) return { ok: false as const, status: 400, error: "远程操作指令无效" };
+  if (row.mode === "view" && !["scroll", "reload", "back", "forward", "close"].includes(safeCommand.type)) {
     return { ok: false as const, status: 403, error: "查看模式不允许修改页面；请使用维护模式" };
   }
-  const extra = { ...row.extra, commandSeq: Number(row.extra.commandSeq || 0) + 1, command };
+  const extra: Record<string, unknown> = { ...row.extra, commandSeq: Number(row.extra.commandSeq || 0) + 1 };
+  delete extra.command;
   const db = await getSql();
   await db.query(
     `update relay_account_inspections
         set status=case when $3='close' then 'closing' else status end, last_seen_at=now(), extra=$2::jsonb
       where id=$1`,
-    [row.id, JSON.stringify(extra), command.type],
+    [row.id, JSON.stringify(extra), safeCommand.type],
   );
+  await coordSet(`inspection-command:${row.id}`, JSON.stringify({ commandSeq: extra.commandSeq, command: safeCommand }), 60_000);
   return { ok: true as const, commandSeq: extra.commandSeq };
 }
 
@@ -198,12 +226,19 @@ export async function workerInspectionPoll(id: string, afterSeq: number) {
     return { ok: true as const, close: true, commandSeq: Number(row.extra.commandSeq || 0) };
   }
   const commandSeq = Number(row.extra.commandSeq || 0);
+  let queued: { commandSeq?: number; command?: InspectionCommand } | null = null;
+  try {
+    const raw = await coordGet(`inspection-command:${row.id}`);
+    queued = raw ? JSON.parse(raw) as { commandSeq?: number; command?: InspectionCommand } : null;
+  } catch {
+    queued = null;
+  }
   return {
     ok: true as const,
     close: row.status === "closing",
     mode: row.mode,
     commandSeq,
-    command: commandSeq > afterSeq ? row.extra.command || null : null,
+    command: commandSeq > afterSeq && Number(queued?.commandSeq || 0) === commandSeq ? queued?.command || null : null,
   };
 }
 
@@ -217,10 +252,10 @@ export async function workerInspectionStatus(id: string, patch: Record<string, u
     viewportHeight: Number(patch.viewportHeight || row.extra.viewportHeight || 900),
     frameSeq: Number(patch.frameSeq || row.extra.frameSeq || 0),
     commandSeq: Number(row.extra.commandSeq || 0),
-    command: row.extra.command || null,
     jobId: row.extra.jobId || null,
   };
-  const status = ["active", "closed", "failed"].includes(String(patch.status)) ? String(patch.status) : row.status;
+  const requestedStatus = ["active", "closed", "failed"].includes(String(patch.status)) ? String(patch.status) : row.status;
+  const status = row.status === "closing" && requestedStatus === "active" ? "closing" : requestedStatus;
   const db = await getSql();
   await db.query(
     `update relay_account_inspections
@@ -270,9 +305,42 @@ async function deleteInspectionFrame(id: string) {
 }
 
 export async function listAccountInspections(accountId?: string) {
+  await expireAccountInspections();
   const db = await getSql();
   const rows = accountId
     ? await db.query<Record<string, unknown>>("select * from relay_account_inspections where account_id=$1 order by created_at desc limit 30", [accountId])
     : await db.query<Record<string, unknown>>("select * from relay_account_inspections order by created_at desc limit 30");
   return rows.map(mapInspection).map((row) => ({ ...row, extra: undefined }));
+}
+
+export async function expireAccountInspections() {
+  const db = await getSql();
+  const rows = await db.query<Record<string, unknown>>(
+    "select * from relay_account_inspections where status in ('queued','active','closing') and expires_at <= now()",
+  );
+  if (!rows.length) return 0;
+  const plane = await readControlPlane();
+  for (const raw of rows) {
+    const row = mapInspection(raw);
+    await db.query(
+      "update relay_account_inspections set status='closed', finished_at=now(), close_reason='expired' where id=$1",
+      [row.id],
+    );
+    const account = plane.accounts.find((item) => item.id === row.accountId);
+    if (account?.inspectionId === row.id) await patchAccount(row.accountId, { inspectionId: null });
+    await deleteInspectionFrame(row.id);
+  }
+  return rows.length;
+}
+
+let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startInspectionCleanupScheduler() {
+  if (process.env.RELAY_TEST === "1") return false;
+  if (cleanupTimer) return true;
+  const initial = setTimeout(() => void expireAccountInspections().catch(() => undefined), 30_000);
+  if (typeof initial === "object" && "unref" in initial) initial.unref();
+  cleanupTimer = setInterval(() => void expireAccountInspections().catch(() => undefined), 5 * 60_000);
+  if (typeof cleanupTimer === "object" && "unref" in cleanupTimer) cleanupTimer.unref();
+  return true;
 }
