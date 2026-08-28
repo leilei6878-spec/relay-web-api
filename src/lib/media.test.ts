@@ -28,3 +28,11 @@ test("invalid image references are reported instead of ignored", () => {
   assert.equal(parseMessageContent([{ type: "image_url", image_url: { url: "file:///secret.png" } }]).imageInvalid, true);
   assert.equal(parseImageRequest({ prompt: "x", image: "not-a-url" }).imageInvalid, true);
 });
+
+test("the image alias and images array do not duplicate one reference", () => {
+  const url = image(1);
+  const parsed = parseImageRequest({ prompt: "x", image: url, images: [url] }, { maxImages: 6 });
+  assert.deepEqual(parsed.images, [url]);
+  assert.equal(parsed.imageOverflow, false);
+  assert.equal(parsed.imageInvalid, false);
+});

@@ -21,6 +21,7 @@ export async function ingestReferenceImages(
   origin: string,
 ): Promise<{ ok: true; assets: ReferenceAsset[] } | { ok: false; error: string }> {
   const assets: ReferenceAsset[] = [];
+  const seenHashes = new Set<string>();
   for (const url of urls) {
     const loaded = await loadImageBytes(url);
     if (!loaded.ok) return { ok: false, error: `REFERENCE_INVALID: ${loaded.error}` };
@@ -28,6 +29,9 @@ export async function ingestReferenceImages(
     if (!mime) return { ok: false, error: "REFERENCE_INVALID: unsupported image bytes" };
     const meta = readImageMeta(loaded.buf);
     if (!meta) return { ok: false, error: "REFERENCE_INVALID: unreadable dimensions" };
+    const hash = sha256Hex(loaded.buf);
+    if (seenHashes.has(hash)) continue;
+    seenHashes.add(hash);
     try {
       const stored = await getMediaStore().put(loaded.buf, mime);
       const stableUrl = stored.url.startsWith("/")
@@ -36,7 +40,7 @@ export async function ingestReferenceImages(
       assets.push({
         assetId: stored.id,
         url: stableUrl,
-        sha256: stored.sha256 || sha256Hex(loaded.buf),
+        sha256: stored.sha256 || hash,
         mime,
         bytes: stored.bytes,
         width: meta.width,

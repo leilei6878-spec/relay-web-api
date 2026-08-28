@@ -22,10 +22,11 @@ function asUrl(value: unknown): string {
   return "";
 }
 
-function pushImage(list: string[], url: string, max = MAX_IMAGES): "added" | "overflow" | "ignored" {
+function pushImage(list: string[], url: string, max = MAX_IMAGES): "added" | "duplicate" | "overflow" | "ignored" {
   if (!url) return "ignored";
   if (url.length > MAX_CHARS) return "ignored";
   if (!url.startsWith("data:image") && !url.startsWith("http://") && !url.startsWith("https://")) return "ignored";
+  if (list.includes(url)) return "duplicate";
   if (list.length >= max) return "overflow";
   list.push(url);
   return "added";

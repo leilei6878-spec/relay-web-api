@@ -23,6 +23,15 @@ test("data references become stable assets with exact descriptors", async () => 
   assert.equal(out.assets[0]!.sha256.length, 64);
 });
 
+test("byte-identical references are frozen once", async () => {
+  resetMediaStoreForTests();
+  const data = `data:image/png;base64,${PNG.toString("base64")}`;
+  const out = await ingestReferenceImages([data, data], "http://relay.test");
+  assert.equal(out.ok, true);
+  if (!out.ok) return;
+  assert.equal(out.assets.length, 1);
+});
+
 test("remote references are fetched exactly once before being frozen", async () => {
   resetMediaStoreForTests();
   const originalFetch = globalThis.fetch;
