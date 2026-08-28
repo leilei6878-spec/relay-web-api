@@ -9,6 +9,7 @@ import {
 } from "./selector-promotion.ts";
 import { claimCanaryDispatch, nextCanaryDelay, parseInterval, realImageCanaryMs, isPaidImageCanary, resetCanarySchedulerForTests, scheduleCanaries, tickProviderCanaries } from "./provider-canary-scheduler.ts";
 import { resetCoordForTests } from "./coord.ts";
+import { canaryModelFor } from "./provider/canary-run.ts";
 
 test("candidate pack promotes after 3 consecutive passes and rolls back on fail", async () => {
   resetCoordForTests();
@@ -41,6 +42,22 @@ test("structural vs paid image canary intervals", () => {
   assert.equal(isPaidImageCanary("chatgpt", "paid"), false);
   assert.equal(isPaidImageCanary("leonardo", "paid"), true);
   assert.equal(isPaidImageCanary("gemini", "structural"), false);
+});
+
+test("Leonardo canary selects a model verified on its assigned account", () => {
+  const models = ["leonardo-gpt-image-2", "leonardo-gemini"];
+  assert.equal(
+    canaryModelFor("leonardo", { platform: "leonardo", availableModels: ["Nano Banana 2"] }, models),
+    "leonardo-gemini",
+  );
+  assert.equal(
+    canaryModelFor("leonardo", { platform: "leonardo", availableModels: ["GPT Image 2"] }, models),
+    "leonardo-gpt-image-2",
+  );
+  assert.equal(
+    canaryModelFor("leonardo", { platform: "leonardo", availableModels: [] }, models),
+    "leonardo-gpt-image-2",
+  );
 });
 
 test("only one gateway claims a provider canary window", async () => {

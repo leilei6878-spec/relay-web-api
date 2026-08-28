@@ -7,6 +7,17 @@ import { featureDelta, fingerprint } from "./fingerprint";
 import { getAdapter } from "./index";
 import type { DomFeature } from "./types";
 import { activeSelectorPack, selectorPackForCanary } from "../selector-promotion";
+import { accountHasLeonardoModel } from "./leonardo-models";
+import type { Account } from "../types";
+
+export function canaryModelFor(
+  provider: ProviderId,
+  account: Pick<Account, "platform" | "availableModels">,
+  models: string[],
+) {
+  if (provider !== "leonardo") return models[0] || "";
+  return models.find((model) => accountHasLeonardoModel(account, model)) || models[0] || "";
+}
 
 export async function rememberFingerprint(provider: ProviderId, features: DomFeature[], packVersion: string) {
   const fp = fingerprint(provider, packVersion, features);
@@ -37,6 +48,7 @@ export async function enqueueProviderCanary(provider: ProviderId, kind: "structu
     return { ok: false as const, error: "no canary account", circuit: snap.state };
   }
   const adapter = getAdapter(provider);
+  const model = canaryModelFor(provider, account, adapter.capabilities().models);
   const selectorPackVersion =
     kind === "structural"
       ? await selectorPackForCanary(provider)
@@ -46,7 +58,7 @@ export async function enqueueProviderCanary(provider: ProviderId, kind: "structu
       kind === "paid"
         ? "A plain cobalt blue square centered on a white background"
         : "Reply with the single word: pong",
-    model: adapter.capabilities().models[0],
+    model,
     kind: kind === "paid" ? "image" : "canary",
   });
   const excludeAccountIds = plane.accounts.filter((item) => item.id !== account.id).map((item) => item.id);
