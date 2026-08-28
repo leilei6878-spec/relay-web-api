@@ -45,7 +45,7 @@ At takeover:
 | 4 | Image provenance/validator/media closure | COMPLETE | Commit `ac0ae39`; frozen refs, strict confidence/assets/history, DOM correlation, WebP, WARM_IDLE fail-closed. |
 | 5 | Canary + selector self-healing closure | COMPLETE | Commit `71fd1f1`; distributed dispatch lease, real paid canary, shared selector state, finish-path fingerprint/promotion. |
 | 6 | Provider/capability/key backpressure | COMPLETE | Commit `71fd1f1`; global/provider/chat/image/key caps, file + distributed PG admission, 429/Retry-After. |
-| 7 | Full local automated campaign | COMPLETE | Relay 219/219; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
+| 7 | Full local automated campaign | COMPLETE | Relay 221/221; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
 | 7B | Production recovery + Compose contract | COMPLETE | Versioned/checksummed backup includes secrets/sessions; DB backup/restore fail closed; Compose has no required-secret defaults and host health port is consistently 8088. CLI/contract tests 6/6 pass. |
 | 7C | Release identity | COMPLETE | `0.9.0-rc2`; health/readiness/runtime expose exact commit and build time; production readiness rejects an unknown commit. |
 | 7D | Dev + production browser render | COMPLETE | Desktop and 390×844 mobile render with visible content, no horizontal overflow, and zero browser-console warnings/errors. Production-only partial runtime response crash was found, fixed, rebuilt, and retested. |
@@ -98,10 +98,11 @@ runs. No zero is inferred from unit tests:
 - `9969bfa` — extend the free structural Leonardo canary through size controls
 - `63c7708` — persist account additions explicitly and surface save failures
 - `635f909` — select a Leonardo canary model compatible with the assigned account
+- `c46eb82` — generate browser UIDs when public HTTP lacks crypto.randomUUID
 
 ## Phase 7 evidence (2026-08-28)
 
-- `npm run test:relay`: **219/219 PASS**.
+- `npm run test:relay`: **221/221 PASS**.
 - `npm test`: **101/101 PASS**.
 - `npm run test:ci`: Relay **212/212 PASS** at the original full CI checkpoint plus multi-process/contract suite
   **21/21 PASS**.
@@ -123,7 +124,7 @@ Temporary dependency cache content is never committed.
 ## Phase 10 production evidence (2026-08-28)
 
 - Production health/readiness: HTTP 200, version 0.9.0-rc2, schema 4,
-  exact implementation commit 635f90930841144d8229aa38e44910ad9213bdcf,
+  exact implementation commit c46eb82d5c50955a359114b6a9de76461dfd0a2e,
   zero blockers; Postgres, Redis, object media and Worker are ready.
 - Anonymous /api/admin/session: HTTP 401 and no Set-Cookie.
 - Real Chat: exact non-stream marker PASS; exact SSE marker plus done PASS;
@@ -138,6 +139,10 @@ Temporary dependency cache content is never committed.
   reload persistence, delete and reload cleanup; console errors 0. A separate
   production API add/read/delete/read check also passed and restored the
   original account count.
+- The user's public HTTP browser exposed a second account-add blocker:
+  crypto.randomUUID is unavailable outside secure contexts. The UID generator
+  now falls back to crypto.getRandomValues. Production Chromium verified the
+  exact insecure runtime plus add/reload/delete/reload with zero console errors.
 - Two healthy production accounts are marked Canary; Gemini remains without
   an account. The default structural interval is about seven minutes and paid
   image interval about three hours.

@@ -6,7 +6,7 @@ Overall status: **PARTIAL**
 
 Takeover HEAD: b30a9f7d52653344d8512f5479b8f882c88500d0
 
-Final implementation HEAD: 635f90930841144d8229aa38e44910ad9213bdcf
+Final implementation HEAD: c46eb82d5c50955a359114b6a9de76461dfd0a2e
 
 Production currently serves the final implementation HEAD. No known P0 remains
 open in the deployed code. Overall acceptance stays PARTIAL because the
@@ -17,7 +17,7 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 | Gate | Status | Evidence |
 |---|---|---|
-| Relay unit/integration | **PASS** | 219/219 |
+| Relay unit/integration | **PASS** | 221/221 |
 | Core/template contract | **PASS** | 101/101 |
 | Multi-process/operations contract | **PASS** | 21/21 |
 | Two-gateway chaos | **PASS** | 18/18; fenced stale results and restart recovery pass |
@@ -27,9 +27,9 @@ five-account live concurrency, and one-hour live soak were not completed.
 | Production dependencies | **PASS** | npm audit --omit=dev reports 0 vulnerabilities |
 | Dev + built browser render | **PASS** | Desktop and 390×844 mobile; no overflow or error heading |
 | Pre-deploy backup | **PASS** | Verified checksummed DB, media, MinIO, configuration and Git metadata backup |
-| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit 635f909; DB/Redis/object media/worker ready |
+| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit c46eb82; DB/Redis/object media/worker ready |
 | Anonymous admin boundary | **PASS** | External /api/admin/session returns HTTP 401 and no Set-Cookie |
-| Account add persistence | **PASS** | Production UI add → refresh → delete → refresh passed; console errors 0; test record removed |
+| Account add persistence | **PASS** | Public insecure HTTP UI add → refresh → delete → refresh passed without randomUUID; console errors 0; test record removed |
 | Live Chat | **PARTIAL** | Real non-stream and SSE marker requests succeeded; one earlier request ended RESULT_UNCERTAIN; 200-request matrix not run |
 | Live image | **PARTIAL** | One Leonardo request safely returned RESULT_UNCERTAIN after submit; no image or fake success returned; the resulting size-control defect was fixed and deployed |
 
@@ -40,22 +40,24 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 2. **最终 HEAD — PASS.**
    Final implementation HEAD is
-   635f90930841144d8229aa38e44910ad9213bdcf. The final report commit is
+   c46eb82d5c50955a359114b6a9de76461dfd0a2e. The final report commit is
    documentation-only and follows this implementation HEAD.
 
 3. **本次 commits — PASS.**
    6dc58a7, 5e2bb60, d0ba670, c429950, 1ff9844, 06cca41,
    ac0ae39, 71fd1f1, 68e60ed, 1035633, 47be2f3, 9e4fc8b,
    d9ccd60, 1e1c207, 9860071, 7206861, e286563, 9969bfa,
-   63c7708 and 635f909.
+   63c7708, 635f909 and c46eb82.
 
 4. **还存在什么 P0 — PASS.**
    No known P0 remains open in the deployed candidate. The live anonymous
    administrator-cookie issue was closed and externally verified. A live API
    metadata privacy leak was found, fixed and verified. A Leonardo size
    selector JavaScript defect and fail-open size gate were also found, fixed
-   and deployed. Remaining items are coverage/scale gates rather than known P0
-   defects.
+   and deployed. Public HTTP account creation was blocked by unavailable
+   crypto.randomUUID; the UID generator now uses crypto.getRandomValues when
+   randomUUID is unavailable. Remaining items are coverage/scale gates rather
+   than known P0 defects.
 
 5. **Chat completion 是否还会提前截断 — PARTIAL.**
    The detector requires confirmed completion, reopens if the DOM grows,
@@ -233,7 +235,7 @@ required full live campaigns.
 ## Production state at report time
 
 - **PASS:** external health and readiness return exact release
-  635f90930841144d8229aa38e44910ad9213bdcf with no blockers.
+  c46eb82d5c50955a359114b6a9de76461dfd0a2e with no blockers.
 - **PASS:** Postgres, Redis, object media and the Worker are online; the Worker
   advertises capacity 2.
 - **PASS:** anonymous administrator session request returns HTTP 401 without a
@@ -273,6 +275,12 @@ required full live campaigns.
    different family. Commit 635f909 selects the first account-compatible
    logical model and has a regression test for Nano Banana/Gemini versus GPT
    Image capability lists.
+5. Account creation still failed specifically on the public HTTP IP because
+   browsers do not expose crypto.randomUUID in an insecure context. The live
+   browser console identified the exact exception. Commit c46eb82 adds an RFC
+   4122-compatible crypto.getRandomValues fallback. A production Chromium test
+   confirmed isSecureContext=false, randomUUID unavailable, add/reload/delete/
+   reload all pass, and console errors remain zero.
 
 ## Remaining live blocker
 
