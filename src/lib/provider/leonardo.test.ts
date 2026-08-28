@@ -311,7 +311,8 @@ test("leonardo login helper waits for Sign In to disappear, not the public compo
   assert.match(py, /sign_in_visible/);
   assert.match(py, /leonardo_cookies_ok/);
   assert.match(py, /没有写入 state\.json/);
-  assert.match(py, /同时打开 Canva 和 Leonardo/);
+  assert.match(py, /人工登录阶段不会连接自动化/);
+  assert.match(py, /登录期间助手不会读取或操作浏览器/);
   assert.match(py, /disable-cn-redirect/);
   assert.match(py, /canva\.cn/);
   assert.match(py, /to_canva_com/);

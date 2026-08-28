@@ -648,11 +648,15 @@ def leonardo_ready(context):
 def wait_login(page, context):
     print("在弹出窗口登录", ${email})
     if PLATFORM == "leonardo":
-        print("必须用 Canva 授权 Leonardo，不要点 Microsoft / Google。")
-        print("会同时打开 Canva 和 Leonardo 两个标签。")
-        print("阶段：1) Canva 国际站登录  2) Leonardo 点 Continue with Canva  3) 授权弹窗走完  4) Sign In 消失才保存")
-        print("公开出图页也有 Generate，那不是登录。只登录 Canva、不点授权也不会保存。")
-        ensure_canva_and_leonardo_tabs(context, page)
+        print("正在只读检查 Leonardo 登录结果；不会点击、切换、刷新或创建任何标签。")
+        for _ in range(10):
+            ready = leonardo_ready(context)
+            if ready:
+                print("检测到 Leonardo Session Cookie，正在保存…")
+                return save_state(ready.context)
+            time.sleep(0.8)
+        print("没有检测到完整 Leonardo Session。没有写入 state.json；请重新运行并在授权完成后再按回车。")
+        return False
     else:
         print("看到聊天输入框会自动保存；也可以回到这里按回车。")
     redirected = False
@@ -999,16 +1003,32 @@ def open_leonardo_chrome(p, proxy):
         args.append("--proxy-pac-url=" + pac_url)
         args.append("--host-resolver-rules=MAP canva.cn www.canva.com,MAP www.canva.cn www.canva.com,MAP app.canva.cn app.canva.com")
         print("验证码走本机网络；Canva / Leonardo 走绑定节点")
-    print("正在启动专用 Chrome…")
+    args.extend([CANVA_COM, LEO_LOGIN])
+    print("正在启动普通专用 Chrome；人工登录阶段不会连接自动化。")
     subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(50):
+        probe = socket.socket()
+        try:
+            if probe.connect_ex(("127.0.0.1", debug)) == 0:
+                break
+        finally:
+            probe.close()
+        time.sleep(0.2)
+    print("请在专用窗口完成：1) Canva 登录  2) Leonardo 手动点 Continue with Canva  3) 完成授权并进入 Image Generator。")
+    print("必须用 Canva 授权 Leonardo，不要点 Microsoft / Google。")
+    print("登录期间助手不会读取或操作浏览器，也不会创建、切换或刷新标签。")
+    try:
+        input("全部完成后回到这里按回车，仅执行一次只读导出：")
+    except Exception:
+        pass
+    print("开始一次性只读连接，检查登录 Cookie…")
     last_err = ""
     for _ in range(50):
         try:
             browser = p.chromium.connect_over_cdp("http://127.0.0.1:%d" % debug)
             context = browser.contexts[0] if browser.contexts else browser.new_context()
-            attach_canva_com_guard(context)
             page = context.pages[0] if context.pages else context.new_page()
-            print("已接上专用 Chrome。将只在启动阶段各打开一次 Canva 和 Leonardo。")
+            print("已接上专用 Chrome，只读导出完成后会关闭该专用窗口。")
             return browser, context, page, True
         except Exception as e:
             last_err = str(e)[:160]
