@@ -147,6 +147,11 @@ print(json.dumps({"scripts":scripts,"bad":bad,"good":good}))
   assert.match(result.bad[3], /Image Dimensions unreadable/);
   assert.deepEqual(result.good.slice(0, 3), [true, 1024, 1024]);
   assert.ok(result.scripts.length >= 6);
+  const script = localWorkerScript();
+  const canaryStart = script.indexOf('if kind == "canary":');
+  const canaryDone = script.indexOf('"text": "CANARY"', canaryStart);
+  const sizeProbe = script.indexOf("confirm_leonardo_image_size(", canaryStart);
+  assert.ok(canaryStart > 0 && sizeProbe > canaryStart && sizeProbe < canaryDone);
   for (const source of result.scripts) {
     assert.doesNotThrow(() => new Function(`return (${source});`), source);
   }

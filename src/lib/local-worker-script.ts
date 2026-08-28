@@ -3902,6 +3902,21 @@ def run_leonardo(body, ctx=None):
             picked = shown2
         print("leonardo picked=%s shown=%s" % (picked, shown2), flush=True)
         if kind == "canary":
+            canary_aspect = body.get("aspect") or size_to_aspect(want_size)
+            canary_w, canary_h = parse_size_wh(want_size)
+            canary_tier, _canary_px = size_tier(canary_w, canary_h, gpt)
+            if body.get("tier"):
+                canary_tier = str(body.get("tier"))
+            size_ok, shown_w, shown_h, size_error = confirm_leonardo_image_size(
+                page, want_size, canary_aspect, canary_tier, gpt
+            )
+            if not size_ok:
+                return fail_job(ctx, size_error, "provider", {
+                    "pageState": detect_page_state(page, "leonardo"),
+                    "backendMode": "web_account",
+                    "availableModels": available,
+                    "modelActual": picked,
+                })
             return {
                 "ok": True,
                 "url": "",
@@ -3911,6 +3926,10 @@ def run_leonardo(body, ctx=None):
                 "availableModels": available,
                 "backendMode": "web_account",
                 "selectorPackVersion": pack_version,
+                "requestedSize": want_size,
+                "actualWidth": shown_w,
+                "actualHeight": shown_h,
+                "actualAspect": canary_aspect,
             }
         aspect = body.get("aspect") or size_to_aspect(want_size)
         want_w, want_h = parse_size_wh(want_size)
