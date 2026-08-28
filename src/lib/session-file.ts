@@ -656,19 +656,12 @@ def wait_login(page, context):
     else:
         print("看到聊天输入框会自动保存；也可以回到这里按回车。")
     redirected = False
-    clicked_sso = 0
-    last_sso_at = 0
     reloaded_once = False
     last_hint = 0
     phase = "canva"
     for i in range(240):
         try:
             pages = all_pages(context)
-            for pg in pages:
-                try:
-                    dismiss_canva_cookies(pg)
-                except Exception:
-                    pass
             ready = leonardo_ready(context) if PLATFORM == "leonardo" else None
             if PLATFORM == "leonardo" and ready:
                 print("检测到 Leonardo Session Cookie，正在保存…")
@@ -704,8 +697,6 @@ def wait_login(page, context):
                         pg.goto(to_canva_com(u), wait_until="domcontentloaded", timeout=30000)
                     except Exception:
                         pass
-            ensure_canva_and_leonardo_tabs(context, page)
-            pages = all_pages(context)
             if leonardo_cookies_ok(context) and not reloaded_once:
                 for pg in pages:
                     if "leonardo.ai" in (pg.url or "") and "/auth/" not in (pg.url or ""):
@@ -737,19 +728,16 @@ def wait_login(page, context):
                     leo_login = pg
                     break
             if leo_login is not None:
-                now = time.time()
-                if clicked_sso < 3 and now - last_sso_at > 12:
-                    try:
-                        leo_login.bring_to_front()
-                    except Exception:
-                        pass
+                if time.time() - last_hint > 8:
                     found = list_sso_buttons(leo_login)
                     if found:
-                        print("Leonardo 登录页按钮:", ", ".join(found), "→ 只点 Canva")
-                    if click_canva_sso(leo_login):
-                        clicked_sso += 1
-                        last_sso_at = now
-                        phase = "oauth"
+                        print("Leonardo 登录页按钮:", ", ".join(found))
+                    print("Canva 已登录。请手动切到 Leonardo 标签并点 Continue with Canva；助手不会自动点击或抢焦点。")
+                    last_hint = time.time()
+                phase = "sso-manual"
+            elif time.time() - last_hint > 8:
+                print("Leonardo 标签可能正在完成 Canva 授权或已被关闭。助手不会重复建页；若没有授权页，请手动新建标签打开:", LEO_LOGIN)
+                last_hint = time.time()
             if i % 8 == 0:
                 hits = leonardo_auth_names(all_cookies(context))
                 names = [c.get("name") or "" for c in all_cookies(context)][:18]
@@ -1015,8 +1003,7 @@ def open_leonardo_chrome(p, proxy):
             context = browser.contexts[0] if browser.contexts else browser.new_context()
             attach_canva_com_guard(context)
             page = context.pages[0] if context.pages else context.new_page()
-            print("已接上专用 Chrome。正在打开 Canva 和 Leonardo 两个标签。")
-            ensure_canva_and_leonardo_tabs(context, page)
+            print("已接上专用 Chrome。将只在启动阶段各打开一次 Canva 和 Leonardo。")
             return browser, context, page, True
         except Exception as e:
             last_err = str(e)[:160]
