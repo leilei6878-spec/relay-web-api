@@ -2,7 +2,7 @@
 
 Started: 2026-08-27  
 Takeover HEAD: `b30a9f7d52653344d8512f5479b8f882c88500d0`  
-Current phase: Phase 9 — local acceptance complete; external deployment/live gates blocked
+Current phase: Phase 10 — controlled production deployed; large live matrices and soak remain
 
 ## Rules for this log
 
@@ -45,23 +45,24 @@ At takeover:
 | 4 | Image provenance/validator/media closure | COMPLETE | Commit `ac0ae39`; frozen refs, strict confidence/assets/history, DOM correlation, WebP, WARM_IDLE fail-closed. |
 | 5 | Canary + selector self-healing closure | COMPLETE | Commit `71fd1f1`; distributed dispatch lease, real paid canary, shared selector state, finish-path fingerprint/promotion. |
 | 6 | Provider/capability/key backpressure | COMPLETE | Commit `71fd1f1`; global/provider/chat/image/key caps, file + distributed PG admission, 429/Retry-After. |
-| 7 | Full local automated campaign | COMPLETE | Relay 212/212; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
+| 7 | Full local automated campaign | COMPLETE | Relay 219/219; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
 | 7B | Production recovery + Compose contract | COMPLETE | Versioned/checksummed backup includes secrets/sessions; DB backup/restore fail closed; Compose has no required-secret defaults and host health port is consistently 8088. CLI/contract tests 6/6 pass. |
 | 7C | Release identity | COMPLETE | `0.9.0-rc2`; health/readiness/runtime expose exact commit and build time; production readiness rejects an unknown commit. |
 | 7D | Dev + production browser render | COMPLETE | Desktop and 390×844 mobile render with visible content, no horizontal overflow, and zero browser-console warnings/errors. Production-only partial runtime response crash was found, fixed, rebuilt, and retested. |
 | 7E | Production dependency audit | COMPLETE | Official npm audit 0 vulnerabilities after removing unpatched `image-size` and replacing it with bounded PNG/JPEG/WebP parsing. |
-| 8 | Real providers + soak | BLOCKED_BY_ENVIRONMENT | Needs healthy sessions/accounts and reachable production worker/infrastructure. |
+| 8 | Real providers + soak | PARTIAL | Real Chat non-stream/SSE pass; one Leonardo request safely ended RESULT_UNCERTAIN and exposed a fixed size-control defect. 200 Chat, image matrices, five-account load and one-hour soak remain blocked. |
 | 9 | Final acceptance | COMPLETE | `CODEX_FINAL_ACCEPTANCE.md` answers all 30 required questions and preserves every external/live blocker. |
+| 10 | Controlled production deployment | COMPLETE | Verified backup, bundle import, Compose rebuild, exact release identity, readiness, anonymous-admin 401, real Chat, public metadata redaction, account add persistence and production UI add/reload/delete/reload. |
 
 ## Environment blockers (do not stop local phases)
 
 | Blocker | Current evidence | Affected gates |
 |---|---|---|
-| `LOGIN_REQUIRED` / `NO_REAL_ACCOUNT` | No verified usable ChatGPT/Gemini/Leonardo credentials are available to this worktree. | 200 Chat, image matrices, live DOM recovery. |
-| `BLOCKED_BY_ACCOUNT_COUNT` | Five healthy accounts have not been demonstrated. | 5-account × 20 concurrency. |
-| Server shell unreachable | TCP 246 and 22 were unreachable from this environment. | Host config, worker logs, deploy, real backup/restore. |
+| `BLOCKED_BY_ACCOUNT_COUNT` | Production has one healthy ChatGPT account, one healthy Leonardo account and no Gemini account. | 200 mixed Chat at scale, full image matrices, 5-account × 20 concurrency. |
+| Leonardo live result unavailable | One real request reached SUBMITTED/UNSAFE then RESULT_UNCERTAIN; it was not retried. | Successful post-fix 1:1/16:9/9:16, reference and count matrices. |
+| Server shell/deploy | Resolved: confirmed SSH host key, key authentication, port 246, verified backup and production bundle deployment. | None; host remains reachable. |
 | GitHub write unavailable | Connected GitHub identity has repository read but no push permission. | Push/PR/remote CI for new commits. |
-| Long soak prerequisites | Real providers and stable target infrastructure are not available locally. | ≥1h soak and live crash/proxy/provider injections. |
+| Long soak prerequisites | Stable production exists, but the required account count and observation time were not available in this campaign. | ≥1h live soak and matrix-scale failure injection. |
 
 ## Current correctness counters
 
@@ -90,12 +91,19 @@ runs. No zero is inferred from unit tests:
 - `47be2f3` — exact release identity and `0.9.0-rc2`
 - `9e4fc8b` — production-dashboard partial runtime response resilience
 - `d9ccd60` — bounded image metadata parsing; production dependency audit 0
+- `1e1c207` — publish initial final acceptance report
+- `9860071` — keep the production Node 22/npm 10 lockfile compatible
+- `7206861` — strip account identity and internal topology from public relay metadata
+- `e286563` — fix Leonardo embedded JavaScript and fail closed on unverified size
+- `9969bfa` — extend the free structural Leonardo canary through size controls
+- `63c7708` — persist account additions explicitly and surface save failures
+- `635f909` — select a Leonardo canary model compatible with the assigned account
 
 ## Phase 7 evidence (2026-08-28)
 
-- `npm run test:relay`: **212/212 PASS**.
+- `npm run test:relay`: **219/219 PASS**.
 - `npm test`: **101/101 PASS**.
-- `npm run test:ci`: Relay **212/212 PASS** plus multi-process/contract suite
+- `npm run test:ci`: Relay **212/212 PASS** at the original full CI checkpoint plus multi-process/contract suite
   **21/21 PASS**.
 - `npm run test:chaos`: **18/18 PASS** across two gateways with shared PGlite
   and Redis, including process/database restarts and fenced stale results.
@@ -111,3 +119,31 @@ runs. No zero is inferred from unit tests:
   tracked pre-existing cleanup). `npm run build:app`: PASS.
 
 Temporary dependency cache content is never committed.
+
+## Phase 10 production evidence (2026-08-28)
+
+- Production health/readiness: HTTP 200, version 0.9.0-rc2, schema 4,
+  exact implementation commit 635f90930841144d8229aa38e44910ad9213bdcf,
+  zero blockers; Postgres, Redis, object media and Worker are ready.
+- Anonymous /api/admin/session: HTTP 401 and no Set-Cookie.
+- Real Chat: exact non-stream marker PASS; exact SSE marker plus done PASS;
+  actual_model remained unknown and model_verified remained false.
+- Public metadata: account email plus worker/account/proxy IDs absent from real
+  non-stream and SSE responses.
+- Real Leonardo: one request reached SUBMITTED/UNSAFE and ended
+  RESULT_UNCERTAIN with zero returned images and no automatic retry. Live logs
+  exposed malformed embedded JavaScript and an unreadable 0×0 size gate; both
+  were fixed and deployed.
+- Account management: local and production Chromium both completed add,
+  reload persistence, delete and reload cleanup; console errors 0. A separate
+  production API add/read/delete/read check also passed and restored the
+  original account count.
+- Two healthy production accounts are marked Canary; Gemini remains without
+  an account. The default structural interval is about seven minutes and paid
+  image interval about three hours.
+- A post-deploy Leonardo structural Canary dispatched with
+  leonardo-gemini, entered the Worker and failed before submit with
+  LEONARDO_DOM_CHANGED because the page was not WARM_IDLE after cleanup. The
+  persisted state was PREPARING/SAFE; no Generate click or paid request
+  occurred. The scheduler/model-selection fix is therefore live-verified, and
+  the remaining blocker is the current provider DOM cleanup state.

@@ -1,207 +1,289 @@
-# Codex Final Acceptance — relay-web-api `0.9.0-rc2`
+# Codex Final Acceptance — relay-web-api 0.9.0-rc2
 
 Date: 2026-08-28
 
 Overall status: **PARTIAL**
 
-Takeover implementation base: `b30a9f7d52653344d8512f5479b8f882c88500d0`
+Takeover HEAD: b30a9f7d52653344d8512f5479b8f882c88500d0
 
-Final implementation HEAD: `d9ccd60192759f4e6628bd2687cef3fed9761f0d`
+Final implementation HEAD: 635f90930841144d8229aa38e44910ad9213bdcf
 
-The local acceptance candidate has no known locally reproducible P0. It is not
-the code currently serving production: the GitHub repository grants the
-connected identity pull-only permission, SSH ports 246/22 are unreachable, and
-the public origin still reports `0.9.0-rc1`.
+Production currently serves the final implementation HEAD. No known P0 remains
+open in the deployed code. Overall acceptance stays PARTIAL because the
+required 200-request Chat campaign, complete Gemini/Leonardo image matrices,
+five-account live concurrency, and one-hour live soak were not completed.
 
 ## Current evidence
 
 | Gate | Status | Evidence |
 |---|---|---|
-| Relay unit/integration | **PASS** | 212/212 |
+| Relay unit/integration | **PASS** | 219/219 |
 | Core/template contract | **PASS** | 101/101 |
 | Multi-process/operations contract | **PASS** | 21/21 |
-| Two-gateway chaos | **PASS** | 18/18; no stale lease accepted, restart recovery passed |
+| Two-gateway chaos | **PASS** | 18/18; fenced stale results and restart recovery pass |
 | Scheduler reliability | **PASS** | 120,415 ms; 228/228; lost 0; duplicate execution 0; five gateway restarts |
-| Local Chromium leak | **PASS** | 500/500; four-way; final browsers/contexts/queues 0; post-warmup RSS +5,021,696 bytes |
-| Typecheck / build | **PASS** | `tsc --noEmit`; Vite/Nitro production build |
-| Lint | **PASS** | 0 errors; 16 non-blocking warnings remain |
-| Production dependencies | **PASS** | official `npm audit --omit=dev`: 0 vulnerabilities |
-| Dev + built browser render | **PASS** | desktop + 390×844; visible content; no horizontal overflow; console errors/warnings 0 |
-| Live server infrastructure | **PARTIAL** | HTTP `readyz` reports Postgres/Redis/object media ready and one live worker; deployed code is old |
+| Local Chromium leak | **PASS** | 500/500; concurrency 4; final browsers/contexts/queues 0; post-warmup RSS +5,021,696 bytes |
+| Typecheck / build / lint | **PASS** | TypeScript, Vite/Nitro production build, lint 0 errors |
+| Production dependencies | **PASS** | npm audit --omit=dev reports 0 vulnerabilities |
+| Dev + built browser render | **PASS** | Desktop and 390×844 mobile; no overflow or error heading |
+| Pre-deploy backup | **PASS** | Verified checksummed DB, media, MinIO, configuration and Git metadata backup |
+| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit 635f909; DB/Redis/object media/worker ready |
+| Anonymous admin boundary | **PASS** | External /api/admin/session returns HTTP 401 and no Set-Cookie |
+| Account add persistence | **PASS** | Production UI add → refresh → delete → refresh passed; console errors 0; test record removed |
+| Live Chat | **PARTIAL** | Real non-stream and SSE marker requests succeeded; one earlier request ended RESULT_UNCERTAIN; 200-request matrix not run |
+| Live image | **PARTIAL** | One Leonardo request safely returned RESULT_UNCERTAIN after submit; no image or fake success returned; the resulting size-control defect was fixed and deployed |
 
 ## Required 30 answers
 
 1. **接手时 HEAD — PASS.**
-   `b30a9f7d52653344d8512f5479b8f882c88500d0`.
+   b30a9f7d52653344d8512f5479b8f882c88500d0.
 
 2. **最终 HEAD — PASS.**
    Final implementation HEAD is
-   `d9ccd60192759f4e6628bd2687cef3fed9761f0d`. The commit containing this
-   report is documentation-only and follows that implementation HEAD.
+   635f90930841144d8229aa38e44910ad9213bdcf. The final report commit is
+   documentation-only and follows this implementation HEAD.
 
 3. **本次 commits — PASS.**
-   `6dc58a7`, `5e2bb60`, `d0ba670`, `c429950`, `1ff9844`, `06cca41`,
-   `ac0ae39`, `71fd1f1`, `68e60ed`, `1035633`, `47be2f3`, `9e4fc8b`,
-   `d9ccd60` (13 commits).
+   6dc58a7, 5e2bb60, d0ba670, c429950, 1ff9844, 06cca41,
+   ac0ae39, 71fd1f1, 68e60ed, 1035633, 47be2f3, 9e4fc8b,
+   d9ccd60, 1e1c207, 9860071, 7206861, e286563, 9969bfa,
+   63c7708 and 635f909.
 
-4. **还存在什么 P0 — FAIL.**
-   The local candidate has no known P0, but production still serves
-   `0.9.0-rc1`; anonymous `GET /api/admin/session` returned HTTP 200 with a
-   `Set-Cookie` header on 2026-08-28. This remains a live P0 until `5e2bb60`
-   and the later commits are deployed. The server credential supplied in chat
-   and the Shadowsocks credential found in Git history must also be rotated.
+4. **还存在什么 P0 — PASS.**
+   No known P0 remains open in the deployed candidate. The live anonymous
+   administrator-cookie issue was closed and externally verified. A live API
+   metadata privacy leak was found, fixed and verified. A Leonardo size
+   selector JavaScript defect and fail-open size gate were also found, fixed
+   and deployed. Remaining items are coverage/scale gates rather than known P0
+   defects.
 
 5. **Chat completion 是否还会提前截断 — PARTIAL.**
-   The detector now requires confirmed completion, reopens if the DOM grows,
-   distinguishes partial/final text, and passes pause/no-Stop/Stop lifecycle
-   tests. No 200-request live Chat campaign was available to prove the live
-   error count is zero.
+   The detector requires confirmed completion, reopens if the DOM grows,
+   separates partial/final text, and passes pause/no-Stop/Stop tests. Multiple
+   real marker requests returned complete exact text, including SSE, but the
+   required 200-request campaign has not proved the long-run error count zero.
 
-6. **SSE HTTP 200/业务状态是否彻底分离 — PASS.**
-   Transport and logical status are separate; partial+error, partial+done,
-   cancellation, timeout, history and UI consistency tests pass.
+6. **SSE HTTP200/业务状态是否彻底分离 — PASS.**
+   Transport and logical status are separate across parser, history and UI.
+   Local timeout/disconnect/partial tests pass, and one real SSE request
+   produced exact content plus an explicit done terminal event.
 
 7. **多账号实际最大并发 — PARTIAL.**
    Locally verified: four concurrent real Chromium lifecycles, seven unique
-   simultaneous account leases in two-gateway chaos, and distinct-account
-   Playwright shards in parallel. Live provider-account maximum is not known.
+   simultaneous leases, and distinct-account shards in parallel. Production
+   has one ChatGPT and one Leonardo account, so five-account live concurrency
+   was not available.
 
 8. **同账号实际最大并发 — PARTIAL.**
-   Worker shard/account-lock and distributed lease tests prove a local maximum
-   of 1. A real provider session campaign has not measured it externally.
+   Account locks, leases and shard tests keep the local maximum at 1.
+   Production traffic observed no overlapping active job on the tested
+   account, but a sustained live concurrency campaign was not run.
 
 9. **Proxy drift — PARTIAL.**
-   Proxy identity/credential fingerprints key browser pools; warmup and job
-   execution use the account-bound proxy and fail closed. Live drift counter
-   has not been measured.
+   Browser pools, warmup and jobs are keyed to the account-bound proxy identity
+   and credentials and fail closed. No drift was seen in the small live sample;
+   the full live counter remains unmeasured.
 
 10. **cross-request chunk — PARTIAL.**
-    JobRuntimeContext and chunk fencing/isolation tests pass. The live counter
-    has not been measured.
+    JobRuntimeContext and fencing/isolation tests pass. Live non-stream and SSE
+    marker content was exact, but the 200-request campaign was not run.
 
 11. **duplicate submit — PARTIAL.**
-    Idempotency 20/50-way storms, fencing and crash recovery pass with no
-    duplicate execution. Live provider submit count has not been measured.
+    Idempotency storms, fencing and crash recovery pass. The live Chat
+    RESULT_UNCERTAIN request was not silently resubmitted. A full live
+    failure-injection matrix was not run.
 
 12. **duplicate paid image generation — PARTIAL.**
-    Submitted/unknown/unsafe attempts are never blindly requeued or failed over;
-    same-page/result recovery is required. No paid live crash campaign ran.
+    The real Leonardo timeout was recorded as SUBMITTED plus UNSAFE and was not
+    retried or failed over. This is direct evidence of the safety gate, but a
+    full paid crash/recovery campaign was not run.
 
 13. **Reference exact count — PARTIAL.**
-    Exact 1/2/4/6 attachment and hash-exclusion tests pass for Gemini and
-    Leonardo paths. Live reference matrices did not run.
+    Exact 1/2/4/6 attachment and hash exclusion pass locally for Gemini and
+    Leonardo. Live reference matrices were not run.
 
 14. **GenerationBoundary — PARTIAL.**
-    Request/attempt/time, prior containers/URLs/hashes, new scoped containers,
-    confidence and historical/reference exclusion are implemented and tested.
-    Live DOM correlation did not run.
+    Request/attempt/time, prior container/URL/hash state, scoped new results,
+    confidence and reference/history exclusion are implemented and tested.
+    The one live image attempt did not yield a validated result.
 
 15. **false-positive image — PARTIAL.**
-    Only HIGH/VERIFIED correlated results pass production validation; UI,
-    historical and reference assets are rejected. Live false-positive count is
-    not measured.
+    Production only accepts HIGH/VERIFIED correlated results. The live
+    uncertain attempt returned zero images instead of a false success; the
+    full live matrix remains incomplete.
 
 16. **requested n / actual n — PARTIAL.**
-    Result count mismatch fails closed in contract tests; provider capability
-    limits reject unsupported counts. Live matrices did not run.
+    Count mismatch fails closed and unsupported provider counts are rejected.
+    The live request asked for one and returned no success after uncertainty;
+    no successful live count matrix exists.
 
 17. **requested size / actual size — PARTIAL.**
-    Final PNG/JPEG/WebP bytes are parsed with bounded code and compared to the
-    requested aspect/tier/native size. Live 1:1/16:9/9:16 matrices did not run.
+    Final image bytes are parsed and validated against aspect/tier/native size.
+    Live testing found that a Python-embedded JavaScript newline was malformed
+    and that unreadable dimensions could previously reach Generate. The
+    embedded script is now runtime-compiled in tests, dimensions must equal the
+    selected native size before submit, and unknown dimensions fail closed.
+    Successful 1:1/16:9/9:16 live matrices remain unexecuted.
 
 18. **Job 是否还保存大 Base64 — PASS.**
-    Input references are frozen into MediaStore and workers return asset
-    descriptors; 1/5/15 MB tests prove Job JSON does not carry image base64.
+    References are frozen into MediaStore and workers return asset
+    descriptors. The 1/5/15 MB tests prove Job JSON does not carry image
+    base64.
 
-19. **Gemini warm runtime — PARTIAL.**
-    WARM_IDLE reuse, cleanup and reference-state isolation are tested; no live
-    Gemini session was available.
+19. **Gemini warm runtime — BLOCKED_BY_ENVIRONMENT.**
+    WARM_IDLE reuse, cleanup and reference isolation pass locally. Production
+    has no Gemini account.
 
 20. **Leonardo warm runtime — PARTIAL.**
-    WARM_IDLE reuse, exact reference attach and cleanup are tested; no live
-    Leonardo session was available.
+    The live session authenticated and selected Nano Banana 2. One real
+    generation became uncertain after submit. The size-control defect found by
+    that run is fixed; WARM_IDLE and reference isolation remain locally tested,
+    not yet proven by a successful live image matrix.
 
-21. **Model truth — PARTIAL.**
-    `requested_model`, `actual_model`, verification/profile fields are distinct;
-    `chatgpt-web-auto` never invents an exact model and exact IDs fail closed
-    without exact UI evidence. Live false-confirmation count is not measured.
+21. **Model truth — PASS.**
+    Requested and actual model/profile fields are distinct. Real Chat auto
+    responses reported actual_model=unknown and model_verified=false rather
+    than inventing an exact model. Internal account and topology identifiers
+    are now stripped from all public relay metadata. Account creation now waits
+    for an acknowledged server write and reports authentication, network or
+    protected-write failures instead of silently losing the row.
 
 22. **Canary 自动运行 — PARTIAL.**
-    Distributed scheduler leases, jittered structural canaries and separate
-    low-frequency paid image canaries are wired and tested. They have not run
-    on the new candidate in production.
+    Distributed scheduling, structural probes, low-frequency paid image
+    probes and selector promotion are deployed. The healthy ChatGPT and
+    Leonardo accounts are marked as canary accounts. Leonardo structural
+    probes now validate the size selector without clicking Generate, and the
+    scheduler selects a logical Leonardo model verified on its assigned
+    account instead of blindly choosing the provider's first model. A real
+    post-deploy Leonardo structural Canary selected leonardo-gemini and entered
+    the Worker; it then failed before submit because the page could not recover
+    to WARM_IDLE. The durable state remained PREPARING/SAFE, so Generate was
+    not clicked and no paid request was made. Gemini is blocked by the absence
+    of an account, and a long production observation window is not complete.
 
 23. **Selector promote/rollback — PASS.**
-    Candidate state is distributed; three consecutive passes promote; failure
-    rolls back; finish-path fingerprints drive the state.
+    Candidate state is distributed; three consecutive passes promote, failure
+    rolls back, and finish-path fingerprints drive the decision.
 
 24. **200 Chat 是否真实完成 — BLOCKED_BY_ENVIRONMENT.**
-    No usable authenticated ChatGPT session/account set was available.
+    Real non-stream and SSE requests ran, but not 200 mixed requests. Only one
+    production ChatGPT account is available and no one-hour observation window
+    was completed.
 
 25. **Image matrices 是否真实完成 — BLOCKED_BY_ENVIRONMENT.**
-    Gemini and both Leonardo model matrices require authenticated accounts and
-    paid live generations; none was executed.
+    Production has one Leonardo account and no Gemini account. One Leonardo
+    request ended RESULT_UNCERTAIN and exposed a now-fixed defect. Required
+    model/reference/aspect/count matrices were not completed.
 
 26. **最长实际 soak — PARTIAL.**
-    Longest scheduler reliability run was 120,415 ms; the separate 500-browser
-    lifecycle run completed 500 jobs. A one-hour live-provider soak was not
-    executed.
+    Longest automated scheduler run was 120,415 ms and the Chromium lifecycle
+    campaign completed 500 jobs. The required one-hour live-provider soak was
+    not executed.
 
-27. **当前已验证账号数 — BLOCKED_BY_ENVIRONMENT.**
-    Real provider accounts verified on this candidate: 0. Synthetic/local
-    account pools were used only for correctness tests.
+27. **当前已验证账号数 — PARTIAL.**
+    Production has two healthy accounts: one ChatGPT and one Leonardo. ChatGPT
+    completed real requests. Leonardo authenticated and submitted a request but
+    did not return a validated image. Gemini has zero accounts.
 
 28. **当前已验证并发 — PARTIAL.**
-    Local real Chromium lifecycle: 4; distributed unique leases: 7; same account:
-    1. Live provider concurrency: 0 measured.
+    Local Chromium concurrency 4; distributed unique leases 7; same-account
+    maximum 1. Production Worker capacity is 2, but live multi-account maximum
+    was not measured under load.
 
 29. **所有 NOT_EXECUTED — PASS.**
-    No locally automatable gate remains unexecuted. The following are
-    **BLOCKED_BY_ENVIRONMENT**: 200 live Chat; all Gemini/Leonardo image
-    matrices; five-account live concurrency; live post-submit crash, proxy-down,
-    session-expiry, DOM-change, stale-result and disconnect injections; one-hour
-    live soak; real Postgres `pg_dump`→`pg_restore`; remote CI for these commits;
-    and deployment of this candidate.
+    No known locally automatable high-priority code gate remains. Still
+    **BLOCKED_BY_ENVIRONMENT**: 200 mixed live Chat requests; Gemini and both
+    Leonardo model image matrices; five-account live concurrency; live
+    proxy/session/DOM/crash injections at matrix scale; and one-hour live soak.
+    A successful post-fix Leonardo output-size matrix is also not executed.
 
 30. **是否建议进入正式部署测试 — PARTIAL.**
-    Yes for a controlled staging/maintenance-window deployment test after
-    rotating exposed credentials and establishing a writable GitHub/SSH path.
-    No for unrestricted production traffic until the new commit is deployed,
-    anonymous admin Cookie issuance is confirmed absent, live provider matrices
-    pass, and the one-hour live soak completes.
+    The controlled production deployment test is already running and its
+    health, readiness, anonymous-admin boundary, responsive UI and real Chat
+    path pass. Do not yet claim unrestricted commercial reliability until the
+    image matrices, 200 Chat campaign, five-account concurrency and one-hour
+    soak pass.
 
 ## Hard correctness counters
 
-The local synthetic campaigns observed zero `lost_request`, `double_lease`,
+Local synthetic campaigns observed zero lost_request, double_lease,
 stale-result acceptance and duplicate execution in their covered workloads.
-The production/live-provider values below are not inferred from those tests:
+The small live sample also returned no false image and did not retry the unsafe
+submitted Leonardo attempt. These observations are not extrapolated to the
+required full live campaigns.
 
 | Counter | Status |
 |---|---|
-| `proxy_drift` | **BLOCKED_BY_ENVIRONMENT** |
-| `cross_request_chunk` | **BLOCKED_BY_ENVIRONMENT** |
-| `duplicate_submit` | **BLOCKED_BY_ENVIRONMENT** |
-| `duplicate_paid_generation` | **BLOCKED_BY_ENVIRONMENT** |
-| `partial_truncation` | **BLOCKED_BY_ENVIRONMENT** |
-| `historical_image_returned` | **BLOCKED_BY_ENVIRONMENT** |
-| `reference_image_returned` | **BLOCKED_BY_ENVIRONMENT** |
-| `ui_image_returned` | **BLOCKED_BY_ENVIRONMENT** |
-| `reference_missed` | **BLOCKED_BY_ENVIRONMENT** |
-| `wrong_result_count` | **BLOCKED_BY_ENVIRONMENT** |
-| `wrong_size` | **BLOCKED_BY_ENVIRONMENT** |
-| `stale_result_accepted` | **BLOCKED_BY_ENVIRONMENT** |
-| `model_false_confirmation` | **BLOCKED_BY_ENVIRONMENT** |
-| `lost_request` | **BLOCKED_BY_ENVIRONMENT** |
-| `double_lease` | **BLOCKED_BY_ENVIRONMENT** |
+| proxy_drift | **BLOCKED_BY_ENVIRONMENT** |
+| cross_request_chunk | **PARTIAL** |
+| duplicate_submit | **PARTIAL** |
+| duplicate_paid_generation | **PARTIAL** |
+| partial_truncation | **PARTIAL** |
+| historical_image_returned | **BLOCKED_BY_ENVIRONMENT** |
+| reference_image_returned | **BLOCKED_BY_ENVIRONMENT** |
+| ui_image_returned | **PARTIAL** |
+| reference_missed | **BLOCKED_BY_ENVIRONMENT** |
+| wrong_result_count | **BLOCKED_BY_ENVIRONMENT** |
+| wrong_size | **BLOCKED_BY_ENVIRONMENT** |
+| stale_result_accepted | **BLOCKED_BY_ENVIRONMENT** |
+| model_false_confirmation | **PARTIAL** |
+| lost_request | **BLOCKED_BY_ENVIRONMENT** |
+| double_lease | **BLOCKED_BY_ENVIRONMENT** |
 
-## External state at report time
+## Production state at report time
 
-- **FAIL:** production `0.9.0-rc1` still issues an anonymous admin Cookie.
-- **BLOCKED_BY_ENVIRONMENT:** TCP 246/22 and direct 8088 are unreachable;
-  HTTP 80/HTTPS 443 accept connections.
-- **PARTIAL:** public `/readyz` is HTTP 200 with schema 4, Postgres, Redis,
-  object media and one online worker, but it cannot identify its Git commit.
-- **BLOCKED_BY_ENVIRONMENT:** connected GitHub user `leilei6878` has
-  `pull=true`, `push=false` on `leilei6878-spec/relay-web-api`; the final
-  implementation is 13 commits ahead of `origin/main` (plus this report-only
-  documentation commit).
+- **PASS:** external health and readiness return exact release
+  635f90930841144d8229aa38e44910ad9213bdcf with no blockers.
+- **PASS:** Postgres, Redis, object media and the Worker are online; the Worker
+  advertises capacity 2.
+- **PASS:** anonymous administrator session request returns HTTP 401 without a
+  cookie.
+- **PASS:** a full checksummed pre-deploy backup is retained at
+  /opt/backups/relay-pre-rc2-20260828-130046.
+- **PASS:** SSH key authentication is working on the confirmed host key and
+  port 246.
+- **PARTIAL:** two healthy canary accounts are configured; Gemini has no
+  account.
+- **PARTIAL:** the live Leonardo structural Canary dispatched with the correct
+  model but reported a pre-submit WARM_IDLE/DOM cleanup failure. It remained
+  PREPARING/SAFE and did not generate a paid image.
+- **BLOCKED_BY_ENVIRONMENT:** the connected GitHub identity has pull but not
+  push permission. Production was updated through verified Git bundles, so
+  origin/main remains behind the deployed/local branch.
+
+## Live incidents found during acceptance
+
+1. A public Chat response exposed the account email and internal worker,
+   account and proxy IDs in the relay extension. Commit 7206861 introduced a
+   shared public metadata boundary; real non-stream and SSE responses then
+   proved the private keys absent.
+2. A Leonardo size selector contained an embedded JavaScript newline escaping
+   defect. The page reported 0×0, yet the old gate continued to Generate. The
+   request became RESULT_UNCERTAIN after submit and was not retried. Commit
+   e286563 fixes the script and requires exact visible native dimensions before
+   submit. Commit 9969bfa adds the same no-charge check to the structural
+   canary.
+3. Account creation updated only browser memory and depended on a delayed
+   background save whose result was ignored. Commit 63c7708 adds an explicit
+   acknowledged write, duplicate guard, saving state and visible failure
+   handling. Both an isolated local browser and production Chromium completed
+   add, reload persistence, delete and reload cleanup with zero console errors.
+4. The live scheduler initially skipped Leonardo because it always requested
+   the provider's first logical model, while the Canary account had verified a
+   different family. Commit 635f909 selects the first account-compatible
+   logical model and has a regression test for Nano Banana/Gemini versus GPT
+   Image capability lists.
+
+## Remaining live blocker
+
+Leonardo currently cannot prove WARM_IDLE after cleanup on its live page. The
+new structural Canary detects this before submission and fails with
+LEONARDO_DOM_CHANGED while retry safety is still SAFE. This is not a fake
+success or duplicate-charge defect, but it blocks successful Leonardo image
+matrices until the provider DOM/session cleanup path is reconfirmed on the live
+account.
+
+The correct final decision is therefore **PARTIAL**: the deployed candidate has
+no known open P0 and all locally automatable high-priority gaps are closed, but
+the explicitly required large live campaigns remain blocked by account count,
+provider availability and long observation time.
