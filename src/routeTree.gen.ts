@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as ConsoleRouteImport } from './routes/console'
 import { Route as HealthzRouteImport } from './routes/healthz'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as PlaygroundRouteImport } from './routes/playground'
@@ -63,6 +64,11 @@ const ConsoleRoute = ConsoleRouteImport.update({
 const HealthzRoute = HealthzRouteImport.update({
   id: '/healthz',
   path: '/healthz',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LogsRoute = LogsRouteImport.update({
@@ -226,6 +232,7 @@ export interface FileRoutesByFullPath {
   '/accounts': typeof AccountsRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
+  '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/metrics': typeof MetricsRoute
   '/playground': typeof PlaygroundRoute
@@ -263,6 +270,7 @@ export interface FileRoutesByTo {
   '/accounts': typeof AccountsRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
+  '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/metrics': typeof MetricsRoute
   '/playground': typeof PlaygroundRoute
@@ -301,6 +309,7 @@ export interface FileRoutesById {
   '/accounts': typeof AccountsRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
+  '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/metrics': typeof MetricsRoute
   '/playground': typeof PlaygroundRoute
@@ -340,6 +349,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/console'
     | '/healthz'
+    | '/login'
     | '/logs'
     | '/metrics'
     | '/playground'
@@ -377,6 +387,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/console'
     | '/healthz'
+    | '/login'
     | '/logs'
     | '/metrics'
     | '/playground'
@@ -414,6 +425,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/console'
     | '/healthz'
+    | '/login'
     | '/logs'
     | '/metrics'
     | '/playground'
@@ -452,6 +464,7 @@ export interface RootRouteChildren {
   AccountsRoute: typeof AccountsRoute
   ConsoleRoute: typeof ConsoleRoute
   HealthzRoute: typeof HealthzRoute
+  LoginRoute: typeof LoginRoute
   LogsRoute: typeof LogsRoute
   MetricsRoute: typeof MetricsRoute
   PlaygroundRoute: typeof PlaygroundRoute
@@ -513,6 +526,13 @@ declare module '@tanstack/react-router' {
       path: '/healthz'
       fullPath: '/healthz'
       preLoaderRoute: typeof HealthzRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/logs': {
@@ -740,6 +760,7 @@ const rootRouteChildren: RootRouteChildren = {
   AccountsRoute: AccountsRoute,
   ConsoleRoute: ConsoleRoute,
   HealthzRoute: HealthzRoute,
+  LoginRoute: LoginRoute,
   LogsRoute: LogsRoute,
   MetricsRoute: MetricsRoute,
   PlaygroundRoute: PlaygroundRoute,
