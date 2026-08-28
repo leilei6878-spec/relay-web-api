@@ -158,6 +158,7 @@ export default defineConfig(({ command, isPreview }) => ({
     host: "127.0.0.1",
     port: 8081,
     strictPort: true,
+    allowedHosts: ["relay.38.175.201.137.nip.io"],
   },
   resolve: { tsconfigPaths: true },
   plugins: [
