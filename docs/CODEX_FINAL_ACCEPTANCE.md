@@ -6,7 +6,7 @@ Overall status: **PARTIAL**
 
 Takeover HEAD: b30a9f7d52653344d8512f5479b8f882c88500d0
 
-Final implementation HEAD: 186ace9a421f412cb45e024c41a9359cf20a76a3
+Final implementation HEAD: 8b9ef5e2574c708d90bc6204032a68cc58658197
 
 Production currently serves the final implementation HEAD. No known P0 remains
 open in the deployed code. Overall acceptance stays PARTIAL because the
@@ -17,7 +17,7 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 | Gate | Status | Evidence |
 |---|---|---|
-| Relay unit/integration | **PASS** | 233/233 |
+| Relay unit/integration | **PASS** | 234/234 |
 | Core/template contract | **PASS** | 101/101 |
 | Multi-process/operations contract | **PASS** | 21/21 |
 | Two-gateway chaos | **PASS** | 18/18; fenced stale results and restart recovery pass |
@@ -27,7 +27,7 @@ five-account live concurrency, and one-hour live soak were not completed.
 | Production dependencies | **PASS** | npm audit --omit=dev reports 0 vulnerabilities |
 | Dev + built browser render | **PASS** | Desktop and 390×844 mobile; no overflow or error heading |
 | Pre-deploy backup | **PASS** | Verified checksummed DB, media, MinIO, configuration and Git metadata backup |
-| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit 186ace9; DB/Redis/object media/worker ready |
+| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit 8b9ef5e; DB/Redis/object media/worker ready |
 | Anonymous admin boundary | **PASS** | External /api/admin/session returns HTTP 401 and no Set-Cookie |
 | Account add persistence | **PASS** | Public insecure HTTP UI add → refresh → delete → refresh passed without randomUUID; console errors 0; test record removed |
 | Live Chat | **PARTIAL** | Real non-stream and SSE marker requests succeeded; one earlier request ended RESULT_UNCERTAIN; 200-request matrix not run |
@@ -40,7 +40,7 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 2. **最终 HEAD — PASS.**
    Final implementation HEAD is
-   186ace9a421f412cb45e024c41a9359cf20a76a3. The final report commit is
+   8b9ef5e2574c708d90bc6204032a68cc58658197. The final report commit is
    documentation-only and follows this implementation HEAD.
 
 3. **本次 commits — PASS.**
@@ -49,7 +49,7 @@ five-account live concurrency, and one-hour live soak were not completed.
    d9ccd60, 1e1c207, 9860071, 7206861, e286563, 9969bfa,
    63c7708, 635f909, c46eb82, 68bb245, 4d4041a, 9a6776d,
    7566ddb, aa3f74a, 2425cb4, e01bf54, d49a371, 0adce26 and
-   186ace9.
+   186ace9 and 8b9ef5e.
 
 4. **还存在什么 P0 — PASS.**
    No known P0 remains open in the deployed candidate. The live anonymous
@@ -248,7 +248,7 @@ required full live campaigns.
 ## Production state at report time
 
 - **PASS:** external health and readiness return exact release
-  186ace9a421f412cb45e024c41a9359cf20a76a3 with no blockers.
+  8b9ef5e2574c708d90bc6204032a68cc58658197 with no blockers.
 - **PASS:** Postgres, Redis, object media and the Worker are online; the Worker
   advertises capacity 2.
 - **PASS:** anonymous administrator session request returns HTTP 401 without a
@@ -323,6 +323,13 @@ required full live campaigns.
     200, wrong-password 401 with no cookie, correct-password 200, protected
     account-pool 200 and exact release identity. The plaintext password is not
     stored in Git or the server environment.
+11. After username/password login, several pages still sent an empty
+    `Authorization: Bearer` value. That malformed header shadowed the valid
+    administrator cookie; the logs page converted the resulting 401 into an
+    empty table, making retained records look deleted. Commit 8b9ef5e omits
+    empty authorization headers, treats an empty Bearer scheme as absent and
+    keeps prior rows visible on fetch failure. Production returned 129 retained
+    usage rows with HTTP 200 after the fix.
 
 ## Remaining live blocker
 

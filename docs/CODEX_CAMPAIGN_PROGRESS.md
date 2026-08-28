@@ -45,7 +45,7 @@ At takeover:
 | 4 | Image provenance/validator/media closure | COMPLETE | Commit `ac0ae39`; frozen refs, strict confidence/assets/history, DOM correlation, WebP, WARM_IDLE fail-closed. |
 | 5 | Canary + selector self-healing closure | COMPLETE | Commit `71fd1f1`; distributed dispatch lease, real paid canary, shared selector state, finish-path fingerprint/promotion. |
 | 6 | Provider/capability/key backpressure | COMPLETE | Commit `71fd1f1`; global/provider/chat/image/key caps, file + distributed PG admission, 429/Retry-After. |
-| 7 | Full local automated campaign | COMPLETE | Relay 233/233; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
+| 7 | Full local automated campaign | COMPLETE | Relay 234/234; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
 | 7B | Production recovery + Compose contract | COMPLETE | Versioned/checksummed backup includes secrets/sessions; DB backup/restore fail closed; Compose has no required-secret defaults and host health port is consistently 8088. CLI/contract tests 6/6 pass. |
 | 7C | Release identity | COMPLETE | `0.9.0-rc2`; health/readiness/runtime expose exact commit and build time; production readiness rejects an unknown commit. |
 | 7D | Dev + production browser render | COMPLETE | Desktop and 390×844 mobile render with visible content, no horizontal overflow, and zero browser-console warnings/errors. Production-only partial runtime response crash was found, fixed, rebuilt, and retested. |
@@ -109,10 +109,11 @@ runs. No zero is inferred from unit tests:
 - `d49a371` — preserve PNG/JPEG/WebP extensions for frozen reference uploads
 - `0adce26` — add a standalone administrator username/password login page
 - `186ace9` — use a Compose-safe scrypt password-hash representation
+- `8b9ef5e` — keep administrator log history visible after password login
 
 ## Phase 7 evidence (2026-08-28)
 
-- `npm run test:relay`: **233/233 PASS**.
+- `npm run test:relay`: **234/234 PASS**.
 - `npm test`: **101/101 PASS**.
 - `npm run test:ci`: Relay **212/212 PASS** at the original full CI checkpoint plus multi-process/contract suite
   **21/21 PASS**.
@@ -134,7 +135,7 @@ Temporary dependency cache content is never committed.
 ## Phase 10 production evidence (2026-08-28)
 
 - Production health/readiness: HTTP 200, version 0.9.0-rc2, schema 4,
-  exact implementation commit 186ace9a421f412cb45e024c41a9359cf20a76a3,
+  exact implementation commit 8b9ef5e2574c708d90bc6204032a68cc58658197,
   zero blockers; Postgres, Redis, object media and Worker are ready.
 - Anonymous /api/admin/session: HTTP 401 and no Set-Cookie.
 - Real Chat: exact non-stream marker PASS; exact SSE marker plus done PASS;
@@ -173,3 +174,6 @@ Temporary dependency cache content is never committed.
   is stored only as a random-salt scrypt hash. Production checks passed for the
   page, generic wrong-password response, HttpOnly cookie, successful protected
   account-pool read and unauthorized data pre-render gating.
+- The post-login log-history regression is closed. Empty Bearer headers no
+  longer shadow the administrator cookie, failed fetches no longer erase the
+  visible table, and production returned 129 retained usage rows over HTTP 200.
