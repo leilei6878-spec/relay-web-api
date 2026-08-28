@@ -100,6 +100,7 @@ runs. No zero is inferred from unit tests:
 - `635f909` — select a Leonardo canary model compatible with the assigned account
 - `c46eb82` — generate browser UIDs when public HTTP lacks crypto.randomUUID
 - `68bb245` — stop Leonardo login helper tab recreation and focus stealing
+- `4d4041a` — reset only the dedicated Leonardo login profile before launch
 
 ## Phase 7 evidence (2026-08-28)
 
@@ -125,7 +126,7 @@ Temporary dependency cache content is never committed.
 ## Phase 10 production evidence (2026-08-28)
 
 - Production health/readiness: HTTP 200, version 0.9.0-rc2, schema 4,
-  exact implementation commit 68bb2454ae7bc0a1988956fff0d664d4c0409d83,
+  exact implementation commit 4d4041abc6884b044b6fb805de9bf22bacb9f0e5,
   zero blockers; Postgres, Redis, object media and Worker are ready.
 - Anonymous /api/admin/session: HTTP 401 and no Set-Cookie.
 - Real Chat: exact non-stream marker PASS; exact SSE marker plus done PASS;
@@ -148,6 +149,9 @@ Temporary dependency cache content is never committed.
   periodically auto-clicking/stealing focus. The deployed pack now opens Canva
   and Leonardo once at startup and then performs read-only session detection;
   production pack inspection found one startup call and zero SSO/focus calls.
+- The dedicated chrome-login profile is now removed and recreated before each
+  run, preventing aborted Canva/Stripe tabs from being restored without
+  touching the user's daily Chrome profile.
 - Two healthy production accounts are marked Canary; Gemini remains without
   an account. The default structural interval is about seven minutes and paid
   image interval about three hours.
