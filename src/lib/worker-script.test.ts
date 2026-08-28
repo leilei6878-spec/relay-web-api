@@ -177,12 +177,12 @@ test("worker maps 1264x848 to 3:2 and 16:9 size token to 1376x768", () => {
   assert.match(out.stdout, /ok/);
 });
 
-test("leonardo img2img attaches refs before generate and fail-fasts", () => {
+test("leonardo img2img attaches refs before one visible Generate click", () => {
   const s = localWorkerScript();
   assert.match(s, /def click_leonardo_model/);
   assert.match(s, /def wait_leonardo_generate_ready/);
   assert.match(s, /def ref_body_sizes/);
-  assert.match(s, /generate did not start \(img2img\)/);
+  assert.doesNotMatch(s, /generate did not start \(img2img\)/);
   assert.match(s, /generate did not become ready after refs/);
   assert.match(s, /reference image did not attach/);
   const attachIdx = s.indexOf("up_err = attach_leonardo_refs");
@@ -219,6 +219,8 @@ test("leonardo img2img attaches refs before generate and fail-fasts", () => {
   assert.match(generateFn, /querySelectorAll\('button'\)/);
   assert.match(generateFn, /\(generate\|create\)\(\\s\+\\d\+\)\?/);
   assert.match(generateFn, /getBoundingClientRect/);
+  assert.match(generateFn, /generate click playwright/);
+  assert.match(generateFn, /get_by_role\("button", name=re\.compile/);
   const submitBlock = s.slice(s.indexOf('print("leonardo clicking generate"'), s.indexOf("page.wait_for_timeout(800)", s.indexOf('print("leonardo clicking generate"')));
   assert.doesNotMatch(submitBlock, /keyboard\.press\("Enter"\)/);
   assert.match(submitBlock, /visible Generate button disappeared before click/);

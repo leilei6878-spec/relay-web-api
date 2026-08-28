@@ -980,6 +980,15 @@ def leonardo_js_fill(page, prompt):
 
 def leonardo_js_generate(page):
     try:
+        button = page.get_by_role("button", name=re.compile(r"^Generate(?:\\s+\\d+)?$", re.I)).last
+        if button.count() > 0 and button.is_visible() and button.is_enabled():
+            label = (button.inner_text() or "Generate").strip()
+            button.click(timeout=2200)
+            print("leonardo generate click playwright", label, flush=True)
+            return True
+    except Exception as e:
+        print("leonardo generate playwright fallback", str(e)[:100], flush=True)
+    try:
         clicked = page.evaluate("""() => {
           const visible = (element) => {
             const rect = element.getBoundingClientRect();
@@ -4228,7 +4237,6 @@ def run_leonardo(body, ctx=None):
             err, fault = page_state_error(pst2, False, "leonardo")
             return {"ok": False, "error": err, "fault": fault, "pageState": pst2, "backendMode": "web_account", "availableModels": available}
         deadline = max(time.time() + 30, t0 + int(body.get("timeoutMs") or 120000) / 1000 - 5)
-        fail_at = time.time() + 28
         done_hint = ("that's a wrap", "how was this output", "time to generate more")
         progress_hint = ("generating", "queued", "in progress", "creating image", "working on")
         best = []
@@ -4296,9 +4304,6 @@ def run_leonardo(body, ctx=None):
                 captures.append((len(raw), w, h, src, raw, mime, cand.get("confidence") or ""))
                 captured_srcs.add(src)
                 set_submission_state(ctx, "RESULT_DETECTED")
-            if images and not saw_progress and time.time() > fail_at:
-                set_submission_state(ctx, "SUBMISSION_UNCERTAIN")
-                return fail_job(ctx, "SUBMISSION_UNCERTAIN: generate did not start (img2img)", "provider", {"pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked})
             ranked = sorted(captures, key=lambda row: (1 if aspect_match(row[1], row[2], aspect) else 0, row[1] * row[2], row[0]), reverse=True)
             picked_rows = []
             seen = set()
