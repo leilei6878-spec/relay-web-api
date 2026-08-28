@@ -201,6 +201,9 @@ test("leonardo img2img attaches refs before generate and fail-fasts", () => {
   const modelRestore = s.slice(s.indexOf("def click_leonardo_model"), s.indexOf("def apply_gemini_aspect"));
   assert.match(modelRestore, /lines\.includes\(want\)/);
   assert.match(modelRestore, /model-selector-trigger/);
+  assert.match(modelRestore, /data-slot=drawer-content/);
+  assert.match(modelRestore, /getAttribute\('data-testid'\) === slug/);
+  assert.match(modelRestore, /re\.sub\(r"\[\^a-z0-9\]\+", "-", label\.lower\(\)\)/);
   assert.doesNotMatch(modelRestore, /innerText\|\|''\)\.includes\(want\)/);
 });
 

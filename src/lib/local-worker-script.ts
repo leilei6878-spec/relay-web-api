@@ -3551,19 +3551,23 @@ def click_leonardo_model(page, label):
     label = str(label or "").strip()
     if not label:
         return ""
+    slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
 
     def click_exact_option():
         try:
             return page.evaluate(
-                """(want) => {
+                """(args) => {
+                  const want = String(args.want || '');
+                  const slug = String(args.slug || '');
                   const vis = (el) => {
                     const r = el.getBoundingClientRect();
                     const st = getComputedStyle(el);
                     return r.width > 4 && r.height > 4 && r.bottom > 0 && r.top < window.innerHeight && st.visibility !== 'hidden' && st.display !== 'none';
                   };
-                  const selector = '[role=menuitem], [role=option], [data-slot=dropdown-menu-item], [data-radix-collection-item], [role=listbox] button, [role=menu] button';
+                  const selector = '[role=menuitem], [role=option], [data-slot=dropdown-menu-item], [data-radix-collection-item], [role=listbox] button, [role=menu] button, [data-slot=drawer-content] button[data-testid]';
                   const hits = [...document.querySelectorAll(selector)].filter((el) => {
                     if (!vis(el) || el.getAttribute('data-testid') === 'model-selector-trigger') return false;
+                    if (slug && el.getAttribute('data-testid') === slug) return true;
                     const lines = (el.innerText || '').split('\\\\n').map((line) => line.trim()).filter(Boolean);
                     return lines.includes(want) || (el.innerText || '').trim() === want;
                   });
@@ -3572,7 +3576,7 @@ def click_leonardo_model(page, label):
                   hit.click();
                   return (hit.innerText || '').trim().split('\\\\n').filter(Boolean).pop() || want;
                 }""",
-                label,
+                {"want": label, "slug": slug},
             ) or ""
         except Exception:
             return ""
