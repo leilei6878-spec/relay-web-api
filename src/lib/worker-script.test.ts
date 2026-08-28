@@ -205,11 +205,7 @@ test("ref_body_sizes and extract_prompt_images keep leonardo refs", () => {
     "base64",
   );
   const dataUrl = `data:image/png;base64,${png.toString("base64")}`;
-  const out = spawnSync(
-    PYTHON,
-    [
-      "-c",
-      `import importlib.util
+  const harness = `import importlib.util, os, urllib.request
 spec=importlib.util.spec_from_file_location('w','storage/relay-qa/worker.py')
 m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 url=${JSON.stringify(dataUrl)}
@@ -218,12 +214,25 @@ assert prompt=="edit me"
 assert len(imgs)==1
 sizes=m.ref_body_sizes(imgs)
 assert ${png.length} in sizes, sizes
+raw=__import__('base64').b64decode(url.split(',',1)[1])
+class Response:
+    def __enter__(self): return self
+    def __exit__(self, *args): return False
+    def read(self): return raw
+old_urlopen=urllib.request.urlopen
+urllib.request.urlopen=lambda *args, **kwargs: Response()
+try:
+    paths=m.materialize_images(['https://relay.test/api/media/opaque-id'])
+    assert len(paths)==1 and paths[0].endswith('.png'), paths
+    assert open(paths[0],'rb').read()==raw
+    os.unlink(paths[0])
+finally:
+    urllib.request.urlopen=old_urlopen
 print("ok")
-`,
-    ],
-    { encoding: "utf8" },
-  );
-  assert.equal(out.status, 0, out.stderr || out.stdout);
+`;
+  writeFileSync("storage/relay-qa/materialize-reference.py", harness);
+  const out = spawnSync(PYTHON, ["storage/relay-qa/materialize-reference.py"], { encoding: "utf8" });
+  assert.equal(out.status, 0, String(out.error || out.stderr || out.stdout));
   assert.match(out.stdout, /ok/);
 });
 

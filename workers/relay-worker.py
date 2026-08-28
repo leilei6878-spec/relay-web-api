@@ -583,10 +583,20 @@ def materialize_images(images):
                 paths.append(path)
             elif url.startswith("http://") or url.startswith("https://"):
                 import urllib.request
-                path = os.path.join(tempfile.gettempdir(), "relay-img-%s-%d.bin" % (os.getpid(), i))
                 try:
-                    urllib.request.urlretrieve(url, path)
-                    if os.path.getsize(path) > 32:
+                    with urllib.request.urlopen(url, timeout=20) as resp:
+                        raw = resp.read()
+                    ext = ""
+                    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+                        ext = "png"
+                    elif raw.startswith(b"\xff\xd8\xff"):
+                        ext = "jpg"
+                    elif raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+                        ext = "webp"
+                    if len(raw) > 32 and ext:
+                        path = os.path.join(tempfile.gettempdir(), "relay-img-%s-%d.%s" % (os.getpid(), i, ext))
+                        with open(path, "wb") as f:
+                            f.write(raw)
                         paths.append(path)
                 except Exception:
                     continue
