@@ -7,6 +7,10 @@ const REASON_ZH: Record<string, string> = {
   "账号占用中": "正在处理上一条请求",
   "未绑定 sticky 代理": "还没绑定代理",
   "代理已停用": "绑定的代理已停用",
+  "业务已过期": "账号业务期限已到",
+  "登录态已过期": "登录态已过期，需要重新登录",
+  "登录 IP 漂移": "登录 IP 与绑定代理不一致",
+  "代理出口不可用": "绑定代理当前无法取得出口 IP",
 };
 
 export function whyBlocked(account: Account, proxies: Proxy[], settings: GatewaySettings) {

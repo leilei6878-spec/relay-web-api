@@ -4,6 +4,9 @@ export type ProxyStatus = "active" | "disabled";
 export type ProxyType = "http" | "socks5" | "ss";
 export type LogStatus = "success" | "fail" | "switched";
 export type TokenState = "TOKEN_AVAILABLE" | "TOKEN_LOW" | "TOKEN_EXHAUSTED" | "UNKNOWN";
+export type AccountIpState = "matched" | "drift" | "unknown" | "proxy_unavailable";
+export type AccountCheckLevel = "static" | "proxy" | "live";
+export type AccountCheckStatus = "queued" | "running" | "passed" | "failed" | "cancelled";
 
 export type Account = {
   id: string;
@@ -38,6 +41,60 @@ export type Account = {
   generationConcurrency?: number;
   queueDepthHint?: number | null;
   recentResultHashes?: string[];
+  updatedAt?: string | null;
+  expiresAt?: string | null;
+  sessionExpiresAt?: string | null;
+  batch?: string;
+  tags?: string[];
+  loginIp?: string | null;
+  lastProbeIp?: string | null;
+  ipState?: AccountIpState;
+  nextProbeAt?: string | null;
+  lastHealthAt?: string | null;
+  lastStaticProbeAt?: string | null;
+  lastProxyProbeAt?: string | null;
+  lastLiveProbeAt?: string | null;
+  consecutiveProbeFailures?: number;
+  healthScore?: number;
+  autoCheck?: boolean;
+  inspectionId?: string | null;
+};
+
+export type AccountCheckRun = {
+  id: string;
+  trigger: "manual" | "scheduled";
+  requestedBy: string;
+  scope: Record<string, unknown>;
+  levels: AccountCheckLevel[];
+  status: "queued" | "running" | "done" | "cancelled";
+  total: number;
+  completed: number;
+  passed: number;
+  failed: number;
+  cancelled: number;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+};
+
+export type AccountCheckRecord = {
+  id: string;
+  runId: string | null;
+  accountId: string;
+  platform: Platform;
+  trigger: "manual" | "scheduled";
+  level: AccountCheckLevel;
+  status: AccountCheckStatus;
+  resultCode: string | null;
+  detail: string | null;
+  expectedIp: string | null;
+  observedIp: string | null;
+  ipState: AccountIpState | null;
+  pageState: string | null;
+  latencyMs: number | null;
+  workerId: string | null;
+  startedAt: string;
+  finishedAt: string | null;
 };
 
 export type Proxy = {

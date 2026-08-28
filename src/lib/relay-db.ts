@@ -33,14 +33,24 @@ export async function dbSyncPlane(plane: PlaneRow) {
     await db.query(
       `insert into relay_accounts
         (id, platform, email, remark, status, proxy_id, session_path, session_version, fail_count, total_requests,
-         last_used_at, locked_until, last_error, last_probe_at, session_warning, created_at, extra)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb)
+         last_used_at, locked_until, last_error, last_probe_at, session_warning, created_at, updated_at,
+         expires_at, session_expires_at, batch, tags, login_ip, last_probe_ip, ip_state, next_probe_at,
+         last_health_at, last_static_probe_at, last_proxy_probe_at, last_live_probe_at,
+         consecutive_probe_failures, health_score, auto_check, inspection_id, extra)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34::jsonb)
        on conflict (id) do update set
          platform=excluded.platform, email=excluded.email, remark=excluded.remark, status=excluded.status,
          proxy_id=excluded.proxy_id, session_path=excluded.session_path, session_version=excluded.session_version,
          fail_count=excluded.fail_count, total_requests=excluded.total_requests, last_used_at=excluded.last_used_at,
          locked_until=excluded.locked_until, last_error=excluded.last_error, last_probe_at=excluded.last_probe_at,
-         session_warning=excluded.session_warning, extra=excluded.extra`,
+         session_warning=excluded.session_warning, updated_at=excluded.updated_at, expires_at=excluded.expires_at,
+         session_expires_at=excluded.session_expires_at, batch=excluded.batch, tags=excluded.tags,
+         login_ip=excluded.login_ip, last_probe_ip=excluded.last_probe_ip, ip_state=excluded.ip_state,
+         next_probe_at=excluded.next_probe_at, last_health_at=excluded.last_health_at,
+         last_static_probe_at=excluded.last_static_probe_at, last_proxy_probe_at=excluded.last_proxy_probe_at,
+         last_live_probe_at=excluded.last_live_probe_at,
+         consecutive_probe_failures=excluded.consecutive_probe_failures, health_score=excluded.health_score,
+         auto_check=excluded.auto_check, inspection_id=excluded.inspection_id, extra=excluded.extra`,
       [
         a.id,
         a.platform,
@@ -58,6 +68,23 @@ export async function dbSyncPlane(plane: PlaneRow) {
         a.lastProbeAt ?? null,
         a.sessionWarning ?? null,
         a.createdAt,
+        a.updatedAt || a.createdAt,
+        a.expiresAt ?? null,
+        a.sessionExpiresAt ?? null,
+        a.batch || "",
+        a.tags || [],
+        a.loginIp ?? null,
+        a.lastProbeIp ?? null,
+        a.ipState || "unknown",
+        a.nextProbeAt ?? null,
+        a.lastHealthAt ?? null,
+        a.lastStaticProbeAt ?? null,
+        a.lastProxyProbeAt ?? null,
+        a.lastLiveProbeAt ?? null,
+        a.consecutiveProbeFailures || 0,
+        a.healthScore ?? (a.status === "healthy" ? 100 : 0),
+        a.autoCheck !== false,
+        a.inspectionId ?? null,
         json(a),
       ],
     );
@@ -110,8 +137,29 @@ export async function dbLoadPlane(): Promise<PlaneRow | null> {
       last_used_at: string | Date | null;
       last_probe_at: string | Date | null;
       session_version: number | null;
+      updated_at: string | Date | null;
+      expires_at: string | Date | null;
+      session_expires_at: string | Date | null;
+      batch: string | null;
+      tags: string[] | null;
+      login_ip: string | null;
+      last_probe_ip: string | null;
+      ip_state: string | null;
+      next_probe_at: string | Date | null;
+      last_health_at: string | Date | null;
+      last_static_probe_at: string | Date | null;
+      last_proxy_probe_at: string | Date | null;
+      last_live_probe_at: string | Date | null;
+      consecutive_probe_failures: number | null;
+      health_score: number | null;
+      auto_check: boolean | null;
+      inspection_id: string | null;
     }>(
-      `select extra, status, locked_until, last_error, session_warning, fail_count, total_requests, last_used_at, last_probe_at, session_version
+      `select extra, status, locked_until, last_error, session_warning, fail_count, total_requests,
+              last_used_at, last_probe_at, session_version, updated_at, expires_at, session_expires_at,
+              batch, tags, login_ip, last_probe_ip, ip_state, next_probe_at, last_health_at,
+              last_static_probe_at, last_proxy_probe_at, last_live_probe_at, consecutive_probe_failures,
+              health_score, auto_check, inspection_id
          from relay_accounts`,
     );
     const pxRows = await db.query<{ extra: unknown }>("select extra from relay_proxies");
@@ -132,6 +180,23 @@ export async function dbLoadPlane(): Promise<PlaneRow | null> {
           lastUsedAt: isoTimestamp(r.last_used_at, extra.lastUsedAt ?? null),
           lastProbeAt: isoTimestamp(r.last_probe_at, extra.lastProbeAt ?? null),
           sessionVersion: r.session_version ?? extra.sessionVersion ?? 0,
+          updatedAt: isoTimestamp(r.updated_at, extra.updatedAt ?? extra.createdAt ?? null),
+          expiresAt: isoTimestamp(r.expires_at, extra.expiresAt ?? null),
+          sessionExpiresAt: isoTimestamp(r.session_expires_at, extra.sessionExpiresAt ?? null),
+          batch: r.batch ?? extra.batch ?? "",
+          tags: r.tags ?? extra.tags ?? [],
+          loginIp: r.login_ip ?? extra.loginIp ?? null,
+          lastProbeIp: r.last_probe_ip ?? extra.lastProbeIp ?? null,
+          ipState: (r.ip_state || extra.ipState || "unknown") as Account["ipState"],
+          nextProbeAt: isoTimestamp(r.next_probe_at, extra.nextProbeAt ?? null),
+          lastHealthAt: isoTimestamp(r.last_health_at, extra.lastHealthAt ?? null),
+          lastStaticProbeAt: isoTimestamp(r.last_static_probe_at, extra.lastStaticProbeAt ?? null),
+          lastProxyProbeAt: isoTimestamp(r.last_proxy_probe_at, extra.lastProxyProbeAt ?? null),
+          lastLiveProbeAt: isoTimestamp(r.last_live_probe_at, extra.lastLiveProbeAt ?? null),
+          consecutiveProbeFailures: r.consecutive_probe_failures ?? extra.consecutiveProbeFailures ?? 0,
+          healthScore: r.health_score ?? extra.healthScore ?? 0,
+          autoCheck: r.auto_check ?? extra.autoCheck ?? true,
+          inspectionId: r.inspection_id ?? extra.inspectionId ?? null,
         } satisfies Account;
       })
       .filter(Boolean) as Account[];
@@ -584,23 +649,88 @@ export async function dbUnlockAllAccounts() {
 
 export async function dbPatchAccount(id: string, patch: Record<string, unknown>) {
   const db = await sql();
-  const rows = await db.query<{ extra: unknown }>("select extra from relay_accounts where id=$1", [id]);
+  const rows = await db.query<Record<string, unknown>>("select * from relay_accounts where id=$1", [id]);
   if (!rows[0]) return false;
-  const next = { ...(rows[0].extra as object), ...patch } as Record<string, unknown>;
+  const row = rows[0];
+  const next = {
+    ...(row.extra as object),
+    platform: row.platform,
+    email: row.email,
+    remark: row.remark,
+    status: row.status,
+    proxyId: row.proxy_id,
+    sessionPath: row.session_path,
+    sessionVersion: row.session_version,
+    failCount: row.fail_count,
+    totalRequests: row.total_requests,
+    lastUsedAt: isoTimestamp(row.last_used_at),
+    lockedUntil: isoTimestamp(row.locked_until),
+    lastError: row.last_error,
+    lastProbeAt: isoTimestamp(row.last_probe_at),
+    sessionWarning: row.session_warning,
+    expiresAt: isoTimestamp(row.expires_at),
+    sessionExpiresAt: isoTimestamp(row.session_expires_at),
+    batch: row.batch,
+    tags: row.tags,
+    loginIp: row.login_ip,
+    lastProbeIp: row.last_probe_ip,
+    ipState: row.ip_state,
+    nextProbeAt: isoTimestamp(row.next_probe_at),
+    lastHealthAt: isoTimestamp(row.last_health_at),
+    lastStaticProbeAt: isoTimestamp(row.last_static_probe_at),
+    lastProxyProbeAt: isoTimestamp(row.last_proxy_probe_at),
+    lastLiveProbeAt: isoTimestamp(row.last_live_probe_at),
+    consecutiveProbeFailures: row.consecutive_probe_failures,
+    healthScore: row.health_score,
+    autoCheck: row.auto_check,
+    inspectionId: row.inspection_id,
+    ...patch,
+    updatedAt: new Date().toISOString(),
+  } as Record<string, unknown>;
   await db.query(
     `update relay_accounts set
-       status=$2, fail_count=$3, total_requests=$4, locked_until=$5, last_used_at=$6,
-       last_error=$7, session_version=$8, extra=$9::jsonb
+       platform=$2, email=$3, remark=$4, status=$5, proxy_id=$6, session_path=$7,
+       session_version=$8, fail_count=$9, total_requests=$10, last_used_at=$11,
+       locked_until=$12, last_error=$13, last_probe_at=$14, session_warning=$15,
+       updated_at=$16, expires_at=$17, session_expires_at=$18, batch=$19, tags=$20,
+       login_ip=$21, last_probe_ip=$22, ip_state=$23, next_probe_at=$24,
+       last_health_at=$25, last_static_probe_at=$26, last_proxy_probe_at=$27,
+       last_live_probe_at=$28, consecutive_probe_failures=$29, health_score=$30,
+       auto_check=$31, inspection_id=$32, extra=$33::jsonb
      where id=$1`,
     [
       id,
+      next.platform,
+      next.email,
+      next.remark || "",
       next.status,
+      next.proxyId ?? null,
+      next.sessionPath ?? null,
+      next.sessionVersion || 0,
       next.failCount || 0,
       next.totalRequests || 0,
-      next.lockedUntil ?? null,
       next.lastUsedAt ?? null,
+      next.lockedUntil ?? null,
       next.lastError ?? null,
-      next.sessionVersion || 0,
+      next.lastProbeAt ?? null,
+      next.sessionWarning ?? null,
+      next.updatedAt,
+      next.expiresAt ?? null,
+      next.sessionExpiresAt ?? null,
+      next.batch || "",
+      Array.isArray(next.tags) ? next.tags : [],
+      next.loginIp ?? null,
+      next.lastProbeIp ?? null,
+      next.ipState || "unknown",
+      next.nextProbeAt ?? null,
+      next.lastHealthAt ?? null,
+      next.lastStaticProbeAt ?? null,
+      next.lastProxyProbeAt ?? null,
+      next.lastLiveProbeAt ?? null,
+      next.consecutiveProbeFailures || 0,
+      next.healthScore || 0,
+      next.autoCheck !== false,
+      next.inspectionId ?? null,
       json(next),
     ],
   );

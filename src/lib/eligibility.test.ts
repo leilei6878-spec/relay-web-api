@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { listEligible } from "./eligibility.ts";
+import { eligibilityReason, listEligible } from "./eligibility.ts";
 import type { Account, GatewaySettings } from "./types.ts";
 
 const settings = { enforceProxy: false } as GatewaySettings;
@@ -22,4 +22,14 @@ test("eligible account ordering accepts PostgreSQL Date timestamps", () => {
   const never = account("never", null);
   const rows = listEligible([newer, older, never], [], settings, "leonardo");
   assert.deepEqual(rows.map((row) => row.id), ["never", "older", "newer"]);
+});
+
+test("expired business accounts and IP drift fail closed", () => {
+  const expired = account("expired", null);
+  expired.expiresAt = "2026-08-28T00:00:00Z";
+  assert.equal(eligibilityReason(expired, [], settings, Date.parse("2026-08-29T00:00:00Z")), "业务已过期");
+
+  const drift = account("drift", null);
+  drift.ipState = "drift";
+  assert.equal(eligibilityReason(drift, [], settings), "登录 IP 漂移");
 });

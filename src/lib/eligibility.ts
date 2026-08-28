@@ -11,6 +11,27 @@ export function proxyOf(account: Account, proxies: Proxy[]) {
   return proxies.find((p) => p.id === account.proxyId) ?? null;
 }
 
+export function accountHealthReason(
+  account: Account,
+  proxies: Proxy[],
+  settings: GatewaySettings,
+  now = Date.now(),
+): string | null {
+  if (account.status !== "healthy" && account.status !== "probing") return "状态不是健康";
+  if (!account.sessionPath) return "没有 Session";
+  if (account.expiresAt && Date.parse(account.expiresAt) <= now) return "业务已过期";
+  if (account.sessionExpiresAt && Date.parse(account.sessionExpiresAt) <= now) return "登录态已过期";
+  if (settings.enforceProxy) {
+    const p = proxyOf(account, proxies);
+    if (!p) return "未绑定 sticky 代理";
+    if (p.status !== "active") return "代理已停用";
+  }
+  if (account.ipState === "drift") return "登录 IP 漂移";
+  if (account.ipState === "proxy_unavailable") return "代理出口不可用";
+  if (account.tokenState === "TOKEN_EXHAUSTED") return "额度用尽";
+  return null;
+}
+
 export function eligibilityReason(
   account: Account,
   proxies: Proxy[],
@@ -18,15 +39,9 @@ export function eligibilityReason(
   now = Date.now(),
   requestedModel?: string,
 ): string | null {
-  if (account.status !== "healthy" && account.status !== "probing") return "状态不是健康";
-  if (!account.sessionPath) return "没有 Session";
+  const health = accountHealthReason(account, proxies, settings, now);
+  if (health) return health;
   if (isLocked(account, now)) return "账号占用中";
-  if (settings.enforceProxy) {
-    const p = proxyOf(account, proxies);
-    if (!p) return "未绑定 sticky 代理";
-    if (p.status !== "active") return "代理已停用";
-  }
-  if (account.tokenState === "TOKEN_EXHAUSTED") return "额度用尽";
   if (requestedModel && account.platform === "leonardo" && !accountHasLeonardoModel(account, requestedModel)) {
     return `模型不可用（${requestedModel}）`;
   }

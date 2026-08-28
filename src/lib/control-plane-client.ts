@@ -32,6 +32,23 @@ export function createPendingAccount(data: {
     lockedUntil: null,
     lastError: null,
     lastProbeAt: null,
+    updatedAt: nowIso(),
+    expiresAt: null,
+    sessionExpiresAt: null,
+    batch: "",
+    tags: [],
+    loginIp: null,
+    lastProbeIp: null,
+    ipState: "unknown",
+    nextProbeAt: null,
+    lastHealthAt: null,
+    lastStaticProbeAt: null,
+    lastProxyProbeAt: null,
+    lastLiveProbeAt: null,
+    consecutiveProbeFailures: 0,
+    healthScore: 0,
+    autoCheck: true,
+    inspectionId: null,
   };
 }
 

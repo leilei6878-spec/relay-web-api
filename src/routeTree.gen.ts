@@ -29,6 +29,7 @@ import { Route as InternalReadinessRouteImport } from './routes/internal/readine
 import { Route as V1ModelsRouteImport } from './routes/v1/models'
 import { Route as V1ResponsesRouteImport } from './routes/v1/responses'
 import { Route as ApiAccountsProbeRouteImport } from './routes/api/accounts/probe'
+import { Route as ApiAdminAccountOperationsRouteImport } from './routes/api/admin/account-operations'
 import { Route as ApiAdminInvokeRouteImport } from './routes/api/admin/invoke'
 import { Route as ApiAdminLoginPackRouteImport } from './routes/api/admin/login-pack'
 import { Route as ApiAdminMetricsRouteImport } from './routes/api/admin/metrics'
@@ -146,6 +147,12 @@ const ApiAccountsProbeRoute = ApiAccountsProbeRouteImport.update({
   path: '/api/accounts/probe',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAdminAccountOperationsRoute =
+  ApiAdminAccountOperationsRouteImport.update({
+    id: '/api/admin/account-operations',
+    path: '/api/admin/account-operations',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAdminInvokeRoute = ApiAdminInvokeRouteImport.update({
   id: '/api/admin/invoke',
   path: '/api/admin/invoke',
@@ -248,6 +255,7 @@ export interface FileRoutesByFullPath {
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
@@ -286,6 +294,7 @@ export interface FileRoutesByTo {
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
@@ -325,6 +334,7 @@ export interface FileRoutesById {
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
@@ -365,6 +375,7 @@ export interface FileRouteTypes {
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
+    | '/api/admin/account-operations'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
@@ -403,6 +414,7 @@ export interface FileRouteTypes {
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
+    | '/api/admin/account-operations'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
@@ -441,6 +453,7 @@ export interface FileRouteTypes {
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
+    | '/api/admin/account-operations'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
@@ -480,6 +493,7 @@ export interface RootRouteChildren {
   V1ModelsRoute: typeof V1ModelsRoute
   V1ResponsesRoute: typeof V1ResponsesRoute
   ApiAccountsProbeRoute: typeof ApiAccountsProbeRoute
+  ApiAdminAccountOperationsRoute: typeof ApiAdminAccountOperationsRoute
   ApiAdminInvokeRoute: typeof ApiAdminInvokeRoute
   ApiAdminLoginPackRoute: typeof ApiAdminLoginPackRoute
   ApiAdminMetricsRoute: typeof ApiAdminMetricsRoute
@@ -640,6 +654,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAccountsProbeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/admin/account-operations': {
+      id: '/api/admin/account-operations'
+      path: '/api/admin/account-operations'
+      fullPath: '/api/admin/account-operations'
+      preLoaderRoute: typeof ApiAdminAccountOperationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/admin/invoke': {
       id: '/api/admin/invoke'
       path: '/api/admin/invoke'
@@ -776,6 +797,7 @@ const rootRouteChildren: RootRouteChildren = {
   V1ModelsRoute: V1ModelsRoute,
   V1ResponsesRoute: V1ResponsesRoute,
   ApiAccountsProbeRoute: ApiAccountsProbeRoute,
+  ApiAdminAccountOperationsRoute: ApiAdminAccountOperationsRoute,
   ApiAdminInvokeRoute: ApiAdminInvokeRoute,
   ApiAdminLoginPackRoute: ApiAdminLoginPackRoute,
   ApiAdminMetricsRoute: ApiAdminMetricsRoute,
