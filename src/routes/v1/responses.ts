@@ -5,6 +5,7 @@ import { prepareChatRequest } from "@/lib/provider/index";
 import { estimateTokens } from "@/lib/tokens";
 import { ingestReferenceImages } from "@/lib/reference-input";
 import { runChat, streamChat } from "./chat/completions";
+import { publicRelayMeta } from "@/lib/public-relay-meta";
 
 const ALLOWED = new Set(["model", "input", "stream"]);
 
@@ -158,7 +159,7 @@ export const Route = createFileRoute("/v1/responses")({
               output_tokens: estimateTokens(result.text),
               total_tokens: estimateTokens(prepared.webPrompt) + estimateTokens(result.text),
             },
-            relay: {
+            relay: publicRelayMeta({
               accountEmail: result.accountEmail,
               jobId: result.id,
               mode: result.mode,
@@ -172,7 +173,7 @@ export const Route = createFileRoute("/v1/responses")({
               requested_profile: result.requestedProfile || "exact",
               actual_profile: result.actualProfile || "unknown",
               profile_verified: result.profileVerified ?? false,
-            },
+            }),
           },
           { headers: cors() },
         );

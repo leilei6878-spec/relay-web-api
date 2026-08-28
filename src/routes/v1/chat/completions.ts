@@ -17,6 +17,7 @@ import { appendUsage } from "@/lib/usage";
 import { estimateTokens } from "@/lib/tokens";
 import { uid } from "@/lib/utils";
 import { bootProductionGuard } from "@/lib/production-guard";
+import { publicRelayMeta } from "@/lib/public-relay-meta";
 
 type ChatBody = {
   messages?: { role?: string; content?: unknown }[];
@@ -503,7 +504,7 @@ export function streamChat(
           object: "chat.completion.chunk",
           model,
           choices: [{ index: 0, delta: {} }],
-          relay: { phase: "waiting_worker", accountEmail: queued.job.accountEmail, jobId: queued.job.id, requestId },
+          relay: publicRelayMeta({ phase: "waiting_worker", accountEmail: queued.job.accountEmail, jobId: queued.job.id, requestId }),
         });
         let assembled = "";
         let firstSse = 0;
@@ -513,7 +514,7 @@ export function streamChat(
             object: "chat.completion.chunk",
             model,
             choices: [{ index: 0, delta: {} }],
-            relay: { phase: "waiting_worker", jobId: queued.job.id, accountEmail: queued.job.accountEmail },
+            relay: publicRelayMeta({ phase: "waiting_worker", jobId: queued.job.id, accountEmail: queued.job.accountEmail }),
           });
         }, 8000);
         let unsubscribeJob: () => void = () => undefined;
@@ -614,7 +615,7 @@ export function streamChat(
           object: "chat.completion.chunk",
           model,
           choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-          relay: {
+          relay: publicRelayMeta({
             phase: "done",
             logicalStatus: "success",
             accountEmail: queued.job.accountEmail,
@@ -640,7 +641,7 @@ export function streamChat(
             actual_profile: done.actualProfile || "unknown",
             profile_verified: done.profileVerified ?? false,
             finalText: text,
-          },
+          }),
         });
         await send(sseUsageChunk(model, queued.job.id, estimateTokens(prompt), estimateTokens(text)));
         await logUsage(key, model, { images }, prompt, started, {
@@ -689,7 +690,7 @@ function completion(result: ChatOk, imageCount: number, promptTokens: number, co
       completion_tokens: completionTokens,
       total_tokens: promptTokens + completionTokens,
     },
-    relay: {
+    relay: publicRelayMeta({
       accountEmail: result.accountEmail,
       jobId: result.id,
       mode: result.mode,
@@ -707,7 +708,7 @@ function completion(result: ChatOk, imageCount: number, promptTokens: number, co
       requested_profile: result.requestedProfile || "exact",
       actual_profile: result.actualProfile || "unknown",
       profile_verified: result.profileVerified ?? false,
-    },
+    }),
   };
 }
 

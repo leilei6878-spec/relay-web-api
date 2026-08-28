@@ -8,6 +8,7 @@ import { completeRequest, createRelayRequest } from "@/lib/requests";
 import { fallbackImage } from "@/lib/upstream";
 import { appendUsage } from "@/lib/usage";
 import { estimateTokens } from "@/lib/tokens";
+import { publicRelayMeta } from "@/lib/public-relay-meta";
 import { uid } from "@/lib/utils";
 import { collectSizeInput, resolveImageSpec } from "@/lib/provider/image-size";
 import { getAdapter } from "@/lib/provider";
@@ -418,7 +419,7 @@ async function imagePayload(
       input_tokens: 0,
       output_tokens: 0,
     },
-    relay: {
+    relay: publicRelayMeta({
       accountEmail,
       jobId,
       mode,
@@ -437,7 +438,7 @@ async function imagePayload(
       actual_aspect: extra?.actualAspect,
       requested_tier: extra?.requestedTier,
       actual_tier: extra?.actualTier,
-    },
+    }),
   };
 }
 
