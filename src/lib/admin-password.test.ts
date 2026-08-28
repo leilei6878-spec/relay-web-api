@@ -11,7 +11,7 @@ import {
 
 test("administrator password hashes verify without storing plaintext", () => {
   const encoded = hashAdminPassword("correct horse", Buffer.alloc(16, 7));
-  assert.match(encoded, /^scrypt\$[A-Za-z0-9_-]+\$[A-Za-z0-9_-]+$/);
+  assert.match(encoded, /^scrypt:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/);
   assert.equal(encoded.includes("correct horse"), false);
   const env = {
     RELAY_ADMIN_USERNAME: "admin",

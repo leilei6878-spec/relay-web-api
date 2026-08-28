@@ -15,7 +15,7 @@ function safeTextEqual(left: string, right: string) {
 export function hashAdminPassword(password: string, salt = randomBytes(16)) {
   if (!password || password.length > 1024) throw new Error("invalid administrator password");
   const digest = scryptSync(password, salt, KEY_BYTES);
-  return `${PREFIX}$${salt.toString("base64url")}$${digest.toString("base64url")}`;
+  return `${PREFIX}:${salt.toString("base64url")}:${digest.toString("base64url")}`;
 }
 
 export function verifyAdminCredentials(
@@ -27,7 +27,7 @@ export function verifyAdminCredentials(
   const encoded = env.RELAY_ADMIN_PASSWORD_HASH?.trim() || "";
   if (!expectedUsername || !username || !password || password.length > 1024) return false;
   const usernameOk = safeTextEqual(username, expectedUsername);
-  const [prefix, saltText, digestText, extra] = encoded.split("$");
+  const [prefix, saltText, digestText, extra] = encoded.split(":");
   if (prefix !== PREFIX || !saltText || !digestText || extra !== undefined) return false;
   try {
     const salt = Buffer.from(saltText, "base64url");
