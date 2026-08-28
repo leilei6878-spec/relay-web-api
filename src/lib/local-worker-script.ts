@@ -802,6 +802,7 @@ def attach_leonardo_refs(page, images):
     paths = materialize_images(seen[:6])
     if not paths:
         return "LEONARDO_DOM_CHANGED: cannot read reference images"
+    close_leonardo_drawers(page)
     print("leonardo attaching %d refs" % len(paths), flush=True)
     attached = {"ok": False}
 
@@ -3408,6 +3409,18 @@ def click_leonardo_aspect(page, aspect):
             page.wait_for_timeout(400)
         except Exception:
             time.sleep(0.4)
+        slider_steps = {"21:9": 0, "16:9": 1, "3:2": 2, "4:3": 3, "5:4": 4, "1:1": 5, "4:5": 6, "3:4": 7, "2:3": 8, "9:16": 9}
+        if str(how).startswith("custom-open") and aspect in slider_steps:
+            try:
+                slider = page.get_by_role("slider", name="Output Dimensions - Aspect Ratio").last
+                slider.press("Home", timeout=1800)
+                for _ in range(slider_steps[aspect]):
+                    slider.press("ArrowRight", timeout=1800)
+                    page.wait_for_timeout(90)
+                page.wait_for_timeout(350)
+                return str(how) + "+slider:" + str(slider_steps[aspect])
+            except Exception as e:
+                how = str(how) + "+slider-err:" + str(e)[:80]
         try:
             picked = page.evaluate(
                 """(args) => {
@@ -3508,6 +3521,35 @@ def read_displayed_size(page):
         pass
     return 0, 0
 
+def close_leonardo_drawers(page):
+    closed = 0
+    for _ in range(4):
+        try:
+            hit = page.evaluate("""() => {
+              const vis = (el) => {
+                const r = el.getBoundingClientRect();
+                const st = getComputedStyle(el);
+                return r.width > 4 && r.height > 4 && st.visibility !== 'hidden' && st.display !== 'none';
+              };
+              const drawers = [...document.querySelectorAll('[data-slot="drawer-content"]')].filter(vis);
+              const drawer = drawers[drawers.length - 1];
+              if (!drawer) return false;
+              const close = drawer.querySelector('button[data-slot="drawer-close"], [data-slot="drawer-close"]');
+              if (!close) return false;
+              close.click();
+              return true;
+            }""")
+        except Exception:
+            hit = False
+        if not hit:
+            break
+        closed += 1
+        try:
+            page.wait_for_timeout(180)
+        except Exception:
+            time.sleep(0.18)
+    return closed
+
 def apply_image_size(page, want_size, aspect=None, tier=None, gpt=False):
     aspect = (aspect or size_to_aspect(want_size) or "1:1").strip()
     w, h = parse_size_wh(want_size)
@@ -3515,6 +3557,9 @@ def apply_image_size(page, want_size, aspect=None, tier=None, gpt=False):
         tier, _px = size_tier(w, h, gpt)
     k = "4K" if str(tier).lower() == "large" else ("2K" if str(tier).lower() == "medium" else "1K")
     opened = click_leonardo_aspect(page, aspect)
+    closed = close_leonardo_drawers(page)
+    if closed:
+        opened = str(opened) + "+closed:" + str(closed)
     try:
         page.keyboard.press("Escape")
     except Exception:

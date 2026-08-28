@@ -93,6 +93,11 @@ test("apply_image_size clicks Image Dimensions chips then Small/Medium/Large", (
   assert.match(s, /Facebook \(16:9\)/);
   assert.match(s, /Ultrawide \(21:9\)/);
   assert.match(s, /TikTok \(9:16\)/);
+  assert.match(s, /"21:9": 0, "16:9": 1, "3:2": 2, "4:3": 3, "5:4": 4, "1:1": 5, "4:5": 6, "3:4": 7, "2:3": 8, "9:16": 9/);
+  assert.match(s, /get_by_role\("slider", name="Output Dimensions - Aspect Ratio"\)\.last/);
+  assert.match(s, /slider\.press\("Home"/);
+  assert.match(s, /def close_leonardo_drawers/);
+  assert.match(s, /button\[data-slot="drawer-close"\]/);
   assert.match(s, /skip-square/);
   assert.match(s, /def aspect_match/);
   assert.match(s, /LEONARDO_RESULT_ASPECT_MISMATCH/);
@@ -187,6 +192,8 @@ test("leonardo img2img attaches refs before generate and fail-fasts", () => {
   const clickIdx = s.indexOf('print("leonardo clicking generate"');
   const sizeAfter = s.indexOf("confirm_leonardo_image_size(page, want_size, aspect, tier, gpt)", attachIdx);
   assert.ok(attachIdx > 0 && readyIdx > attachIdx, "wait generate ready after attach");
+  const attachFn = s.slice(s.indexOf("def attach_leonardo_refs"), s.indexOf("def leonardo_js_fill"));
+  assert.match(attachFn, /close_leonardo_drawers\(page\)/);
   assert.ok(restoreModelIdx > attachIdx && restoreModelIdx < sizeAfter, "restore exact model before re-applying size");
   assert.ok(sizeAfter > attachIdx && sizeAfter < readyIdx, "re-apply size after refs");
   assert.ok(baselineIdx > readyIdx, "boundary after refs, not before");
