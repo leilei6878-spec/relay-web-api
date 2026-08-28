@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { assertAdmin } from "@/lib/authz";
 import { primaryApiKey } from "@/lib/api-keys";
 import { dispatchAdminInvoke } from "@/lib/invoke-dispatch";
+import { ADMIN_INVOKE_TIMEOUT_MS } from "@/lib/image-timeout";
 
 export const Route = createFileRoute("/api/admin/invoke")({
   server: {
@@ -12,7 +13,7 @@ export const Route = createFileRoute("/api/admin/invoke")({
         const body = (await request.json().catch(() => ({}))) as { path?: string; payload?: unknown };
         const key = await primaryApiKey();
         const inner = new AbortController();
-        const killer = setTimeout(() => inner.abort(), 165_000);
+        const killer = setTimeout(() => inner.abort(), ADMIN_INVOKE_TIMEOUT_MS);
         try {
           return await dispatchAdminInvoke({
             path: body.path || "",

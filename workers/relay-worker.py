@@ -3619,6 +3619,8 @@ def upgrade_cdn_url(url):
     if not u.startswith("http"):
         return u
     u = re.sub(r"([?&])(w|width|h|height|dpr|q|quality|fm|fit)=[^&]*", r"\1", u)
+    u = u.replace("?&", "?")
+    u = re.sub(r"&+", "&", u)
     u = re.sub(r"[?&]$", "", u)
     u = re.sub(r"/(256|384|512|640|768)(/|$)", r"/", u)
     u = re.sub(r"_(256|384|512|640|768)(\.[a-zA-Z]+)$", r"\2", u)
@@ -3645,9 +3647,14 @@ def download_result_image(context, url):
         return url, None
     if url.startswith("http"):
         last_err = "LEONARDO_DOWNLOAD_FAILED"
+        best = None
+        seen = set()
         for candidate in (url, upgrade_cdn_url(url)):
             if not candidate:
                 continue
+            if candidate in seen:
+                continue
+            seen.add(candidate)
             try:
                 resp = context.request.get(candidate, timeout=20000)
                 raw = resp.body()
@@ -3658,9 +3665,15 @@ def download_result_image(context, url):
                 if not raw or len(raw) < 2048:
                     last_err = "LEONARDO_RESULT_NOT_FOUND: image too small"
                     continue
-                return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode()), None
+                w, h = image_wh(raw)
+                score = (w * h, len(raw))
+                if best is None or score > best[0]:
+                    best = (score, raw, mime)
             except Exception:
                 last_err = "LEONARDO_DOWNLOAD_FAILED"
+        if best is not None:
+            _score, raw, mime = best
+            return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode()), None
         return None, last_err
     return None, "LEONARDO_RESULT_NOT_FOUND"
 
@@ -4061,7 +4074,7 @@ def run_leonardo(body, ctx=None):
         if pst2 in ("LOGIN_REQUIRED", "TOKEN_EXHAUSTED", "QUEUE_FULL", "CHALLENGE"):
             err, fault = page_state_error(pst2, False, "leonardo")
             return {"ok": False, "error": err, "fault": fault, "pageState": pst2, "backendMode": "web_account", "availableModels": available}
-        deadline = time.time() + int(body.get("timeoutMs") or 120000) / 1000
+        deadline = max(time.time() + 30, t0 + int(body.get("timeoutMs") or 120000) / 1000 - 5)
         fail_at = time.time() + 28
         done_hint = ("that's a wrap", "how was this output", "time to generate more")
         progress_hint = ("generating", "queued", "in progress", "creating image", "working on")
@@ -4100,6 +4113,18 @@ def run_leonardo(body, ctx=None):
                 cached = captures_by_url.get(src)
                 if cached:
                     _n, w, h, _src, raw, mime = cached
+                    if max(w, h) < want_min:
+                        full_url, _full_err = download_result_image(context, src)
+                        if full_url:
+                            try:
+                                full_header, full_encoded = full_url.split(",", 1)
+                                full_raw = base64.b64decode(full_encoded)
+                                full_mime = full_header[5:].split(";")[0] if full_header.startswith("data:") else mime
+                                full_w, full_h = image_wh(full_raw)
+                                if full_w * full_h > w * h:
+                                    raw, mime, w, h = full_raw, full_mime, full_w, full_h
+                            except Exception:
+                                pass
                 else:
                     data_url, _derr = download_result_image(context, src)
                     if not data_url:
@@ -4159,6 +4184,9 @@ def run_leonardo(body, ctx=None):
                 ranked = sorted([row for row in captures if aspect_match(row[1], row[2], aspect)], key=lambda row: (row[1] * row[2], row[0]), reverse=True)
                 if ranked and max(ranked[0][1], ranked[0][2]) >= max(best[0][1], best[0][2]):
                     best = ranked[: max(1, want_n)]
+        if best and max(best[0][1], best[0][2]) < want_min:
+            got = "%dx%d" % (best[0][1], best[0][2])
+            return fail_job(ctx, "LEONARDO_RESULT_SIZE_MISMATCH: want %s got %s" % (want_size, got), "provider", {"pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked})
         if not best:
             set_submission_state(ctx, "RESULT_UNCERTAIN")
             return fail_job(ctx, "RESULT_UNCERTAIN: LEONARDO_RESULT_NOT_FOUND", "provider", {"pageState": "GENERATION_FAILED", "backendMode": "web_account", "availableModels": available, "modelActual": picked})

@@ -9,6 +9,7 @@ import type { DomFeature } from "./types";
 import { activeSelectorPack, selectorPackForCanary } from "../selector-promotion";
 import { accountHasLeonardoModel } from "./leonardo-models";
 import type { Account } from "../types";
+import { LEONARDO_JOB_TIMEOUT_MS } from "../image-timeout";
 
 export function canaryModelFor(
   provider: ProviderId,
@@ -62,7 +63,7 @@ export async function enqueueProviderCanary(provider: ProviderId, kind: "structu
     kind: kind === "paid" ? "image" : "canary",
   });
   const excludeAccountIds = plane.accounts.filter((item) => item.id !== account.id).map((item) => item.id);
-  const timeoutMs = kind === "paid" ? (provider === "leonardo" ? 180_000 : 90_000) : 45_000;
+  const timeoutMs = kind === "paid" ? (provider === "leonardo" ? LEONARDO_JOB_TIMEOUT_MS : 90_000) : 45_000;
   const queued =
     provider === "gemini" || provider === "leonardo"
       ? await enqueueImage(prepared.webPrompt, prepared.model, timeoutMs, [], {

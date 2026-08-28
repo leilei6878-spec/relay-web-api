@@ -813,3 +813,51 @@ test("worker parses WebP dimensions", () => {
   assert.match(s, /chunk == b"VP8L"/);
 });
 
+test("Leonardo CDN download prefers the upgraded full-resolution asset", () => {
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker-download.py", localWorkerScript());
+  const out = spawnSync(
+    PYTHON,
+    [
+      "-c",
+      `
+import base64, importlib.util, struct
+spec=importlib.util.spec_from_file_location("w", "storage/relay-qa/worker-download.py")
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+def png_stub(width, height):
+    raw=bytearray(4096)
+    raw[:8]=bytes.fromhex("89504e470d0a1a0a")
+    raw[16:24]=struct.pack(">II", width, height)
+    return bytes(raw)
+class Response:
+    headers={"content-type":"image/png"}
+    def __init__(self, raw): self.raw=raw
+    def body(self): return self.raw
+class Request:
+    def __init__(self): self.calls=[]
+    def get(self, url, timeout=0):
+        self.calls.append(url)
+        return Response(png_stub(512, 512) if "w=512" in url else png_stub(1024, 1024))
+class Context:
+    def __init__(self): self.request=Request()
+context=Context()
+data_url, error=m.download_result_image(context, "https://cdn.leonardo.ai/result.png?w=512")
+assert error is None, error
+raw=base64.b64decode(data_url.split(",", 1)[1])
+assert m.image_wh(raw)==(1024, 1024), m.image_wh(raw)
+assert context.request.calls==[
+    "https://cdn.leonardo.ai/result.png?w=512",
+    "https://cdn.leonardo.ai/result.png",
+], context.request.calls
+print("full-resolution-ok")
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /full-resolution-ok/);
+  const script = localWorkerScript();
+  assert.match(script, /deadline = max\(time\.time\(\) \+ 30, t0 \+/);
+  assert.match(script, /LEONARDO_RESULT_SIZE_MISMATCH/);
+});
+

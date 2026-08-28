@@ -9,6 +9,7 @@ import { fallbackImage } from "@/lib/upstream";
 import { appendUsage } from "@/lib/usage";
 import { estimateTokens } from "@/lib/tokens";
 import { publicRelayMeta } from "@/lib/public-relay-meta";
+import { LEONARDO_API_WAIT_MS, LEONARDO_JOB_TIMEOUT_MS } from "@/lib/image-timeout";
 import { uid } from "@/lib/utils";
 import { collectSizeInput, resolveImageSpec } from "@/lib/provider/image-size";
 import { getAdapter } from "@/lib/provider";
@@ -318,7 +319,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
   for (let i = 0; i <= maxRetry; i++) {
     const account = await pickAccount(platform, exclude, { model });
     if (!account) break;
-    const queued = await enqueueImage(prompt, model, platform === "leonardo" ? 180_000 : 90_000, referenceUrls, {
+    const queued = await enqueueImage(prompt, model, platform === "leonardo" ? LEONARDO_JOB_TIMEOUT_MS : 90_000, referenceUrls, {
       idempotencyKey: idem,
       keyId: auth.record.id,
       requestId: reqId,
@@ -338,7 +339,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
       exclude.push(account.id);
       continue;
     }
-    const waitMs = Math.min(queued.job.timeoutMs, platform === "leonardo" ? 148_000 : 80_000);
+    const waitMs = Math.min(queued.job.timeoutMs, platform === "leonardo" ? LEONARDO_API_WAIT_MS : 80_000);
     const done = await waitJob(queued.job.id, waitMs, { graceMs: 10_000, cancelOnTimeout: false });
     const fresh = (await getJob(queued.job.id)) || done.job || queued.job;
     const urls = (fresh.urls && fresh.urls.length ? fresh.urls : done.url ? [done.url] : []).filter(Boolean);
