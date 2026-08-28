@@ -211,6 +211,9 @@ test("leonardo img2img attaches refs before generate and fail-fasts", () => {
   assert.match(modelRestore, /data-slot=drawer-content/);
   assert.match(modelRestore, /getAttribute\('data-testid'\) === slug/);
   assert.match(modelRestore, /re\.sub\(r"\[\^a-z0-9\]\+", "-", label\.lower\(\)\)/);
+  assert.match(modelRestore, /return "already:" \+ label/);
+  assert.match(modelRestore, /for _ in range\(12\)/);
+  assert.match(modelRestore, /image-generation-sidebar-container/);
   assert.doesNotMatch(modelRestore, /innerText\|\|''\)\.includes\(want\)/);
 });
 

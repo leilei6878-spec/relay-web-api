@@ -3597,6 +3597,13 @@ def click_leonardo_model(page, label):
     if not label:
         return ""
     slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+    try:
+        trigger = page.locator('[data-testid="image-generation-sidebar-container"] [data-testid="model-selector-trigger"]').first
+        current = re.sub(r"^model\s+", "", " ".join((trigger.inner_text() or "").split()), flags=re.I).strip()
+        if current.lower() == label.lower():
+            return "already:" + label
+    except Exception:
+        pass
 
     def click_exact_option():
         try:
@@ -3629,18 +3636,20 @@ def click_leonardo_model(page, label):
     clicked = click_exact_option()
     if clicked:
         return "exact:" + str(clicked)
-    for spec in ('[data-testid="model-selector-trigger"]', 'button:has-text("Model")', '[aria-label="Model"]', '[aria-label^=Model]'):
+    for spec in ('[data-testid="image-generation-sidebar-container"] [data-testid="model-selector-trigger"]', '[data-testid="model-selector-trigger"]', 'button:has-text("Model")', '[aria-label="Model"]', '[aria-label^=Model]'):
         try:
             loc = page.locator(spec).first
             if loc.count() == 0:
                 continue
             loc.click(timeout=1400, force=True)
-            page.wait_for_timeout(500)
         except Exception:
             continue
-        clicked = click_exact_option()
-        if clicked:
-            return "open+exact:" + str(clicked)
+        for _ in range(12):
+            page.wait_for_timeout(250)
+            clicked = click_exact_option()
+            if clicked:
+                return "open+exact:" + str(clicked)
+        close_leonardo_drawers(page)
     return ""
 
 def apply_gemini_aspect(page, aspect):
