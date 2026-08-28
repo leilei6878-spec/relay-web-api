@@ -3082,6 +3082,175 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(result, ensure_ascii=False).encode("utf-8"))
 
+def inspection_gateway(ctx, method="GET", query="", payload=None, raw=None, content_type="application/json"):
+    gw = (os.environ.get("RELAY_GATEWAY") or "").rstrip("/")
+    token = os.environ.get("RELAY_TOKEN") or ""
+    iid = str((payload or {}).get("inspectionId") if isinstance(payload, dict) else "") or str(getattr(ctx, "inspection_id", "") or "")
+    if not iid:
+        iid = str(getattr(ctx, "job_id", "") or "")
+    if not (gw and token and iid):
+        return None
+    try:
+        import urllib.request, urllib.parse
+        url = gw + "/api/worker/account-inspections"
+        if method == "GET":
+            url += "?" + urllib.parse.urlencode({"id": iid, **(query or {})})
+            data = None
+        elif raw is not None:
+            data = raw
+        else:
+            body = dict(payload or {})
+            body.pop("inspectionId", None)
+            data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={
+                "Authorization": "Bearer " + token,
+                "Content-Type": content_type,
+                "X-Inspection-Id": iid,
+            },
+            method=method,
+        )
+        response = urllib.request.urlopen(req, timeout=12).read()
+        return json.loads(response.decode("utf-8") or "{}")
+    except Exception as e:
+        print("inspection gateway fail", method, str(e)[:120], flush=True)
+        return None
+
+def inspection_command(page, command, mode):
+    if not isinstance(command, dict):
+        return False
+    kind = str(command.get("type") or "")
+    if mode == "view" and kind not in ("scroll", "reload", "back", "forward", "close"):
+        return False
+    try:
+        if kind == "click":
+            x = max(0, min(1365, float(command.get("x") or 0)))
+            y = max(0, min(900, float(command.get("y") or 0)))
+            page.mouse.click(x, y)
+        elif kind == "type":
+            page.keyboard.insert_text(str(command.get("text") or "")[:4000])
+        elif kind == "key":
+            key = str(command.get("key") or "")
+            if key not in ("Enter", "Escape", "Tab", "Backspace", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"):
+                return False
+            page.keyboard.press(key)
+        elif kind == "scroll":
+            delta = max(-2400, min(2400, int(command.get("deltaY") or 0)))
+            page.mouse.wheel(0, delta)
+        elif kind == "reload":
+            page.reload(wait_until="domcontentloaded", timeout=25000)
+        elif kind == "back":
+            page.go_back(wait_until="domcontentloaded", timeout=25000)
+        elif kind == "forward":
+            page.go_forward(wait_until="domcontentloaded", timeout=25000)
+        elif kind == "close":
+            return True
+        else:
+            return False
+        return kind == "close"
+    except Exception as e:
+        print("inspection command fail", kind, str(e)[:120], flush=True)
+        return False
+
+def run_account_inspection(body, ctx=None):
+    ctx = ctx or JobRuntimeContext(body)
+    ctx.inspection_id = str(body.get("inspectionId") or "")
+    if not ctx.inspection_id:
+        return {"ok": False, "error": "INSPECTION_ID_REQUIRED", "fault": "worker"}
+    proxy = job_proxy(body)
+    if proxy is None:
+        return {"ok": False, "error": proxy_fail_error(body, body.get("platform") == "leonardo"), "fault": "proxy"}
+    state = body.get("storageState") or {}
+    if not (state.get("cookies") or []):
+        return {"ok": False, "error": "SESSION_INVALID: inspection missing cookies", "fault": "account"}
+    browser, context, page, ctx_key = get_pooled_context(proxy, state, body.get("accountId"))
+    if page is None or page.is_closed():
+        page = context.new_page()
+        remember_page(ctx_key, page)
+        target = "https://chatgpt.com/?temporary-chat=true"
+        if body.get("platform") == "gemini":
+            target = "https://gemini.google.com/app"
+        elif body.get("platform") == "leonardo":
+            target = "https://app.leonardo.ai/generate"
+        page.goto(target, wait_until="domcontentloaded", timeout=30000)
+    arm_page(page)
+    observed = exit_ip(context)
+    frame_seq = 0
+    command_seq = 0
+    mode = "view"
+    inspection_gateway(ctx, "POST", payload={
+        "inspectionId": ctx.inspection_id,
+        "status": "active",
+        "observedIp": observed,
+        "pageUrl": page.url or "",
+        "pageTitle": page.title() if page else "",
+        "viewportWidth": 1365,
+        "viewportHeight": 900,
+    })
+    deadline = time.time() + min(1800, max(30, int(body.get("timeoutMs") or 1800000) / 1000 - 10))
+    close_reason = "timeout"
+    try:
+        while time.time() < deadline:
+            try:
+                raw = page.screenshot(type="jpeg", quality=58, timeout=10000)
+                uploaded = inspection_gateway(ctx, "POST", raw=raw, content_type="image/jpeg")
+                if uploaded and uploaded.get("frameSeq"):
+                    frame_seq = int(uploaded.get("frameSeq") or frame_seq)
+            except Exception as e:
+                print("inspection frame fail", str(e)[:120], flush=True)
+            polled = inspection_gateway(ctx, "GET", query={"afterSeq": command_seq}) or {}
+            mode = str(polled.get("mode") or mode)
+            next_seq = int(polled.get("commandSeq") or command_seq)
+            command = polled.get("command") if next_seq > command_seq else None
+            if command:
+                should_close = inspection_command(page, command, mode)
+                command_seq = next_seq
+                if should_close:
+                    close_reason = "closed_by_admin"
+                    break
+            if polled.get("close"):
+                close_reason = "closed_by_admin"
+                break
+            inspection_gateway(ctx, "POST", payload={
+                "inspectionId": ctx.inspection_id,
+                "status": "active",
+                "observedIp": observed,
+                "pageUrl": page.url or "",
+                "pageTitle": page.title() if page else "",
+                "viewportWidth": 1365,
+                "viewportHeight": 900,
+                "frameSeq": frame_seq,
+            })
+            time.sleep(0.65)
+    except Exception as e:
+        inspection_gateway(ctx, "POST", payload={"inspectionId": ctx.inspection_id, "status": "failed", "closeReason": str(e)[:500]})
+        return {"ok": False, "error": "INSPECTION_FAILED: %s" % str(e)[:240], "fault": "worker"}
+    try:
+        state_out = context.storage_state()
+    except Exception:
+        state_out = None
+    pst = detect_page_state(page, body.get("platform") or "chatgpt")
+    actual = selected_model_label(page) if body.get("platform") == "leonardo" else (body.get("model") or "")
+    inspection_gateway(ctx, "POST", payload={
+        "inspectionId": ctx.inspection_id,
+        "status": "closed",
+        "closeReason": close_reason,
+        "observedIp": observed,
+        "pageUrl": page.url or "",
+        "pageTitle": page.title() if page else "",
+    })
+    return {
+        "ok": True,
+        "text": "INSPECTION_CLOSED",
+        "pageState": pst,
+        "modelActual": actual,
+        "sessionState": state_out,
+        "sessionBaseVersion": int(body.get("sessionVersion") or 0),
+        "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
+    }
+
 def exec_job(body):
     shard = pick_shard(body)
     if shard.thread is None or threading.current_thread() is shard.thread:
@@ -3107,7 +3276,9 @@ def exec_job_run(body):
     account_lock(aid).acquire()
     ACTIVE += 1
     try:
-        if body.get("platform") in ("gemini", "image", "leonardo") or body.get("kind") in ("image", "edit"):
+        if body.get("kind") == "inspection":
+            result = run_account_inspection(body, ctx)
+        elif body.get("platform") in ("gemini", "image", "leonardo") or body.get("kind") in ("image", "edit"):
             if body.get("platform") == "leonardo" or is_leonardo_model(body.get("model")):
                 result = run_leonardo(body, ctx)
             else:
@@ -3627,7 +3798,7 @@ def click_leonardo_model(page, label):
     slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
     try:
         trigger = page.locator('[data-testid="image-generation-sidebar-container"] [data-testid="model-selector-trigger"]').first
-        current = re.sub(r"^model\s+", "", " ".join((trigger.inner_text() or "").split()), flags=re.I).strip()
+        current = re.sub(r"^model\\s+", "", " ".join((trigger.inner_text() or "").split()), flags=re.I).strip()
         if current.lower() == label.lower():
             return "already:" + label
     except Exception:
@@ -4503,6 +4674,7 @@ def poll_gateway():
                 "selectorPackVersion": data.get("selectorPackVersion") or job.get("selectorPackVersion"),
                 "turns": data.get("turns") or job.get("turns") or [],
                 "kind": data.get("kind") or job.get("kind"),
+                "inspectionId": job.get("inspectionId") or data.get("inspectionId"),
                 "leaseId": (data.get("lease") or {}).get("leaseId") or job.get("leaseId"),
                 "fencingToken": (data.get("lease") or {}).get("fencingToken") or job.get("fencingToken"),
                 "attemptId": (data.get("lease") or {}).get("attemptId") or job.get("attemptId"),

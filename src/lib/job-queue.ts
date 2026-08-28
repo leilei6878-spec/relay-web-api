@@ -76,7 +76,8 @@ export type Job = {
   urls?: string[];
   error?: string;
   lease?: Lease;
-  kind?: "chat" | "image" | "edit" | "canary";
+  kind?: "chat" | "image" | "edit" | "canary" | "inspection";
+  inspectionId?: string;
   turns?: ChatTurn[];
   selectorPackVersion?: string;
   pageState?: string;
@@ -121,6 +122,9 @@ export type EnqueueOpts = {
   aspect?: string;
   tier?: string;
   referenceAssets?: ReferenceAsset[];
+  inspectionId?: string;
+  targetAccountId?: string;
+  allowUnhealthyTarget?: boolean;
 };
 
 export type WorkerRow = {
@@ -400,9 +404,16 @@ async function enqueue(
       }
     }
     const exclude = [...(opts.excludeAccountIds || [])];
-    let account = await pickAccount(platform, exclude, { model });
+    const targetAccount = opts.targetAccountId
+      ? (await readControlPlane()).accounts.find((item) => item.id === opts.targetAccountId && item.platform === platform) || null
+      : null;
+    let account = opts.targetAccountId
+      ? opts.allowUnhealthyTarget
+        ? targetAccount
+        : null
+      : await pickAccount(platform, exclude, { model });
     while (account) {
-      const allowed = await canDispatch(platform, isCanaryAccount(account));
+      const allowed = opts.kind === "inspection" || await canDispatch(platform, isCanaryAccount(account));
       if (!allowed) {
         return {
           ok: false as const,
@@ -416,8 +427,12 @@ async function enqueue(
           const retry = await coordSetNx(`account-lease:${account.id}`, "pending", timeoutMs);
           if (retry) break;
         }
-        exclude.push(account.id);
-        account = await pickAccount(platform, exclude, { model });
+        if (opts.targetAccountId) {
+          account = null;
+        } else {
+          exclude.push(account.id);
+          account = await pickAccount(platform, exclude, { model });
+        }
         continue;
       }
       break;
@@ -447,6 +462,7 @@ async function enqueue(
       excludeAccountIds: exclude,
       proxyId: account.proxyId || undefined,
       kind: opts.kind,
+      inspectionId: opts.inspectionId,
       turns: opts.turns,
       selectorPackVersion:
         opts.kind === "canary" && opts.selectorPackVersion
@@ -744,7 +760,7 @@ export function finishJob(
     let url = result.url;
     let urls = (Array.isArray(result.urls) ? result.urls : []).filter((u: string) => typeof u === "string" && u) as string[];
     if (url && !urls.includes(url)) urls.unshift(url);
-    if ((job.platform === "gemini" || job.platform === "leonardo") && result.ok && job.kind !== "canary" && result.text !== "CANARY") {
+    if ((job.platform === "gemini" || job.platform === "leonardo") && result.ok && job.kind !== "canary" && job.kind !== "inspection" && result.text !== "CANARY") {
       const pending = urls.length ? urls : url ? [url] : [];
       const refHashes = job.referenceAssets?.length
         ? job.referenceAssets.map((asset) => asset.sha256)
@@ -803,7 +819,7 @@ export function finishJob(
         }));
       }
     }
-    if (urls.length && result.ok && (job.platform === "gemini" || job.platform === "leonardo") && job.kind !== "canary") {
+    if (urls.length && result.ok && (job.platform === "gemini" || job.platform === "leonardo") && job.kind !== "canary" && job.kind !== "inspection") {
       const needsPersist = urls.some((u) => u.startsWith("data:"));
       if (needsPersist) {
         const stored = await persistImageUrls(urls);
@@ -886,7 +902,13 @@ export function finishJob(
         if (Object.keys(capabilityPatch).length) {
           await patchAccount(acc.id, capabilityPatch as never);
         }
-        if (result.ok && has) {
+        if (job.kind === "inspection") {
+          await patchAccount(acc.id, {
+            lockedUntil: null,
+            inspectionId: null,
+            lastError: result.ok ? null : result.error || "登录态查看异常结束",
+          });
+        } else if (result.ok && has) {
           if (job.kind !== "canary" && isCanaryAccount(acc)) await recordCanaryResult(job.platform, true);
           await patchAccount(acc.id, {
             failCount: 0,

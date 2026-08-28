@@ -98,10 +98,17 @@ export async function enqueuePg(
   }
 
   const exclude = [...(opts.excludeAccountIds || [])];
-  let account = await pickAccount(platform, exclude, { model });
+  const targetAccount = opts.targetAccountId
+    ? (await readControlPlane()).accounts.find((item) => item.id === opts.targetAccountId && item.platform === platform) || null
+    : null;
+  let account = opts.targetAccountId
+    ? opts.allowUnhealthyTarget
+      ? targetAccount
+      : null
+    : await pickAccount(platform, exclude, { model });
   const until = new Date(Date.now() + timeoutMs).toISOString();
   while (account) {
-    const allowed = await canDispatch(platform, isCanaryAccount(account));
+    const allowed = opts.kind === "inspection" || await canDispatch(platform, isCanaryAccount(account));
     if (!allowed) {
       if (opts.idempotencyKey) await coordDel(`idem:${opts.idempotencyKey}`);
       return { ok: false as const, error: `PROVIDER circuit OPEN for ${platform}; refusing to consume the account pool` };
@@ -110,8 +117,12 @@ export async function enqueuePg(
     const sqlOk = redisOk ? await dbTryLockAccount(account.id, until) : false;
     if (redisOk && sqlOk) break;
     if (redisOk) await coordDel(`account-lease:${account.id}`);
-    exclude.push(account.id);
-    account = await pickAccount(platform, exclude, { model });
+    if (opts.targetAccountId) {
+      account = null;
+    } else {
+      exclude.push(account.id);
+      account = await pickAccount(platform, exclude, { model });
+    }
   }
   if (!account) {
     if (opts.idempotencyKey) await coordDel(`idem:${opts.idempotencyKey}`);
@@ -148,6 +159,7 @@ export async function enqueuePg(
     excludeAccountIds: exclude,
     proxyId: account.proxyId || undefined,
     kind: opts.kind,
+    inspectionId: opts.inspectionId,
     turns: opts.turns,
     selectorPackVersion:
       opts.kind === "canary" && opts.selectorPackVersion
@@ -416,7 +428,7 @@ export async function finishJobPg(
   if (result.url && !rawUrls.includes(result.url)) rawUrls.unshift(result.url);
   let url = result.url;
   let urls = rawUrls;
-  if ((current.platform === "gemini" || current.platform === "leonardo") && result.ok && current.kind !== "canary" && result.text !== "CANARY") {
+  if ((current.platform === "gemini" || current.platform === "leonardo") && result.ok && current.kind !== "canary" && current.kind !== "inspection" && result.text !== "CANARY") {
     const { validateJobImageUrls } = await import("./provider/image-result-validator");
     const { describeDataUrl } = await import("./provider/reference-verify");
     const pending = urls.length ? urls : url ? [url] : [];
@@ -476,7 +488,7 @@ export async function finishJobPg(
       }));
     }
   }
-  if (urls.length && result.ok && (current.platform === "gemini" || current.platform === "leonardo")) {
+  if (urls.length && result.ok && (current.platform === "gemini" || current.platform === "leonardo") && current.kind !== "inspection") {
     const needsPersist = urls.some((u) => u.startsWith("data:"));
     if (needsPersist) {
       const stored = await persistImageUrls(urls);
@@ -587,7 +599,13 @@ export async function finishJobPg(
       if (Object.keys(capabilityPatch).length) {
         await patchAccount(acc.id, capabilityPatch as never);
       }
-      if (result.ok && has) {
+      if (current.kind === "inspection") {
+        await patchAccount(acc.id, {
+          lockedUntil: null,
+          inspectionId: null,
+          lastError: result.ok ? null : result.error || "登录态查看异常结束",
+        });
+      } else if (result.ok && has) {
         if (current.kind !== "canary" && isCanaryAccount(acc)) await recordCanaryResult(current.platform, true);
         await patchAccount(acc.id, {
           failCount: 0,

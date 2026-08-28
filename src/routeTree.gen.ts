@@ -29,6 +29,9 @@ import { Route as InternalReadinessRouteImport } from './routes/internal/readine
 import { Route as V1ModelsRouteImport } from './routes/v1/models'
 import { Route as V1ResponsesRouteImport } from './routes/v1/responses'
 import { Route as ApiAccountsProbeRouteImport } from './routes/api/accounts/probe'
+import { Route as ApiAdminAccountAnalyticsRouteImport } from './routes/api/admin/account-analytics'
+import { Route as ApiAdminAccountChecksRouteImport } from './routes/api/admin/account-checks'
+import { Route as ApiAdminAccountInspectionsRouteImport } from './routes/api/admin/account-inspections'
 import { Route as ApiAdminAccountOperationsRouteImport } from './routes/api/admin/account-operations'
 import { Route as ApiAdminInvokeRouteImport } from './routes/api/admin/invoke'
 import { Route as ApiAdminLoginPackRouteImport } from './routes/api/admin/login-pack'
@@ -37,6 +40,7 @@ import { Route as ApiAdminPlaneRouteImport } from './routes/api/admin/plane'
 import { Route as ApiAdminSessionRouteImport } from './routes/api/admin/session'
 import { Route as ApiAdminWorkerKitRouteImport } from './routes/api/admin/worker-kit'
 import { Route as ApiMediaIdRouteImport } from './routes/api/media/$id'
+import { Route as ApiWorkerAccountInspectionsRouteImport } from './routes/api/worker/account-inspections'
 import { Route as ApiWorkerChunkRouteImport } from './routes/api/worker/chunk'
 import { Route as ApiWorkerControlRouteImport } from './routes/api/worker/control'
 import { Route as ApiWorkerMediaRouteImport } from './routes/api/worker/media'
@@ -147,6 +151,23 @@ const ApiAccountsProbeRoute = ApiAccountsProbeRouteImport.update({
   path: '/api/accounts/probe',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAdminAccountAnalyticsRoute =
+  ApiAdminAccountAnalyticsRouteImport.update({
+    id: '/api/admin/account-analytics',
+    path: '/api/admin/account-analytics',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiAdminAccountChecksRoute = ApiAdminAccountChecksRouteImport.update({
+  id: '/api/admin/account-checks',
+  path: '/api/admin/account-checks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminAccountInspectionsRoute =
+  ApiAdminAccountInspectionsRouteImport.update({
+    id: '/api/admin/account-inspections',
+    path: '/api/admin/account-inspections',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAdminAccountOperationsRoute =
   ApiAdminAccountOperationsRouteImport.update({
     id: '/api/admin/account-operations',
@@ -188,6 +209,12 @@ const ApiMediaIdRoute = ApiMediaIdRouteImport.update({
   path: '/api/media/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiWorkerAccountInspectionsRoute =
+  ApiWorkerAccountInspectionsRouteImport.update({
+    id: '/api/worker/account-inspections',
+    path: '/api/worker/account-inspections',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiWorkerChunkRoute = ApiWorkerChunkRouteImport.update({
   id: '/api/worker/chunk',
   path: '/api/worker/chunk',
@@ -255,6 +282,9 @@ export interface FileRoutesByFullPath {
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/admin/account-analytics': typeof ApiAdminAccountAnalyticsRoute
+  '/api/admin/account-checks': typeof ApiAdminAccountChecksRoute
+  '/api/admin/account-inspections': typeof ApiAdminAccountInspectionsRoute
   '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
@@ -263,6 +293,7 @@ export interface FileRoutesByFullPath {
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
   '/api/worker/media': typeof ApiWorkerMediaRoute
@@ -294,6 +325,9 @@ export interface FileRoutesByTo {
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/admin/account-analytics': typeof ApiAdminAccountAnalyticsRoute
+  '/api/admin/account-checks': typeof ApiAdminAccountChecksRoute
+  '/api/admin/account-inspections': typeof ApiAdminAccountInspectionsRoute
   '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
@@ -302,6 +336,7 @@ export interface FileRoutesByTo {
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
   '/api/worker/media': typeof ApiWorkerMediaRoute
@@ -334,6 +369,9 @@ export interface FileRoutesById {
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
+  '/api/admin/account-analytics': typeof ApiAdminAccountAnalyticsRoute
+  '/api/admin/account-checks': typeof ApiAdminAccountChecksRoute
+  '/api/admin/account-inspections': typeof ApiAdminAccountInspectionsRoute
   '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
@@ -342,6 +380,7 @@ export interface FileRoutesById {
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
   '/api/worker/media': typeof ApiWorkerMediaRoute
@@ -375,6 +414,9 @@ export interface FileRouteTypes {
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
+    | '/api/admin/account-analytics'
+    | '/api/admin/account-checks'
+    | '/api/admin/account-inspections'
     | '/api/admin/account-operations'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
@@ -383,6 +425,7 @@ export interface FileRouteTypes {
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
+    | '/api/worker/account-inspections'
     | '/api/worker/chunk'
     | '/api/worker/control'
     | '/api/worker/media'
@@ -414,6 +457,9 @@ export interface FileRouteTypes {
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
+    | '/api/admin/account-analytics'
+    | '/api/admin/account-checks'
+    | '/api/admin/account-inspections'
     | '/api/admin/account-operations'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
@@ -422,6 +468,7 @@ export interface FileRouteTypes {
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
+    | '/api/worker/account-inspections'
     | '/api/worker/chunk'
     | '/api/worker/control'
     | '/api/worker/media'
@@ -453,6 +500,9 @@ export interface FileRouteTypes {
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
+    | '/api/admin/account-analytics'
+    | '/api/admin/account-checks'
+    | '/api/admin/account-inspections'
     | '/api/admin/account-operations'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
@@ -461,6 +511,7 @@ export interface FileRouteTypes {
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
+    | '/api/worker/account-inspections'
     | '/api/worker/chunk'
     | '/api/worker/control'
     | '/api/worker/media'
@@ -493,6 +544,9 @@ export interface RootRouteChildren {
   V1ModelsRoute: typeof V1ModelsRoute
   V1ResponsesRoute: typeof V1ResponsesRoute
   ApiAccountsProbeRoute: typeof ApiAccountsProbeRoute
+  ApiAdminAccountAnalyticsRoute: typeof ApiAdminAccountAnalyticsRoute
+  ApiAdminAccountChecksRoute: typeof ApiAdminAccountChecksRoute
+  ApiAdminAccountInspectionsRoute: typeof ApiAdminAccountInspectionsRoute
   ApiAdminAccountOperationsRoute: typeof ApiAdminAccountOperationsRoute
   ApiAdminInvokeRoute: typeof ApiAdminInvokeRoute
   ApiAdminLoginPackRoute: typeof ApiAdminLoginPackRoute
@@ -501,6 +555,7 @@ export interface RootRouteChildren {
   ApiAdminSessionRoute: typeof ApiAdminSessionRoute
   ApiAdminWorkerKitRoute: typeof ApiAdminWorkerKitRoute
   ApiMediaIdRoute: typeof ApiMediaIdRoute
+  ApiWorkerAccountInspectionsRoute: typeof ApiWorkerAccountInspectionsRoute
   ApiWorkerChunkRoute: typeof ApiWorkerChunkRoute
   ApiWorkerControlRoute: typeof ApiWorkerControlRoute
   ApiWorkerMediaRoute: typeof ApiWorkerMediaRoute
@@ -654,6 +709,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAccountsProbeRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/admin/account-analytics': {
+      id: '/api/admin/account-analytics'
+      path: '/api/admin/account-analytics'
+      fullPath: '/api/admin/account-analytics'
+      preLoaderRoute: typeof ApiAdminAccountAnalyticsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/account-checks': {
+      id: '/api/admin/account-checks'
+      path: '/api/admin/account-checks'
+      fullPath: '/api/admin/account-checks'
+      preLoaderRoute: typeof ApiAdminAccountChecksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/account-inspections': {
+      id: '/api/admin/account-inspections'
+      path: '/api/admin/account-inspections'
+      fullPath: '/api/admin/account-inspections'
+      preLoaderRoute: typeof ApiAdminAccountInspectionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/admin/account-operations': {
       id: '/api/admin/account-operations'
       path: '/api/admin/account-operations'
@@ -708,6 +784,13 @@ declare module '@tanstack/react-router' {
       path: '/api/media/$id'
       fullPath: '/api/media/$id'
       preLoaderRoute: typeof ApiMediaIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/worker/account-inspections': {
+      id: '/api/worker/account-inspections'
+      path: '/api/worker/account-inspections'
+      fullPath: '/api/worker/account-inspections'
+      preLoaderRoute: typeof ApiWorkerAccountInspectionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/worker/chunk': {
@@ -797,6 +880,9 @@ const rootRouteChildren: RootRouteChildren = {
   V1ModelsRoute: V1ModelsRoute,
   V1ResponsesRoute: V1ResponsesRoute,
   ApiAccountsProbeRoute: ApiAccountsProbeRoute,
+  ApiAdminAccountAnalyticsRoute: ApiAdminAccountAnalyticsRoute,
+  ApiAdminAccountChecksRoute: ApiAdminAccountChecksRoute,
+  ApiAdminAccountInspectionsRoute: ApiAdminAccountInspectionsRoute,
   ApiAdminAccountOperationsRoute: ApiAdminAccountOperationsRoute,
   ApiAdminInvokeRoute: ApiAdminInvokeRoute,
   ApiAdminLoginPackRoute: ApiAdminLoginPackRoute,
@@ -805,6 +891,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAdminSessionRoute: ApiAdminSessionRoute,
   ApiAdminWorkerKitRoute: ApiAdminWorkerKitRoute,
   ApiMediaIdRoute: ApiMediaIdRoute,
+  ApiWorkerAccountInspectionsRoute: ApiWorkerAccountInspectionsRoute,
   ApiWorkerChunkRoute: ApiWorkerChunkRoute,
   ApiWorkerControlRoute: ApiWorkerControlRoute,
   ApiWorkerMediaRoute: ApiWorkerMediaRoute,

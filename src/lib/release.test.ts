@@ -10,7 +10,7 @@ test("release identity exposes version, exact commit, schema, and normalized bui
   assert.equal(APP_VERSION, "0.9.0-rc2");
   assert.equal(release.commit, "abcdef1234567890abcdef1234567890abcdef12");
   assert.equal(release.buildTime, "2026-08-27T16:00:00.000Z");
-  assert.equal(release.schema, 5);
+  assert.equal(release.schema, 6);
   assert.equal(release.api, "v1");
 });
 
