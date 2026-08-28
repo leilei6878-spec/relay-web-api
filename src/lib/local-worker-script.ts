@@ -3232,7 +3232,7 @@ def run_account_inspection(body, ctx=None):
     except Exception:
         state_out = None
     pst = detect_page_state(page, body.get("platform") or "chatgpt")
-    actual = selected_model_label(page) if body.get("platform") == "leonardo" else (body.get("model") or "")
+    actual = body.get("model") or ""
     inspection_gateway(ctx, "POST", payload={
         "inspectionId": ctx.inspection_id,
         "status": "closed",
@@ -3287,6 +3287,13 @@ def exec_job_run(body):
             result = run_chat(body, ctx)
         return attach_runtime(ctx, result)
     except Exception as e:
+        if body.get("kind") == "inspection":
+            ctx.inspection_id = str(body.get("inspectionId") or "")
+            inspection_gateway(ctx, "POST", payload={
+                "inspectionId": ctx.inspection_id,
+                "status": "failed",
+                "closeReason": str(e)[:500],
+            })
         return attach_runtime(ctx, {"ok": False, "error": "WORKER_CRASH: %s" % str(e)[:240], "fault": "worker"})
     finally:
         ACTIVE -= 1

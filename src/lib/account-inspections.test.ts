@@ -29,6 +29,9 @@ test("worker inspection uses account-bound browser state without exposing raw co
   assert.match(script, /page\.screenshot\(type="jpeg"/);
   assert.match(script, /sessionState/);
   assert.doesNotMatch(script, /remote-debugging-port.*inspection/i);
+  const inspectionBlock = script.slice(script.indexOf("def run_account_inspection"), script.indexOf("def exec_job(body)"));
+  assert.doesNotMatch(inspectionBlock, /selected_model_label/);
+  assert.match(script, /body\.get\("kind"\) == "inspection"[\s\S]{0,400}"status": "failed"/);
 });
 
 test("inspection jobs bypass paid image validation and provider counters", async () => {
