@@ -42,6 +42,11 @@ export function listEligible(
   now = Date.now(),
   requestedModel?: string,
 ) {
+  const usedAt = (value: unknown) => {
+    if (value instanceof Date) return value.getTime();
+    const parsed = Date.parse(typeof value === "string" ? value : "");
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
   return accounts
     .filter(
       (a) =>
@@ -49,7 +54,7 @@ export function listEligible(
         !excludeIds.includes(a.id) &&
         !eligibilityReason(a, proxies, settings, now, requestedModel),
     )
-    .sort((a, b) => (a.lastUsedAt ?? "").localeCompare(b.lastUsedAt ?? ""));
+    .sort((a, b) => usedAt(a.lastUsedAt) - usedAt(b.lastUsedAt));
 }
 
 export function proxyCapacity(proxy: Proxy, accounts: Account[]) {

@@ -1,5 +1,11 @@
 import { getSql } from "./db";
 import type { Account, GatewaySettings, Proxy } from "./types";
+
+function isoTimestamp(value: unknown, fallback: string | null = null) {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? fallback : value.toISOString();
+  if (typeof value === "string") return value;
+  return fallback;
+}
 import type { ApiKeyRecord } from "./api-keys";
 import { recoveryDisposition, resetSubmissionForRetry } from "./job-recovery";
 
@@ -101,8 +107,8 @@ export async function dbLoadPlane(): Promise<PlaneRow | null> {
       session_warning: string | null;
       fail_count: number | null;
       total_requests: number | null;
-      last_used_at: string | null;
-      last_probe_at: string | null;
+      last_used_at: string | Date | null;
+      last_probe_at: string | Date | null;
       session_version: number | null;
     }>(
       `select extra, status, locked_until, last_error, session_warning, fail_count, total_requests, last_used_at, last_probe_at, session_version
@@ -123,8 +129,8 @@ export async function dbLoadPlane(): Promise<PlaneRow | null> {
           sessionWarning: r.session_warning ?? null,
           failCount: r.fail_count ?? extra.failCount ?? 0,
           totalRequests: r.total_requests ?? extra.totalRequests ?? 0,
-          lastUsedAt: r.last_used_at ?? extra.lastUsedAt ?? null,
-          lastProbeAt: r.last_probe_at ?? extra.lastProbeAt ?? null,
+          lastUsedAt: isoTimestamp(r.last_used_at, extra.lastUsedAt ?? null),
+          lastProbeAt: isoTimestamp(r.last_probe_at, extra.lastProbeAt ?? null),
           sessionVersion: r.session_version ?? extra.sessionVersion ?? 0,
         } satisfies Account;
       })
