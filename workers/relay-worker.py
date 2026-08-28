@@ -695,24 +695,24 @@ def count_gemini_refs(page):
 def count_leonardo_refs(page):
     try:
         n = page.evaluate("""() => {
-          const remove = [...document.querySelectorAll('button')].filter((b) => {
+          const visible = (el) => {
+            const r = el.getBoundingClientRect();
+            const st = getComputedStyle(el);
+            return r.width >= 16 && r.height >= 16 && st.display !== 'none' && st.visibility !== 'hidden';
+          };
+          const ta = document.querySelector('#home-prompt-textarea, textarea[placeholder*="prompt" i], textarea[placeholder*="image" i], [data-testid*="prompt"] textarea, textarea');
+          const root = ta ? (ta.closest('[data-testid="prompt-container"]') || ta.parentElement) : null;
+          if (!root) return 0;
+          const remove = [...root.querySelectorAll('button')].filter((b) => {
             const a = (b.getAttribute('aria-label') || '').toLowerCase();
             const t = (b.innerText || '').trim().toLowerCase();
-            return /remove|delete|clear reference|remove image/.test(a) || t === '×' || t === 'x';
+            return visible(b) && (/remove reference|remove image|clear reference/.test(a) || t === '×' || t === 'x');
           });
-          const ta = document.querySelector('#home-prompt-textarea, textarea, div[contenteditable="true"]');
-          let root = ta ? ta.parentElement : document.body;
-          for (let i = 0; i < 6 && root && root !== document.body; i++) root = root.parentElement;
-          root = root || document.body;
           const thumbs = [...root.querySelectorAll('img')].filter((im) => {
             const r = im.getBoundingClientRect();
-            const w = im.naturalWidth || im.width || r.width || 0;
-            const h = im.naturalHeight || im.height || r.height || 0;
-            return w >= 24 && w <= 320 && h >= 24 && h <= 320 && r.width >= 24 && r.height >= 24 && r.bottom > 0 && r.top < window.innerHeight;
+            return visible(im) && r.width <= 320 && r.height <= 320 && r.bottom > 0 && r.top < window.innerHeight;
           });
-          const nRemove = remove.length;
-          const nThumbs = thumbs.length;
-          return nRemove > 0 ? nRemove : nThumbs;
+          return Math.max(remove.length, thumbs.length);
         }""")
         return int(n or 0)
     except Exception:
@@ -1109,14 +1109,21 @@ def cleanup_leonardo(page):
         for _ in range(8):
             if count_leonardo_refs(page) <= 0:
                 break
-            page.evaluate("""() => {
-              const b = [...document.querySelectorAll('button')].find((el) => {
+            removed = page.evaluate("""() => {
+              const ta = document.querySelector('#home-prompt-textarea, textarea[placeholder*="prompt" i], textarea[placeholder*="image" i], [data-testid*="prompt"] textarea, textarea');
+              const root = ta ? (ta.closest('[data-testid="prompt-container"]') || ta.parentElement) : null;
+              if (!root) return false;
+              const b = [...root.querySelectorAll('button')].find((el) => {
                 const a = (el.getAttribute('aria-label') || '').toLowerCase();
                 const t = (el.innerText || '').trim();
-                return /remove|delete|clear reference|remove image/.test(a) || t === '×' || t === 'x';
+                return /remove reference|remove image|clear reference/.test(a) || t === '×' || t === 'x';
               });
-              if (b) b.click();
+              if (!b) return false;
+              b.click();
+              return true;
             }""")
+            if not removed:
+                break
             try:
                 page.wait_for_timeout(180)
             except Exception:

@@ -188,6 +188,13 @@ test("leonardo img2img attaches refs before generate and fail-fasts", () => {
   assert.ok(sizeAfter > attachIdx && sizeAfter < readyIdx, "re-apply size after refs");
   assert.ok(baselineIdx > readyIdx, "boundary after refs, not before");
   assert.ok(clickIdx > baselineIdx, "click generate after boundary");
+  const countRefs = s.slice(s.indexOf("def count_leonardo_refs"), s.indexOf("def attach_images"));
+  assert.match(countRefs, /closest\('\[data-testid="prompt-container"\]'\)/);
+  assert.match(countRefs, /root\.querySelectorAll\('button'\)/);
+  assert.doesNotMatch(countRefs, /document\.querySelectorAll\('button'\)/);
+  const cleanup = s.slice(s.indexOf("def cleanup_leonardo"), s.indexOf("def ensure_gemini_ready"));
+  assert.match(cleanup, /closest\('\[data-testid="prompt-container"\]'\)/);
+  assert.doesNotMatch(cleanup, /document\.querySelectorAll\('button'\)/);
 });
 
 test("ref_body_sizes and extract_prompt_images keep leonardo refs", () => {
