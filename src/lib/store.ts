@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { defaultSelectors, listEligible, proxyCapacity } from "./eligibility";
 import { parseStorageState } from "./session-file";
+import { createPendingAccount } from "./control-plane-client";
 import type {
   Account,
   AccountStatus,
@@ -80,22 +81,7 @@ export const useGateway = create<State & Actions>()(
       hydrated: true,
       setHydrated: (v) => set({ hydrated: v }),
       addAccount: (data) => {
-        const account: Account = {
-          id: uid(),
-          platform: data.platform,
-          email: data.email,
-          remark: data.remark,
-          status: "pending_login",
-          proxyId: data.proxyId,
-          sessionPath: null,
-          failCount: 0,
-          totalRequests: 0,
-          lastUsedAt: null,
-          createdAt: nowIso(),
-          lockedUntil: null,
-          lastError: null,
-          lastProbeAt: null,
-        };
+        const account = createPendingAccount(data);
         set({ accounts: [account, ...get().accounts] });
         return account;
       },

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { diagnoseSessionFile, getApiKey, saveSessionFile } from "@/lib/gateway";
+import { createPendingAccount, persistControlPlane } from "@/lib/control-plane-client";
 import { whyBlocked } from "@/lib/readiness";
 import { useGateway } from "@/lib/store";
 import { safeName } from "@/lib/session-file";
@@ -345,21 +346,50 @@ function AccountsView() {
 }
 
 function AddDialog() {
-  const addAccount = useGateway((s) => s.addAccount);
   const proxies = useGateway((s) => s.proxies);
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const [remark, setRemark] = useState("");
   const [platform, setPlatform] = useState<Platform>("chatgpt");
   const [proxyId, setProxyId] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  function submit() {
+  async function submit() {
     if (!email.trim()) {
       toast.error("请填写邮箱");
       return;
     }
-    addAccount({ platform, email: email.trim(), remark, proxyId: proxyId || null });
-    toast.success("已加入账号池。下一步：绑定代理，再点登录");
+    const state = useGateway.getState();
+    const normalizedEmail = email.trim();
+    if (
+      state.accounts.some(
+        (account) =>
+          account.platform === platform && account.email.toLowerCase() === normalizedEmail.toLowerCase(),
+      )
+    ) {
+      toast.error("该平台已存在这个账号");
+      return;
+    }
+    const account = createPendingAccount({
+      platform,
+      email: normalizedEmail,
+      remark,
+      proxyId: proxyId || null,
+    });
+    const nextAccounts = [account, ...state.accounts];
+    setSaving(true);
+    const saved = await persistControlPlane({
+      accounts: nextAccounts,
+      proxies: state.proxies,
+      settings: state.settings,
+    });
+    setSaving(false);
+    if (!saved.ok) {
+      toast.error(saved.error);
+      return;
+    }
+    useGateway.setState({ accounts: nextAccounts });
+    toast.success("账号已保存。下一步：绑定代理，再点登录");
     setEmail("");
     setRemark("");
     setOpen(false);
@@ -405,8 +435,8 @@ function AddDialog() {
               </SelectContent>
             </Select>
           </Field>
-          <Button className="w-full" onClick={submit}>
-            加入池
+          <Button className="w-full" disabled={saving} onClick={() => void submit()}>
+            {saving ? "保存中…" : "加入池"}
           </Button>
         </div>
       </DialogContent>

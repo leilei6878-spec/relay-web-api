@@ -14,7 +14,7 @@ import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "rea
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
-import { saveControlPlane } from "@/lib/gateway";
+import { persistControlPlane } from "@/lib/control-plane-client";
 import { nextStep } from "@/lib/readiness";
 import { useGateway } from "@/lib/store";
 
@@ -192,8 +192,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     const snap = JSON.stringify({ accounts, proxies, settings });
     if (!planeSnap.current || snap === planeSnap.current) return;
     const t = setTimeout(() => {
-      void saveControlPlane({ data: { accounts, proxies, settings } }).then(() => {
-        planeSnap.current = snap;
+      void persistControlPlane({ accounts, proxies, settings }).then((result) => {
+        if (result.ok) {
+          planeSnap.current = snap;
+          setPlaneError("");
+          return;
+        }
+        setPlaneError(result.error);
+        if (result.status === 401) setNeedLogin(true);
       });
     }, 400);
     return () => clearTimeout(t);
