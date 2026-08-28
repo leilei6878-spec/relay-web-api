@@ -174,17 +174,20 @@ test("worker maps 1264x848 to 3:2 and 16:9 size token to 1376x768", () => {
 
 test("leonardo img2img attaches refs before generate and fail-fasts", () => {
   const s = localWorkerScript();
+  assert.match(s, /def click_leonardo_model/);
   assert.match(s, /def wait_leonardo_generate_ready/);
   assert.match(s, /def ref_body_sizes/);
   assert.match(s, /generate did not start \(img2img\)/);
   assert.match(s, /generate did not become ready after refs/);
   assert.match(s, /reference image did not attach/);
   const attachIdx = s.indexOf("up_err = attach_leonardo_refs");
+  const restoreModelIdx = s.indexOf("post_ref_model = click_leonardo_model", attachIdx);
   const readyIdx = s.indexOf("wait_leonardo_generate_ready(page, 20000)");
   const baselineIdx = s.lastIndexOf("create_generation_boundary(page, ctx, \"leonardo\", prompt)");
   const clickIdx = s.indexOf('print("leonardo clicking generate"');
   const sizeAfter = s.indexOf("confirm_leonardo_image_size(page, want_size, aspect, tier, gpt)", attachIdx);
   assert.ok(attachIdx > 0 && readyIdx > attachIdx, "wait generate ready after attach");
+  assert.ok(restoreModelIdx > attachIdx && restoreModelIdx < sizeAfter, "restore exact model before re-applying size");
   assert.ok(sizeAfter > attachIdx && sizeAfter < readyIdx, "re-apply size after refs");
   assert.ok(baselineIdx > readyIdx, "boundary after refs, not before");
   assert.ok(clickIdx > baselineIdx, "click generate after boundary");
@@ -195,6 +198,10 @@ test("leonardo img2img attaches refs before generate and fail-fasts", () => {
   const cleanup = s.slice(s.indexOf("def cleanup_leonardo"), s.indexOf("def ensure_gemini_ready"));
   assert.match(cleanup, /closest\('\[data-testid="prompt-container"\]'\)/);
   assert.doesNotMatch(cleanup, /document\.querySelectorAll\('button'\)/);
+  const modelRestore = s.slice(s.indexOf("def click_leonardo_model"), s.indexOf("def apply_gemini_aspect"));
+  assert.match(modelRestore, /lines\.includes\(want\)/);
+  assert.match(modelRestore, /model-selector-trigger/);
+  assert.doesNotMatch(modelRestore, /innerText\|\|''\)\.includes\(want\)/);
 });
 
 test("ref_body_sizes and extract_prompt_images keep leonardo refs", () => {

@@ -3547,6 +3547,53 @@ def confirm_leonardo_image_size(page, want_size, aspect=None, tier=None, gpt=Fal
         error = "LEONARDO_DOM_CHANGED: Image Dimensions stayed %dx%d, want %s %s" % (shown_w, shown_h, aspect, want_size)
     return False, shown_w, shown_h, error
 
+def click_leonardo_model(page, label):
+    label = str(label or "").strip()
+    if not label:
+        return ""
+
+    def click_exact_option():
+        try:
+            return page.evaluate(
+                """(want) => {
+                  const vis = (el) => {
+                    const r = el.getBoundingClientRect();
+                    const st = getComputedStyle(el);
+                    return r.width > 4 && r.height > 4 && r.bottom > 0 && r.top < window.innerHeight && st.visibility !== 'hidden' && st.display !== 'none';
+                  };
+                  const selector = '[role=menuitem], [role=option], [data-slot=dropdown-menu-item], [data-radix-collection-item], [role=listbox] button, [role=menu] button';
+                  const hits = [...document.querySelectorAll(selector)].filter((el) => {
+                    if (!vis(el) || el.getAttribute('data-testid') === 'model-selector-trigger') return false;
+                    const lines = (el.innerText || '').split('\\\\n').map((line) => line.trim()).filter(Boolean);
+                    return lines.includes(want) || (el.innerText || '').trim() === want;
+                  });
+                  const hit = hits[hits.length - 1];
+                  if (!hit) return '';
+                  hit.click();
+                  return (hit.innerText || '').trim().split('\\\\n').filter(Boolean).pop() || want;
+                }""",
+                label,
+            ) or ""
+        except Exception:
+            return ""
+
+    clicked = click_exact_option()
+    if clicked:
+        return "exact:" + str(clicked)
+    for spec in ('[data-testid="model-selector-trigger"]', 'button:has-text("Model")', '[aria-label="Model"]', '[aria-label^=Model]'):
+        try:
+            loc = page.locator(spec).first
+            if loc.count() == 0:
+                continue
+            loc.click(timeout=1400, force=True)
+            page.wait_for_timeout(500)
+        except Exception:
+            continue
+        clicked = click_exact_option()
+        if clicked:
+            return "open+exact:" + str(clicked)
+    return ""
+
 def apply_gemini_aspect(page, aspect):
     aspect = (aspect or "1:1").strip()
     try:
@@ -3936,15 +3983,12 @@ def run_leonardo(body, ctx=None):
             except Exception:
                 pass
             return {"ok": False, "error": "LEONARDO_MODEL_UNAVAILABLE: " + model + " url=" + (page.url or ""), "fault": "account", "pageState": "MODEL_UNAVAILABLE", "backendMode": "web_account", "availableModels": available, "modelActual": shown or ""}
-        try:
-            page.get_by_text(picked, exact=False).first.click(timeout=1500, force=True)
-        except Exception:
-            page.evaluate("(t) => { const n=[...document.querySelectorAll('[role=menuitem],[role=option],[data-slot=dropdown-menu-item],button')].find(e => (e.innerText||'').includes(t) && (e.innerText||'').trim().length >= 8); if(n) n.click(); }", picked)
+        model_click = click_leonardo_model(page, picked)
+        if not model_click:
+            return fail_job(ctx, "LEONARDO_DOM_CHANGED: cannot select exact model " + picked, "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": shown or ""})
         page.wait_for_timeout(400)
         shown2 = selected_model_label(page)
-        if shown2 and pick_model_label([shown2], labels):
-            picked = shown2
-        print("leonardo picked=%s shown=%s" % (picked, shown2), flush=True)
+        print("leonardo picked=%s shown=%s click=%s" % (picked, shown2, model_click), flush=True)
         if kind == "canary":
             canary_aspect = body.get("aspect") or size_to_aspect(want_size)
             canary_w, canary_h = parse_size_wh(want_size)
@@ -4025,6 +4069,15 @@ def run_leonardo(body, ctx=None):
             miss = attachment_incomplete(requested, attached if isinstance(attached, int) else (1 if attached else 0))
             if miss:
                 return fail_job(ctx, miss, "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": picked, "attachedReferenceCount": attached, "requestedReferenceCount": requested})
+            post_ref_model = click_leonardo_model(page, picked)
+            print("leonardo post-ref model target=%s click=%s" % (picked, post_ref_model), flush=True)
+            if not post_ref_model:
+                return fail_job(ctx, "LEONARDO_DOM_CHANGED: reference changed model and exact restore failed", "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": selected_model_label(page) or ""})
+            page.wait_for_timeout(500)
+            attached = wait_leonardo_refs(page, 4000)
+            miss = attachment_incomplete(requested, attached if isinstance(attached, int) else (1 if attached else 0))
+            if miss:
+                return fail_job(ctx, miss + " after model restore", "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": picked, "attachedReferenceCount": attached, "requestedReferenceCount": requested})
             filled = leonardo_js_fill(page, prompt)
             print("leonardo fill js", filled, flush=True)
             if not filled:
