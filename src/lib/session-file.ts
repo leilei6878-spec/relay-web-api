@@ -959,6 +959,11 @@ def open_leonardo_chrome(p, proxy):
     print("只会打开一个专用 Chrome 窗口。请只在这个窗口登录，不要用日常浏览器。")
     kill_helper_chrome(dest)
     time.sleep(0.4)
+    for _ in range(5):
+        shutil.rmtree(dest, ignore_errors=True)
+        if not os.path.exists(dest):
+            break
+        time.sleep(0.2)
     if live_data:
         clone_chrome_profile(live_data, dest)
     else:

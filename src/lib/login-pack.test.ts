@@ -45,4 +45,8 @@ test("Leonardo login pack never loops tab creation or steals focus", () => {
   assert.doesNotMatch(script, /if click_canva_sso\(leo_login\)/);
   assert.match(script, /助手不会自动点击或抢焦点/);
   assert.match(script, /助手不会重复建页/);
+  const kill = script.indexOf("kill_helper_chrome(dest)");
+  const wipe = script.indexOf("shutil.rmtree(dest, ignore_errors=True)", kill);
+  const clone = script.indexOf("clone_chrome_profile(live_data, dest)", wipe);
+  assert.ok(kill > 0 && wipe > kill && clone > wipe, "wipe only the dedicated profile before cloning");
 });
