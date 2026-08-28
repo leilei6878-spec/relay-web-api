@@ -45,7 +45,7 @@ At takeover:
 | 4 | Image provenance/validator/media closure | COMPLETE | Commit `ac0ae39`; frozen refs, strict confidence/assets/history, DOM correlation, WebP, WARM_IDLE fail-closed. |
 | 5 | Canary + selector self-healing closure | COMPLETE | Commit `71fd1f1`; distributed dispatch lease, real paid canary, shared selector state, finish-path fingerprint/promotion. |
 | 6 | Provider/capability/key backpressure | COMPLETE | Commit `71fd1f1`; global/provider/chat/image/key caps, file + distributed PG admission, 429/Retry-After. |
-| 7 | Full local automated campaign | COMPLETE | Relay 226/226; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
+| 7 | Full local automated campaign | COMPLETE | Relay 233/233; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
 | 7B | Production recovery + Compose contract | COMPLETE | Versioned/checksummed backup includes secrets/sessions; DB backup/restore fail closed; Compose has no required-secret defaults and host health port is consistently 8088. CLI/contract tests 6/6 pass. |
 | 7C | Release identity | COMPLETE | `0.9.0-rc2`; health/readiness/runtime expose exact commit and build time; production readiness rejects an unknown commit. |
 | 7D | Dev + production browser render | COMPLETE | Desktop and 390×844 mobile render with visible content, no horizontal overflow, and zero browser-console warnings/errors. Production-only partial runtime response crash was found, fixed, rebuilt, and retested. |
@@ -107,10 +107,12 @@ runs. No zero is inferred from unit tests:
 - `2425cb4` — recover prompt-correlated results from reused Leonardo cards
 - `e01bf54` — deduplicate the `image` / `images` reference aliases
 - `d49a371` — preserve PNG/JPEG/WebP extensions for frozen reference uploads
+- `0adce26` — add a standalone administrator username/password login page
+- `186ace9` — use a Compose-safe scrypt password-hash representation
 
 ## Phase 7 evidence (2026-08-28)
 
-- `npm run test:relay`: **226/226 PASS**.
+- `npm run test:relay`: **233/233 PASS**.
 - `npm test`: **101/101 PASS**.
 - `npm run test:ci`: Relay **212/212 PASS** at the original full CI checkpoint plus multi-process/contract suite
   **21/21 PASS**.
@@ -132,7 +134,7 @@ Temporary dependency cache content is never committed.
 ## Phase 10 production evidence (2026-08-28)
 
 - Production health/readiness: HTTP 200, version 0.9.0-rc2, schema 4,
-  exact implementation commit d49a371213fe63a1022c8cd17190dc007ac7b371,
+  exact implementation commit 186ace9a421f412cb45e024c41a9359cf20a76a3,
   zero blockers; Postgres, Redis, object media and Worker are ready.
 - Anonymous /api/admin/session: HTTP 401 and no Set-Cookie.
 - Real Chat: exact non-stream marker PASS; exact SSE marker plus done PASS;
@@ -167,3 +169,7 @@ Temporary dependency cache content is never committed.
   WARM_IDLE. Pre-submit upload failures stayed PREPARING/SAFE. URL/hash
   deduplication plus true file extensions closed the production upload path,
   after which the real image-to-image request completed successfully.
+- Standalone administrator login is live at `/login`. The configured password
+  is stored only as a random-salt scrypt hash. Production checks passed for the
+  page, generic wrong-password response, HttpOnly cookie, successful protected
+  account-pool read and unauthorized data pre-render gating.
