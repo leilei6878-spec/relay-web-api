@@ -45,7 +45,7 @@ At takeover:
 | 4 | Image provenance/validator/media closure | COMPLETE | Commit `ac0ae39`; frozen refs, strict confidence/assets/history, DOM correlation, WebP, WARM_IDLE fail-closed. |
 | 5 | Canary + selector self-healing closure | COMPLETE | Commit `71fd1f1`; distributed dispatch lease, real paid canary, shared selector state, finish-path fingerprint/promotion. |
 | 6 | Provider/capability/key backpressure | COMPLETE | Commit `71fd1f1`; global/provider/chat/image/key caps, file + distributed PG admission, 429/Retry-After. |
-| 7 | Full local automated campaign | COMPLETE | Relay 221/221; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
+| 7 | Full local automated campaign | COMPLETE | Relay 222/222; core 101/101; CI operations 21/21; chaos 18/18; 120s reliability 228/228; real local Chromium lifecycle 500/500; typecheck/build pass; lint 0 errors. |
 | 7B | Production recovery + Compose contract | COMPLETE | Versioned/checksummed backup includes secrets/sessions; DB backup/restore fail closed; Compose has no required-secret defaults and host health port is consistently 8088. CLI/contract tests 6/6 pass. |
 | 7C | Release identity | COMPLETE | `0.9.0-rc2`; health/readiness/runtime expose exact commit and build time; production readiness rejects an unknown commit. |
 | 7D | Dev + production browser render | COMPLETE | Desktop and 390×844 mobile render with visible content, no horizontal overflow, and zero browser-console warnings/errors. Production-only partial runtime response crash was found, fixed, rebuilt, and retested. |
@@ -99,10 +99,11 @@ runs. No zero is inferred from unit tests:
 - `63c7708` — persist account additions explicitly and surface save failures
 - `635f909` — select a Leonardo canary model compatible with the assigned account
 - `c46eb82` — generate browser UIDs when public HTTP lacks crypto.randomUUID
+- `68bb245` — stop Leonardo login helper tab recreation and focus stealing
 
 ## Phase 7 evidence (2026-08-28)
 
-- `npm run test:relay`: **221/221 PASS**.
+- `npm run test:relay`: **222/222 PASS**.
 - `npm test`: **101/101 PASS**.
 - `npm run test:ci`: Relay **212/212 PASS** at the original full CI checkpoint plus multi-process/contract suite
   **21/21 PASS**.
@@ -124,7 +125,7 @@ Temporary dependency cache content is never committed.
 ## Phase 10 production evidence (2026-08-28)
 
 - Production health/readiness: HTTP 200, version 0.9.0-rc2, schema 4,
-  exact implementation commit c46eb82d5c50955a359114b6a9de76461dfd0a2e,
+  exact implementation commit 68bb2454ae7bc0a1988956fff0d664d4c0409d83,
   zero blockers; Postgres, Redis, object media and Worker are ready.
 - Anonymous /api/admin/session: HTTP 401 and no Set-Cookie.
 - Real Chat: exact non-stream marker PASS; exact SSE marker plus done PASS;
@@ -143,6 +144,10 @@ Temporary dependency cache content is never committed.
   crypto.randomUUID is unavailable outside secure contexts. The UID generator
   now falls back to crypto.getRandomValues. Production Chromium verified the
   exact insecure runtime plus add/reload/delete/reload with zero console errors.
+- The Leonardo Windows login helper was found recreating tabs during OAuth and
+  periodically auto-clicking/stealing focus. The deployed pack now opens Canva
+  and Leonardo once at startup and then performs read-only session detection;
+  production pack inspection found one startup call and zero SSO/focus calls.
 - Two healthy production accounts are marked Canary; Gemini remains without
   an account. The default structural interval is about seven minutes and paid
   image interval about three hours.

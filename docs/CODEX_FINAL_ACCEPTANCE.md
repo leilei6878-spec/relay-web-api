@@ -6,7 +6,7 @@ Overall status: **PARTIAL**
 
 Takeover HEAD: b30a9f7d52653344d8512f5479b8f882c88500d0
 
-Final implementation HEAD: c46eb82d5c50955a359114b6a9de76461dfd0a2e
+Final implementation HEAD: 68bb2454ae7bc0a1988956fff0d664d4c0409d83
 
 Production currently serves the final implementation HEAD. No known P0 remains
 open in the deployed code. Overall acceptance stays PARTIAL because the
@@ -17,7 +17,7 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 | Gate | Status | Evidence |
 |---|---|---|
-| Relay unit/integration | **PASS** | 221/221 |
+| Relay unit/integration | **PASS** | 222/222 |
 | Core/template contract | **PASS** | 101/101 |
 | Multi-process/operations contract | **PASS** | 21/21 |
 | Two-gateway chaos | **PASS** | 18/18; fenced stale results and restart recovery pass |
@@ -27,7 +27,7 @@ five-account live concurrency, and one-hour live soak were not completed.
 | Production dependencies | **PASS** | npm audit --omit=dev reports 0 vulnerabilities |
 | Dev + built browser render | **PASS** | Desktop and 390×844 mobile; no overflow or error heading |
 | Pre-deploy backup | **PASS** | Verified checksummed DB, media, MinIO, configuration and Git metadata backup |
-| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit c46eb82; DB/Redis/object media/worker ready |
+| Production deployment | **PASS** | External health and readiness return 0.9.0-rc2, schema 4 and exact commit 68bb245; DB/Redis/object media/worker ready |
 | Anonymous admin boundary | **PASS** | External /api/admin/session returns HTTP 401 and no Set-Cookie |
 | Account add persistence | **PASS** | Public insecure HTTP UI add → refresh → delete → refresh passed without randomUUID; console errors 0; test record removed |
 | Live Chat | **PARTIAL** | Real non-stream and SSE marker requests succeeded; one earlier request ended RESULT_UNCERTAIN; 200-request matrix not run |
@@ -40,14 +40,14 @@ five-account live concurrency, and one-hour live soak were not completed.
 
 2. **最终 HEAD — PASS.**
    Final implementation HEAD is
-   c46eb82d5c50955a359114b6a9de76461dfd0a2e. The final report commit is
+   68bb2454ae7bc0a1988956fff0d664d4c0409d83. The final report commit is
    documentation-only and follows this implementation HEAD.
 
 3. **本次 commits — PASS.**
    6dc58a7, 5e2bb60, d0ba670, c429950, 1ff9844, 06cca41,
    ac0ae39, 71fd1f1, 68e60ed, 1035633, 47be2f3, 9e4fc8b,
    d9ccd60, 1e1c207, 9860071, 7206861, e286563, 9969bfa,
-   63c7708, 635f909 and c46eb82.
+   63c7708, 635f909, c46eb82 and 68bb245.
 
 4. **还存在什么 P0 — PASS.**
    No known P0 remains open in the deployed candidate. The live anonymous
@@ -235,7 +235,7 @@ required full live campaigns.
 ## Production state at report time
 
 - **PASS:** external health and readiness return exact release
-  c46eb82d5c50955a359114b6a9de76461dfd0a2e with no blockers.
+  68bb2454ae7bc0a1988956fff0d664d4c0409d83 with no blockers.
 - **PASS:** Postgres, Redis, object media and the Worker are online; the Worker
   advertises capacity 2.
 - **PASS:** anonymous administrator session request returns HTTP 401 without a
@@ -281,6 +281,13 @@ required full live campaigns.
    4122-compatible crypto.getRandomValues fallback. A production Chromium test
    confirmed isSecureContext=false, randomUUID unavailable, add/reload/delete/
    reload all pass, and console errors remain zero.
+6. The downloadable Leonardo login helper recreated tabs every two seconds
+   whenever OAuth temporarily moved the Leonardo tab onto a Canva domain, and
+   it also stole focus plus auto-clicked Canva SSO up to three times. Commit
+   68bb245 limits tab creation to one startup call and makes the entire wait
+   loop read-only: no repeat tabs, no automated SSO click, no cookie click and
+   no bring-to-front. A generated production login pack was inspected with one
+   startup call and zero auto-click/focus-steal calls.
 
 ## Remaining live blocker
 
