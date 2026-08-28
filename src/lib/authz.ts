@@ -57,8 +57,8 @@ export function bearerToken(request: Request) {
     request.headers.get("x-api-key") ||
     request.headers.get("x-goog-api-key") ||
     "";
-  const m = header.match(/^Bearer\s+(.+)$/i);
-  let token = (m ? m[1] : header).trim();
+  const m = header.match(/^Bearer(?:\s+(.*))?$/i);
+  let token = (m ? m[1] || "" : header).trim();
   if (!token) {
     try {
       token = new URL(request.url).searchParams.get("key") || "";

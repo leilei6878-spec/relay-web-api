@@ -21,12 +21,23 @@ function Page() {
 function LogsView() {
   const [rows, setRows] = useState<UsageRow[]>([]);
   const [q, setQ] = useState("");
+  const [error, setError] = useState("");
 
   async function reload() {
-    const key = await getApiKey();
-    const res = await fetch("/api/usage", { headers: { Authorization: `Bearer ${key.apiKey}` } });
-    const body = (await res.json()) as { rows?: UsageRow[] };
-    setRows(body.rows || []);
+    try {
+      const key = await getApiKey();
+      const headers = key.apiKey.trim() ? { Authorization: `Bearer ${key.apiKey.trim()}` } : undefined;
+      const res = await fetch("/api/usage", { credentials: "include", headers });
+      const body = (await res.json()) as { rows?: UsageRow[]; error?: string };
+      if (!res.ok || !body.rows) {
+        setError(body.error || "请求日志加载失败");
+        return;
+      }
+      setRows(body.rows);
+      setError("");
+    } catch {
+      setError("请求日志加载失败，请检查网络后重试");
+    }
   }
 
   useEffect(() => {
@@ -56,7 +67,12 @@ function LogsView() {
           onClick={() => {
             void (async () => {
               const key = await getApiKey();
-              const res = await fetch("/api/usage?format=csv", { headers: { Authorization: `Bearer ${key.apiKey}` } });
+              const headers = key.apiKey.trim() ? { Authorization: `Bearer ${key.apiKey.trim()}` } : undefined;
+              const res = await fetch("/api/usage?format=csv", { credentials: "include", headers });
+              if (!res.ok) {
+                setError("日志导出失败");
+                return;
+              }
               const blob = await res.blob();
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");
@@ -79,6 +95,11 @@ function LogsView() {
         onChange={(e) => setQ(e.target.value)}
         className="max-w-sm"
       />
+      {error && (
+        <p role="alert" className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2.5 text-sm text-danger">
+          {error}
+        </p>
+      )}
       <div className="overflow-x-auto rounded-xl border border-border">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="bg-surface text-xs text-muted">

@@ -70,7 +70,8 @@ function AccountsView() {
                 const key = await getApiKey();
                 const res = await fetch("/api/accounts/probe", {
                   method: "POST",
-                  headers: { Authorization: `Bearer ${key.apiKey}` },
+                  credentials: "include",
+                  headers: key.apiKey.trim() ? { Authorization: `Bearer ${key.apiKey.trim()}` } : undefined,
                 });
                 const body = (await res.json()) as {
                   checked?: number;

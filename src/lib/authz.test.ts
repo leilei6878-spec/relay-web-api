@@ -29,6 +29,19 @@ test("admin cookie without bearer is admin", async () => {
   assert.equal(p?.kind, "admin");
 });
 
+test("an empty Bearer scheme does not shadow the administrator cookie", async () => {
+  const admin = await ensureAdminToken();
+  const principal = await classify(
+    new Request("http://relay.test/api/usage", {
+      headers: {
+        Authorization: "Bearer",
+        Cookie: `${ADMIN_COOKIE}=${encodeURIComponent(admin)}`,
+      },
+    }),
+  );
+  assert.equal(principal?.kind, "admin");
+});
+
 test("unknown bearer does not fall back to admin cookie", async () => {
   const admin = await ensureAdminToken();
   const req = new Request("http://127.0.0.1/v1/chat/completions", {

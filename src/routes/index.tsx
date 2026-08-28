@@ -101,7 +101,11 @@ function Dashboard() {
                   const key = await getApiKey();
                   const res = await fetch("/api/worker/control", {
                     method: "POST",
-                    headers: { Authorization: `Bearer ${key.apiKey}`, "Content-Type": "application/json" },
+                    credentials: "include",
+                    headers: {
+                      ...(key.apiKey.trim() ? { Authorization: `Bearer ${key.apiKey.trim()}` } : {}),
+                      "Content-Type": "application/json",
+                    },
                     body: JSON.stringify({ action: runtime?.serverWorker?.running ? "stop" : "start" }),
                   });
                   const body = (await res.json()) as { error?: string; running?: boolean };
