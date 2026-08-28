@@ -3336,7 +3336,7 @@ def click_leonardo_aspect(page, aspect):
               };
               const nodes = [...document.querySelectorAll('button, [role=button], [role=radio], [role=option], [role=menuitem], [data-radix-collection-item]')];
               const buttons = nodes.filter(vis);
-              const linesOf = (el) => ((el.innerText || '').trim().split('\\n').map((s) => s.trim()).filter(Boolean));
+              const linesOf = (el) => ((el.innerText || '').trim().split('\\\\n').map((s) => s.trim()).filter(Boolean));
               const selected = (el) => el.getAttribute('aria-pressed') === 'true' || el.getAttribute('data-state') === 'on' || el.getAttribute('aria-checked') === 'true';
               const chip = buttons.find((e) => {
                 const lines = linesOf(e);
@@ -3395,7 +3395,7 @@ def click_leonardo_aspect(page, aspect):
                   });
                   if (!hit) return 'miss';
                   hit.click();
-                  return 'preset:' + ((hit.innerText || '').trim().split('\\n')[0]);
+                  return 'preset:' + ((hit.innerText || '').trim().split('\\\\n')[0]);
                 }""",
                 {"aspect": aspect, "presets": presets},
             )
@@ -3435,14 +3435,14 @@ def click_leonardo_resolution(page, aspect, tier, k, w, h):
               const px = buttons.find((e) => {
                 const t = norm(e.innerText || '');
                 const a = norm(e.getAttribute('aria-label') || '');
-                const first = norm((e.innerText || '').split('\\n')[0]);
+                const first = norm((e.innerText || '').split('\\\\n')[0]);
                 if (aspect !== '1:1' && (squarePreset(first) || squarePreset(t))) return false;
                 return t.indexOf(want) >= 0 || a.indexOf(want) >= 0;
               });
               if (click(px)) return 'px';
               const tbtn = buttons.find((b) => {
                 const raw = (b.innerText || '').trim();
-                const first = raw.split('\\n')[0].trim();
+                const first = raw.split('\\\\n')[0].trim();
                 const t = norm(raw);
                 if (!(first === tier || first.toLowerCase() === tier.toLowerCase() || first.toUpperCase() === k)) return false;
                 if (aspect !== '1:1' && (squarePreset(t) || t.indexOf('1024x1024') >= 0 || t.indexOf('2048x2048') >= 0)) return false;
@@ -3462,7 +3462,7 @@ def read_displayed_size(page):
     try:
         pair = page.evaluate("""() => {
           const lab = [...document.querySelectorAll('div,p,span,label,h2,h3,h4')].find((e) => {
-            const t = (e.innerText || '').split('\\n')[0] || '';
+            const t = (e.innerText || '').split('\\\\n')[0] || '';
             return /image dimensions/i.test(t) && t.length < 80;
           });
           const root = lab ? (lab.parentElement || lab) : document.body;
@@ -3501,6 +3501,21 @@ def apply_image_size(page, want_size, aspect=None, tier=None, gpt=False):
         pass
     return w, h, aspect, tier
 
+def confirm_leonardo_image_size(page, want_size, aspect=None, tier=None, gpt=False, attempts=2):
+    aspect = (aspect or size_to_aspect(want_size) or "1:1").strip()
+    want_w, want_h = parse_size_wh(want_size)
+    shown_w, shown_h = 0, 0
+    for _ in range(max(1, int(attempts or 1))):
+        apply_image_size(page, want_size, aspect, tier, gpt)
+        shown_w, shown_h = read_displayed_size(page)
+        if shown_w == want_w and shown_h == want_h and aspect_match(shown_w, shown_h, aspect):
+            return True, shown_w, shown_h, ""
+    if shown_w <= 0 or shown_h <= 0:
+        error = "LEONARDO_DOM_CHANGED: Image Dimensions unreadable, want %s %s" % (aspect, want_size)
+    else:
+        error = "LEONARDO_DOM_CHANGED: Image Dimensions stayed %dx%d, want %s %s" % (shown_w, shown_h, aspect, want_size)
+    return False, shown_w, shown_h, error
+
 def apply_gemini_aspect(page, aspect):
     aspect = (aspect or "1:1").strip()
     try:
@@ -3512,7 +3527,7 @@ def apply_gemini_aspect(page, aspect):
                 return r.width > 4 && r.height > 4 && st.visibility !== 'hidden' && st.display !== 'none';
               };
               const nodes = [...document.querySelectorAll('button, [role=button], [role=radio], [role=option], [role=menuitem]')];
-              let hit = nodes.find((e) => vis(e) && ((e.innerText || '').trim().split('\\n')[0] === aspect || (e.getAttribute('aria-label') || '').trim() === aspect));
+              let hit = nodes.find((e) => vis(e) && ((e.innerText || '').trim().split('\\\\n')[0] === aspect || (e.getAttribute('aria-label') || '').trim() === aspect));
               if (hit) { hit.click(); return; }
               const opener = nodes.find((e) => vis(e) && /aspect/i.test((e.getAttribute('aria-label') || '') + ' ' + (e.innerText || '')));
               if (opener) opener.click();
@@ -3523,7 +3538,7 @@ def apply_gemini_aspect(page, aspect):
         page.evaluate(
             """(aspect) => {
               const nodes = [...document.querySelectorAll('button, [role=button], [role=radio], [role=option], [role=menuitem]')];
-              const hit = nodes.find((e) => ((e.innerText || '').trim().split('\\n')[0] === aspect) || ((e.getAttribute('aria-label') || '').indexOf(aspect) >= 0));
+              const hit = nodes.find((e) => ((e.innerText || '').trim().split('\\\\n')[0] === aspect) || ((e.getAttribute('aria-label') || '').indexOf(aspect) >= 0));
               if (hit) hit.click();
             }""",
             aspect,
@@ -3903,12 +3918,10 @@ def run_leonardo(body, ctx=None):
         if body.get("tier"):
             tier = str(body.get("tier"))
         want_min = int(max(want_w, want_h) * 0.72)
-        apply_image_size(page, want_size, aspect, tier, gpt)
-        shown_w, shown_h = read_displayed_size(page)
-        if shown_w and shown_h and not aspect_match(shown_w, shown_h, aspect):
-            apply_image_size(page, want_size, aspect, tier, gpt)
-            shown_w, shown_h = read_displayed_size(page)
+        size_ok, shown_w, shown_h, size_error = confirm_leonardo_image_size(page, want_size, aspect, tier, gpt)
         print("leonardo size want=%s aspect=%s tier=%s %dx%d min=%d shown=%dx%d" % (want_size, aspect, tier, want_w, want_h, want_min, shown_w, shown_h), flush=True)
+        if not size_ok:
+            return fail_job(ctx, size_error, "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": picked})
         if want_quality in ("HIGH", "LOW"):
             qhit = False
             for qlab in (want_quality, want_quality.title(), "Quality: " + want_quality.title()):
@@ -3927,7 +3940,7 @@ def run_leonardo(body, ctx=None):
                 page.evaluate(
                     """(n) => {
                       const nodes = [...document.querySelectorAll('div,p,span,label,h2,h3')];
-                      const lab = nodes.find((e) => /number of generations/i.test((e.innerText || '').split('\\n')[0] || '') && (e.innerText || '').length < 80);
+                      const lab = nodes.find((e) => /number of generations/i.test((e.innerText || '').split('\\\\n')[0] || '') && (e.innerText || '').length < 80);
                       const root = lab ? (lab.parentElement || document.body) : document.body;
                       const btn = [...root.querySelectorAll('button')].find((b) => (b.innerText || '').trim() === String(n));
                       if (btn) btn.click();
@@ -3953,13 +3966,9 @@ def run_leonardo(body, ctx=None):
             print("leonardo fill js", filled, flush=True)
             if not filled:
                 return {"ok": False, "error": "LEONARDO_DOM_CHANGED: cannot fill prompt", "fault": "provider", "backendMode": "web_account"}
-            apply_image_size(page, want_size, aspect, tier, gpt)
-            shown_w, shown_h = read_displayed_size(page)
-            if shown_w and shown_h and not aspect_match(shown_w, shown_h, aspect):
-                apply_image_size(page, want_size, aspect, tier, gpt)
-                shown_w, shown_h = read_displayed_size(page)
-            if shown_w and shown_h and not aspect_match(shown_w, shown_h, aspect):
-                return {"ok": False, "error": "LEONARDO_DOM_CHANGED: Image Dimensions stayed %dx%d, want %s %s" % (shown_w, shown_h, aspect, want_size), "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
+            size_ok, shown_w, shown_h, size_error = confirm_leonardo_image_size(page, want_size, aspect, tier, gpt)
+            if not size_ok:
+                return fail_job(ctx, size_error, "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": picked})
             ready_gen = wait_leonardo_generate_ready(page, 20000)
             print("leonardo generate ready", ready_gen, flush=True)
             if not ready_gen:
@@ -3973,12 +3982,9 @@ def run_leonardo(body, ctx=None):
             page.wait_for_timeout(400)
         except Exception:
             time.sleep(0.4)
-        shown_w, shown_h = read_displayed_size(page)
-        if shown_w and shown_h and not aspect_match(shown_w, shown_h, aspect):
-            apply_image_size(page, want_size, aspect, tier, gpt)
-            shown_w, shown_h = read_displayed_size(page)
-        if shown_w and shown_h and not aspect_match(shown_w, shown_h, aspect):
-            return {"ok": False, "error": "LEONARDO_DOM_CHANGED: Image Dimensions stayed %dx%d, want %s %s" % (shown_w, shown_h, aspect, want_size), "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked}
+        size_ok, shown_w, shown_h, size_error = confirm_leonardo_image_size(page, want_size, aspect, tier, gpt)
+        if not size_ok:
+            return fail_job(ctx, size_error, "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": picked})
         boundary = create_generation_boundary(page, ctx, "leonardo")
         baseline = boundary.get("baseline_asset_urls") or snapshot_image_srcs(page)
         captures = []

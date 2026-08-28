@@ -102,6 +102,56 @@ test("apply_image_size clicks Image Dimensions chips then Small/Medium/Large", (
   assert.equal(fn.includes("aspect !== '1:1'"), true);
 });
 
+test("Leonardo dimension selectors are valid JavaScript and unknown size fails closed", () => {
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
+  const out = spawnSync(
+    PYTHON,
+    [
+      "-c",
+      `
+import importlib.util, json
+spec=importlib.util.spec_from_file_location("w", "storage/relay-qa/worker.py")
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+scripts=[]
+class Keyboard:
+    def press(self, key):
+        return None
+class Page:
+    def __init__(self, dimensions):
+        self.dimensions=dimensions
+        self.keyboard=Keyboard()
+    def wait_for_timeout(self, ms):
+        return None
+    def evaluate(self, source, arg=None):
+        scripts.append(source)
+        if "return [Number(m[1]), Number(m[2])]" in source:
+            return self.dimensions
+        if "const linesOf" in source:
+            return "chip-already"
+        return "px"
+bad=m.confirm_leonardo_image_size(Page([0, 0]), "1024x1024", "1:1", "Small", False)
+good=m.confirm_leonardo_image_size(Page([1024, 1024]), "1024x1024", "1:1", "Small", False)
+print(json.dumps({"scripts":scripts,"bad":bad,"good":good}))
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  const result = JSON.parse(out.stdout.trim().split("\n").pop() || "{}") as {
+    scripts: string[];
+    bad: [boolean, number, number, string];
+    good: [boolean, number, number, string];
+  };
+  assert.equal(result.bad[0], false);
+  assert.match(result.bad[3], /Image Dimensions unreadable/);
+  assert.deepEqual(result.good.slice(0, 3), [true, 1024, 1024]);
+  assert.ok(result.scripts.length >= 6);
+  for (const source of result.scripts) {
+    assert.doesNotThrow(() => new Function(`return (${source});`), source);
+  }
+});
+
 test("worker maps 1264x848 to 3:2 and 16:9 size token to 1376x768", () => {
   mkdirSync("storage/relay-qa", { recursive: true });
   writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
@@ -128,7 +178,7 @@ test("leonardo img2img attaches refs before generate and fail-fasts", () => {
   const readyIdx = s.indexOf("wait_leonardo_generate_ready(page, 20000)");
   const baselineIdx = s.lastIndexOf("create_generation_boundary(page, ctx, \"leonardo\")");
   const clickIdx = s.indexOf('print("leonardo clicking generate"');
-  const sizeAfter = s.indexOf("apply_image_size(page, want_size, aspect, tier, gpt)", attachIdx);
+  const sizeAfter = s.indexOf("confirm_leonardo_image_size(page, want_size, aspect, tier, gpt)", attachIdx);
   assert.ok(attachIdx > 0 && readyIdx > attachIdx, "wait generate ready after attach");
   assert.ok(sizeAfter > attachIdx && sizeAfter < readyIdx, "re-apply size after refs");
   assert.ok(baselineIdx > readyIdx, "boundary after refs, not before");
