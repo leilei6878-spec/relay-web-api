@@ -215,6 +215,13 @@ test("leonardo img2img attaches refs before generate and fail-fasts", () => {
   assert.match(modelRestore, /for _ in range\(12\)/);
   assert.match(modelRestore, /image-generation-sidebar-container/);
   assert.doesNotMatch(modelRestore, /innerText\|\|''\)\.includes\(want\)/);
+  const generateFn = s.slice(s.indexOf("def leonardo_js_generate"), s.indexOf("def wait_leonardo_refs"));
+  assert.match(generateFn, /querySelectorAll\('button'\)/);
+  assert.match(generateFn, /\(generate\|create\)\(\\s\+\\d\+\)\?/);
+  assert.match(generateFn, /getBoundingClientRect/);
+  const submitBlock = s.slice(s.indexOf('print("leonardo clicking generate"'), s.indexOf("page.wait_for_timeout(800)", s.indexOf('print("leonardo clicking generate"')));
+  assert.doesNotMatch(submitBlock, /keyboard\.press\("Enter"\)/);
+  assert.match(submitBlock, /visible Generate button disappeared before click/);
 });
 
 test("ref_body_sizes and extract_prompt_images keep leonardo refs", () => {

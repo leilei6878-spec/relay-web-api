@@ -978,10 +978,22 @@ def leonardo_js_fill(page, prompt):
 def leonardo_js_generate(page):
     try:
         clicked = page.evaluate("""() => {
-          const b = document.querySelector('button[aria-label="Generate"], button[aria-label*="Generate" i]');
-          if (b && !b.disabled) { b.click(); return 'aria'; }
-          const t = [...document.querySelectorAll('button')].find((e) => /^(generate|create)$/i.test((e.innerText || '').trim()) && !e.disabled);
-          if (t) { t.click(); return 'text'; }
+          const visible = (element) => {
+            const rect = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            return rect.width > 4 && rect.height > 4 && rect.bottom > 0 && rect.top < innerHeight && style.display !== 'none' && style.visibility !== 'hidden';
+          };
+          const buttons = [...document.querySelectorAll('button')].filter((button) => {
+            if (!visible(button) || button.disabled || button.getAttribute('aria-disabled') === 'true') return false;
+            const aria = (button.getAttribute('aria-label') || '').trim();
+            const text = (button.innerText || '').replace(/\s+/g, ' ').trim();
+            return /^generate\b/i.test(aria) || /^(generate|create)(\s+\d+)?$/i.test(text);
+          });
+          const button = buttons[buttons.length - 1];
+          if (button) {
+            button.click();
+            return (button.getAttribute('aria-label') || button.innerText || 'visible').trim();
+          }
           return '';
         }""")
         print("leonardo generate click", clicked, flush=True)
@@ -996,10 +1008,17 @@ def wait_leonardo_generate_ready(page, timeout_ms=20000):
     while time.time() < deadline:
         try:
             ready = page.evaluate("""() => {
-              const b = document.querySelector('button[aria-label="Generate"], button[aria-label*="Generate" i]');
-              if (b && !b.disabled && b.getAttribute('aria-disabled') !== 'true') return true;
-              const t = [...document.querySelectorAll('button')].find((e) => /^(generate|create)$/i.test((e.innerText || '').trim()));
-              return !!(t && !t.disabled && t.getAttribute('aria-disabled') !== 'true');
+              const visible = (element) => {
+                const rect = element.getBoundingClientRect();
+                const style = getComputedStyle(element);
+                return rect.width > 4 && rect.height > 4 && rect.bottom > 0 && rect.top < innerHeight && style.display !== 'none' && style.visibility !== 'hidden';
+              };
+              return [...document.querySelectorAll('button')].some((button) => {
+                if (!visible(button) || button.disabled || button.getAttribute('aria-disabled') === 'true') return false;
+                const aria = (button.getAttribute('aria-label') || '').trim();
+                const text = (button.innerText || '').replace(/\s+/g, ' ').trim();
+                return /^generate\b/i.test(aria) || /^(generate|create)(\s+\d+)?$/i.test(text);
+              });
             }""")
             if ready:
                 return True
@@ -4189,21 +4208,17 @@ def run_leonardo(body, ctx=None):
             return fail_job(ctx, "WORKER_TIMEOUT: submission checkpoint unavailable", "worker", {"backendMode": "web_account", "availableModels": available, "modelActual": picked})
         gen_clicked = leonardo_js_generate(page)
         if not gen_clicked:
-            if images:
-                try:
-                    page.keyboard.press("Enter")
-                except Exception:
-                    pass
-            else:
-                try:
-                    gen.click(timeout=1500, force=True)
-                    gen_clicked = True
-                except Exception:
-                    page.keyboard.press("Enter")
+            try:
+                page.get_by_role("button", name=re.compile(r"^Generate\b", re.I)).last.click(timeout=1800, force=True)
+                gen_clicked = True
+            except Exception:
+                pass
         if gen_clicked:
             set_submission_state(ctx, "SUBMITTED")
         else:
-            set_submission_state(ctx, "SUBMISSION_UNCERTAIN")
+            ctx.submission_state = "INPUT_READY"
+            ctx.retry_safety = "SAFE"
+            return fail_job(ctx, "LEONARDO_DOM_CHANGED: visible Generate button disappeared before click", "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": picked})
         page.wait_for_timeout(800)
         pst2 = detect_page_state(page, "leonardo")
         if pst2 in ("LOGIN_REQUIRED", "TOKEN_EXHAUSTED", "QUEUE_FULL", "CHALLENGE"):
