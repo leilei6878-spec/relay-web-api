@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { buildObjectMediaManifest, writeObjectMediaManifest } from "./object-media-manifest.mjs";
 
-const workspace = resolve(import.meta.dirname, "..");
+const workspace = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 function sha256(path) {
   return createHash("sha256").update(requireFile(path)).digest("hex");
