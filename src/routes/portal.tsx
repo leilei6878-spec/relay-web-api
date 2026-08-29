@@ -83,8 +83,8 @@ function Portal() {
 
         <div className="grid gap-6 lg:grid-cols-2">
           <section className="rounded-xl border border-border bg-surface">
-            <div className="flex items-center justify-between border-b border-border px-5 py-4"><div><h2 className="font-medium">充值订单</h2><p className="mt-1 text-xs text-subtle">MVP 使用人工审核到账，支付渠道后续接入。</p></div><RechargeDialog currency={billing.tenant.currency} onCreated={load} /></div>
-            <Rows rows={billing.orders} empty="暂无订单" render={(row) => <><div><p className="text-sm font-medium">{money(row.amount_minor, String(row.currency))}</p><p className="text-xs text-subtle">{date(row.created_at)}</p></div><Badge tone={row.status === "paid" ? "ok" : row.status === "pending" ? "warn" : "default"}>{String(row.status)}</Badge></>} />
+            <div className="flex items-center justify-between border-b border-border px-5 py-4"><div><h2 className="font-medium">充值订单</h2><p className="mt-1 text-xs text-subtle">通过 Stripe 托管收银台付款；余额只在已验签 Webhook 确认后入账。</p></div><RechargeDialog currency={billing.tenant.currency} onCreated={load} /></div>
+            <Rows rows={billing.orders} empty="暂无订单" render={(row) => <><div><p className="text-sm font-medium">余额充值 {money(row.amount_minor, String(row.currency))}</p><p className="text-xs text-subtle">实付 {money(row.gross_minor || row.amount_minor, String(row.currency))} · 税 {money(row.tax_minor, String(row.currency))} · {date(row.created_at)}{Number(row.refunded_minor || 0) ? ` · 已退余额 ${money(row.refunded_minor, String(row.currency))}` : ""}</p></div><div className="flex items-center gap-2">{row.checkout_url ? <Button size="sm" variant="secondary" onClick={() => window.location.assign(String(row.checkout_url))}>继续付款</Button> : null}<Badge tone={row.status === "paid" ? "ok" : ["checkout_open", "awaiting_payment"].includes(String(row.status)) ? "warn" : "default"}>{String(row.status)}</Badge></div></>} />
           </section>
           <section className="rounded-xl border border-border bg-surface">
             <div className="border-b border-border px-5 py-4"><h2 className="font-medium">资金流水</h2><p className="mt-1 text-xs text-subtle">不可修改的双录账本。</p></div>
@@ -135,12 +135,16 @@ function RechargeDialog({ currency, onCreated }: { currency: string; onCreated: 
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("10");
   async function create() {
-    const response = await fetch("/api/saas/billing", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ amountMinor: Math.round(Number(amount) * 100), idempotencyKey: crypto.randomUUID() }) });
-    const body = await response.json() as { error?: string };
-    if (!response.ok) { toast.error(body.error || "订单创建失败"); return; }
-    toast.success("充值订单已创建，请等待管理员审核"); setOpen(false); await onCreated();
+    const response = await fetch("/api/saas/billing", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ action: "checkout", amountMinor: Math.round(Number(amount) * 100), idempotencyKey: crypto.randomUUID() }) });
+    const body = await response.json() as { error?: string; checkoutUrl?: string };
+    if (!response.ok || !body.checkoutUrl) {
+      const unavailable = /^(COMMERCIAL_|PAYMENT_PROVIDER_|STRIPE_.*_MISSING|STRIPE_LIVE_KEY_REQUIRED)/.test(body.error || "");
+      toast.error(unavailable ? "商业支付尚未开放，请联系管理员" : body.error || "无法创建安全支付会话");
+      return;
+    }
+    setOpen(false); await onCreated(); window.location.assign(body.checkoutUrl);
   }
-  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button variant="secondary" size="sm">充值</Button></DialogTrigger><DialogContent title="创建充值订单"><div className="space-y-3"><Field label={`金额（${currency}）`}><Input type="number" min="1" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></Field><Button className="w-full" onClick={() => void create()}>提交人工充值订单</Button></div></DialogContent></Dialog>;
+  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button variant="secondary" size="sm">充值</Button></DialogTrigger><DialogContent title="安全充值"><div className="space-y-3"><Field label={`金额（${currency}）`}><Input type="number" min="1" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></Field><p className="text-xs text-subtle">下一步将跳转至 Stripe 托管收银台。本系统不接触或保存银行卡信息。</p><Button className="w-full" onClick={() => void create()}>前往安全支付</Button></div></DialogContent></Dialog>;
 }
 
 function MfaDialog() {

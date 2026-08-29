@@ -18,7 +18,7 @@ type DbLike = Pick<Sql, "query">;
 
 export async function collectCommercialSignals(db?: DbLike) {
   const sql = db || await getSql();
-  const [workers, reservations, failures, lowBalances] = await Promise.all([
+  const [workers, reservations, failures, lowBalances, paymentEvents, refundSettlements, checkoutCreates, openDisputes] = await Promise.all([
     sql.query<{ count: number }>("select count(*)::int as count from relay_workers where draining=false and last_beat > now()-interval '45 seconds'"),
     sql.query<{ count: number }>("select count(*)::int as count from relay_usage_charges where status='reserved' and created_at < now()-interval '20 minutes'"),
     sql.query<{ total: number; failed: number }>(
@@ -26,6 +26,18 @@ export async function collectCommercialSignals(db?: DbLike) {
     ),
     sql.query<{ count: number }>(
       "select count(*)::int as count from relay_tenants where status in ('trial','active') and balance_minor-reserved_minor <= greatest(100,credit_limit_minor*-1)",
+    ),
+    sql.query<{ count: number }>(
+      "select count(*)::int as count from relay_payment_events where status in ('received','failed') and created_at < now()-interval '5 minutes'",
+    ),
+    sql.query<{ count: number }>(
+      "select count(*)::int as count from relay_payment_refunds where status='settlement_pending' and updated_at < now()-interval '5 minutes'",
+    ),
+    sql.query<{ count: number }>(
+      "select count(*)::int as count from relay_orders where payment_provider='stripe' and status='creating' and created_at < now()-interval '10 minutes'",
+    ),
+    sql.query<{ count: number }>(
+      "select count(*)::int as count from relay_payment_disputes where status in ('warning_needs_response','warning_under_review','needs_response','under_review')",
     ),
   ]);
   const signals: CommercialSignal[] = [];
@@ -35,6 +47,10 @@ export async function collectCommercialSignals(db?: DbLike) {
   const failed = Number(failures[0]?.failed || 0);
   if (total >= 10 && failed / total >= 0.1) signals.push({ code: "FAILURE_RATE", severity: failed / total >= 0.25 ? "critical" : "warning", message: `15-minute failure rate ${Math.round(failed / total * 100)}%`, detail: { total, failed } });
   if (Number(lowBalances[0]?.count || 0) > 0) signals.push({ code: "LOW_TENANT_BALANCE", severity: "warning", message: `${lowBalances[0]?.count} tenant wallet(s) are low or exhausted` });
+  if (Number(paymentEvents[0]?.count || 0) > 0) signals.push({ code: "PAYMENT_EVENT_STUCK", severity: "critical", message: `${paymentEvents[0]?.count} Stripe event(s) require reconciliation` });
+  if (Number(refundSettlements[0]?.count || 0) > 0) signals.push({ code: "REFUND_SETTLEMENT_STUCK", severity: "critical", message: `${refundSettlements[0]?.count} refund(s) require ledger settlement` });
+  if (Number(checkoutCreates[0]?.count || 0) > 0) signals.push({ code: "CHECKOUT_CREATE_STUCK", severity: "warning", message: `${checkoutCreates[0]?.count} Checkout order(s) are stuck during creation` });
+  if (Number(openDisputes[0]?.count || 0) > 0) signals.push({ code: "PAYMENT_DISPUTE_OPEN", severity: "critical", message: `${openDisputes[0]?.count} Stripe dispute(s) require evidence or review` });
   return signals;
 }
 

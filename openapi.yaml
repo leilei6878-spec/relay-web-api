@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Relay Public API
-  version: 0.10.0-rc1
+  version: 0.10.0-rc2
   description: |
     OpenAI-compatible API. Commercial `sk-saas-*` credentials are routed only
     to official provider APIs. Legacy `sk-relay-*` credentials are internal.
@@ -104,6 +104,31 @@ paths:
           description: Unsupported parameter (mask) or invalid input
         "401":
           description: Unauthorized
+  /api/webhooks/stripe:
+    post:
+      summary: Stripe-signed payment event receiver
+      operationId: stripeWebhook
+      security: []
+      parameters:
+        - in: header
+          name: Stripe-Signature
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Raw Stripe Event payload; signature verification occurs before parsing.
+      responses:
+        "200":
+          description: Authenticated event processed or idempotently replayed
+        "400":
+          description: Invalid or stale signature
+        "422":
+          description: Signed event failed order, amount, currency, or tenant validation
 components:
   securitySchemes:
     bearerAuth:

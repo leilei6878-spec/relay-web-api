@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { assertAdmin } from "@/lib/authz";
 import { commercialAdminSnapshot, postBalanceAdjustment, publishPrice, settleManualOrder } from "@/lib/saas-billing";
 import { getSql } from "@/lib/db";
+import { createStripeRefund, reconcileStripeOrder } from "@/lib/payments";
 import type { CommercialCapability } from "@/lib/commercial-types";
 import { uid } from "@/lib/utils";
 
@@ -21,6 +22,11 @@ export const Route = createFileRoute("/api/admin/commercial")({
         try {
           let result: unknown;
           if (action === "settle-order") result = await settleManualOrder(String(body.orderId || ""), "admin");
+          else if (action === "reconcile-payment") result = await reconcileStripeOrder(String(body.orderId || ""));
+          else if (action === "refund-order") result = await createStripeRefund({
+            orderId: String(body.orderId || ""), amountMinor: Number(body.amountMinor || 0),
+            reason: String(body.reason || "Administrator refund"), idempotencyKey: String(body.idempotencyKey || uid()), actor: "admin",
+          });
           else if (action === "adjust-balance") {
             result = await postBalanceAdjustment({
               tenantId: String(body.tenantId || ""), deltaMinor: Number(body.deltaMinor || 0),

@@ -18,7 +18,7 @@ export function retentionPolicy(env: NodeJS.ProcessEnv = process.env) {
 export async function runDataRetention(env: NodeJS.ProcessEnv = process.env) {
   const policy = retentionPolicy(env);
   const sql = await getSql();
-  const [jobs, sessions, checks, usage, chargeResults, audit] = await Promise.all([
+  const [chargeResults, jobs, sessions, checks, usage, checkoutUrls, audit] = await Promise.all([
     sql.query<{ count: number }>(
       `with updated as (
          update relay_usage_charges set extra=extra-'providerResultCiphertext'
@@ -60,6 +60,13 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env) {
       [policy.requestContentDays],
     ),
     sql.query<{ count: number }>(
+      `with updated as (
+         update relay_orders set checkout_url=null,updated_at=now()
+          where checkout_url is not null and coalesce(checkout_expires_at,expires_at,created_at) < now()
+          returning id
+       ) select count(*)::int as count from updated`,
+    ),
+    sql.query<{ count: number }>(
       `with deleted as (
          delete from relay_commercial_audit where created_at < now()-($1::text||' days')::interval returning id
        ) select count(*)::int as count from deleted`,
@@ -76,6 +83,7 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env) {
     deletedChecks: Number(checks[0]?.count || 0),
     redactedUsage: Number(usage[0]?.count || 0),
     redactedChargeResults: Number(chargeResults[0]?.count || 0),
+    redactedCheckoutUrls: Number(checkoutUrls[0]?.count || 0),
     deletedAudit: Number(audit[0]?.count || 0),
   };
 }

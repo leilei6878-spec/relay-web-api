@@ -152,11 +152,14 @@ export async function postBalanceAdjustment(
   input: {
     tenantId: string;
     deltaMinor: number;
-    kind: "recharge" | "adjustment" | "refund" | "charge";
+    kind: "recharge" | "adjustment" | "refund" | "charge" | "chargeback";
     idempotencyKey: string;
     description?: string;
     orderId?: string;
     requestId?: string;
+    counterAccountCode?: "external_settlement" | "service_revenue" | "cash_refund" | "manual_adjustment" | "payment_dispute";
+    allowNegative?: boolean;
+    allowInactive?: boolean;
   },
   db?: DbLike,
 ) {
@@ -171,18 +174,18 @@ export async function postBalanceAdjustment(
   const transactionId = uid();
   const walletEntryId = uid();
   const counterEntryId = uid();
-  const counter = delta > 0 ? "external_settlement" : "service_revenue";
+  const counter = input.counterAccountCode || (delta > 0 ? "external_settlement" : "service_revenue");
   let rows: Record<string, unknown>[];
   try {
     rows = await sql.query<Record<string, unknown>>(
       `with locked as (
        select id,balance_minor,credit_limit_minor,currency
-         from relay_tenants where id=$1 and status in ('trial','active') for update
+         from relay_tenants where id=$1 and ($13 or status in ('trial','active')) for update
      ), updated as (
        update relay_tenants t
           set balance_minor=t.balance_minor+$2,updated_at=now()
          from locked l
-        where t.id=l.id and l.balance_minor+l.credit_limit_minor+$2 >= 0
+        where t.id=l.id and ($12 or l.balance_minor+l.credit_limit_minor+$2 >= 0)
        returning t.id,t.balance_minor,t.currency
      ), tx as (
        insert into relay_billing_transactions
@@ -211,6 +214,8 @@ export async function postBalanceAdjustment(
         walletEntryId,
         counterEntryId,
         counter,
+        Boolean(input.allowNegative),
+        Boolean(input.allowInactive),
       ],
     );
   } catch (error) {
@@ -440,7 +445,11 @@ export async function tenantBillingSummary(tenantId: string, db?: DbLike) {
     [tenantId],
   );
   const orders = await sql.query<Record<string, unknown>>(
-    "select * from relay_orders where tenant_id=$1 order by created_at desc limit 100",
+    `select id,tenant_id,type,status,currency,amount_minor,payment_provider,provider_reference,
+            idempotency_key,description,created_at,paid_at,expires_at,checkout_expires_at,refunded_minor,
+            tax_minor,gross_minor,refunded_tax_minor,refunded_gross_minor,
+            case when status='checkout_open' and checkout_expires_at>now() then checkout_url else null end as checkout_url
+       from relay_orders where tenant_id=$1 order by created_at desc limit 100`,
     [tenantId],
   );
   return { tenant, transactions, charges, orders };
@@ -538,13 +547,22 @@ export async function publishPrice(
 
 export async function commercialAdminSnapshot(db?: DbLike) {
   const sql = await database(db);
-  const [tenants, plans, prices, orders, transactions, alerts] = await Promise.all([
+  const [tenants, plans, prices, orders, transactions, alerts, paymentEvents, refunds, disputes] = await Promise.all([
     sql.query<Record<string, unknown>>("select * from relay_tenants order by created_at desc limit 500"),
     sql.query<Record<string, unknown>>("select * from relay_plans order by created_at asc"),
     sql.query<Record<string, unknown>>("select * from relay_price_book order by created_at desc limit 500"),
-    sql.query<Record<string, unknown>>("select * from relay_orders order by created_at desc limit 500"),
+    sql.query<Record<string, unknown>>(
+      `select id,tenant_id,type,status,currency,amount_minor,payment_provider,provider_reference,
+              provider_session_id,provider_payment_intent,idempotency_key,description,created_by,
+              created_at,paid_at,expires_at,checkout_expires_at,refunded_minor,tax_minor,gross_minor,
+              refunded_tax_minor,refunded_gross_minor,updated_at
+         from relay_orders order by created_at desc limit 500`,
+    ),
     sql.query<Record<string, unknown>>("select * from relay_billing_transactions order by created_at desc limit 500"),
     sql.query<Record<string, unknown>>("select * from relay_alert_events order by last_seen_at desc limit 200"),
+    sql.query<Record<string, unknown>>("select * from relay_payment_events order by created_at desc limit 500"),
+    sql.query<Record<string, unknown>>("select * from relay_payment_refunds order by created_at desc limit 500"),
+    sql.query<Record<string, unknown>>("select * from relay_payment_disputes order by created_at desc limit 500"),
   ]);
-  return { tenants, plans, prices, orders, transactions, alerts };
+  return { tenants, plans, prices, orders, transactions, alerts, paymentEvents, refunds, disputes };
 }

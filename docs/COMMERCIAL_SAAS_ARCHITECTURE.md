@@ -44,11 +44,36 @@ official-provider usage/asset settlement paths are authoritative.
 
 ## Payments
 
-The MVP creates idempotent manual recharge orders. Only the internal commercial
-administrator can mark an order paid; that action posts an immutable recharge
-transaction. A later payment adapter must verify signed provider callbacks and
-reuse the same order idempotency key. No browser redirect or unverified webhook
-may credit a wallet.
+Customer recharge uses a server-created Stripe Checkout Session. Internal order
+and tenant IDs are attached as Checkout and PaymentIntent metadata. The Checkout
+URL is short-lived and is cleared after expiry; card data never enters Relay.
+
+`POST /api/webhooks/stripe` reads the raw body, validates the timestamped HMAC
+signature with constant-time comparison, deduplicates the provider event, and
+requires exact order, tenant, amount and currency matches. Only a paid Checkout
+Session can append the recharge transaction. A browser success redirect cannot
+credit a wallet. Separate Stripe events referring to the same PaymentIntent use
+one ledger idempotency key and therefore cannot double-credit.
+
+Refunds reserve available tenant credit before the provider call. A successful
+Stripe refund appends a negative wallet entry with an equal cash-refund entry,
+then releases the reservation. Failed calls release the hold without changing
+balance. Dashboard/external refunds are associated through the unique
+PaymentIntent and may suspend a tenant whose wallet becomes negative. Payment
+events retain only the payload SHA-256 and reconciliation identifiers, not the
+raw Stripe payload.
+
+Orders separate net wallet credit, tax and gross customer payment. With
+`RELAY_TAX_MODE=stripe_automatic`, Checkout collects the billing address and
+uses Stripe Tax. Settlement posts wallet credit and tax payable against gross
+external cash; refunds reverse those same three accounts. `approved_exempt` is
+accepted only as an explicit, documented tax/legal decision, never as a
+default.
+
+Dispute creation immediately suspends the tenant. Stripe's explicit
+funds-withdrawn and funds-reinstated events mirror the financial effect through
+separate idempotent ledger transactions. A won dispute restores funds but does
+not automatically reactivate access; an operator must review the account.
 
 ## Data and privacy
 
@@ -73,6 +98,9 @@ may credit a wallet.
 - declared two or more Gateway replicas;
 - offsite backup target;
 - completed legal review (`RELAY_LEGAL_APPROVED=1`).
+- Stripe live API/restricted key, Webhook signing secret and payment-provider
+  selection.
+- configured Stripe automatic tax or a documented approved exemption.
 
 The required infrastructure contract is
 [`deploy/commercial-ha-contract.yaml`](../deploy/commercial-ha-contract.yaml).
@@ -89,3 +117,11 @@ The required infrastructure contract is
 - Leonardo Production API image generation uses Bearer auth, creates with
   `POST /api/rest/v1/generations` and polls `GET /generations/{id}`:
   https://docs.leonardo.ai/v1.0/docs/getting-started
+- Stripe Checkout Sessions are created server-side with metadata for internal
+  reconciliation: https://docs.stripe.com/api/checkout/sessions/create
+- Stripe requires the raw request body for Webhook signature verification:
+  https://docs.stripe.com/webhooks
+- Stripe refunds support partial refunds and emit refund lifecycle events:
+  https://docs.stripe.com/refunds
+- Stripe defines dispute creation, closure, funds-withdrawn and
+  funds-reinstated event types: https://docs.stripe.com/api/events/types

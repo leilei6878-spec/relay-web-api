@@ -11,6 +11,9 @@ export type CommercialReadiness = {
   offsiteBackupConfigured: boolean;
   legalApproved: boolean;
   registrationEnabled: boolean;
+  paymentProvider: string;
+  paymentReady: boolean;
+  taxMode: string;
 };
 
 export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, db?: Pick<Sql, "query">): Promise<CommercialReadiness> {
@@ -40,6 +43,14 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   const minWorkers = Math.max(1, Number(env.RELAY_COMMERCIAL_MIN_WORKERS || 2));
   const offsiteBackupConfigured = Boolean(env.RELAY_BACKUP_S3_ENDPOINT?.trim() && env.RELAY_BACKUP_S3_BUCKET?.trim());
   const legalApproved = env.RELAY_LEGAL_APPROVED === "1";
+  const paymentProvider = (env.RELAY_PAYMENT_PROVIDER || "disabled").trim();
+  const stripeSecret = env.STRIPE_SECRET_KEY?.trim() || "";
+  const stripeWebhookSecret = env.STRIPE_WEBHOOK_SECRET?.trim() || "";
+  const stripeLiveKey = /^(sk|rk)_live_/.test(stripeSecret);
+  const taxMode = (env.RELAY_TAX_MODE || "unconfigured").trim();
+  const taxReady = ["stripe_automatic", "approved_exempt"].includes(taxMode);
+  const paymentReady = paymentProvider === "stripe" && Boolean(stripeSecret && stripeWebhookSecret) &&
+    (env.NODE_ENV !== "production" || stripeLiveKey) && taxReady;
   const blockers: string[] = [];
   if (enabled && !Object.values(officialProviders).some(Boolean)) blockers.push("no official provider credential configured");
   if (enabled && activePrices === 0) blockers.push("no active commercial price book rows");
@@ -49,6 +60,10 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   if (enabled && gatewayReplicas < 2) blockers.push("at least two gateway replicas required");
   if (enabled && !offsiteBackupConfigured) blockers.push("offsite backup target not configured");
   if (enabled && !legalApproved) blockers.push("commercial legal approval not recorded");
+  if (enabled && paymentProvider !== "stripe") blockers.push("Stripe payment provider not configured");
+  if (enabled && paymentProvider === "stripe" && (!stripeSecret || !stripeWebhookSecret)) blockers.push("Stripe API or webhook secret missing");
+  if (enabled && env.NODE_ENV === "production" && paymentProvider === "stripe" && !stripeLiveKey) blockers.push("Stripe live restricted/secret key required");
+  if (enabled && !taxReady) blockers.push("tax mode requires Stripe Tax or documented approved exemption");
   if (enabled && env.RELAY_SAAS_REGISTRATION_ENABLED === "1" && !env.RELAY_EMAIL_WEBHOOK_URL?.trim()) blockers.push("email verification delivery not configured");
   return {
     enabled,
@@ -61,6 +76,9 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     offsiteBackupConfigured,
     legalApproved,
     registrationEnabled: enabled && env.RELAY_SAAS_REGISTRATION_ENABLED === "1",
+    paymentProvider,
+    paymentReady,
+    taxMode,
   };
 }
 
