@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc4`
+- production version: `0.10.0-rc5`
 - schema: `9`
-- runtime commit: `433b5c781659d0ec553329a4869860dba6aefc10`
+- runtime commit: `e4b307b949bf726f5f9fc94acf43e9735bc55993`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -28,7 +28,7 @@ complete when only design intent or a narrow test exists.
 | Immutable usage/funds ledger | Append-only transaction/entry triggers, equal-and-opposite entries, tax/cash/wallet settlement and replay tests | Complete |
 | Token/image/model pricing | Versioned price book, integer minor-unit calculation, authoritative provider usage/count settlement | Complete in code; live provider pricing still absent |
 | Customer self-service and commercial admin UI | Login/register/reset/verification, keys, balance, usage, members, Checkout; tenant/price/order/refund/dispute/admin controls; browser QA | Complete |
-| Official provider adapters and sandbox | OpenAI, Gemini and Leonardo request/usage adapters with mocked official response tests | Sandbox code complete; live sandbox acceptance missing credentials |
+| Official provider adapters and sandbox | OpenAI, Gemini API, Vertex AI and Leonardo request/usage adapters with mocked official response tests | Sandbox code complete; live sandbox acceptance missing credentials |
 | Tenant data isolation | Tenant-bound sessions/keys, tenant-filtered history/usage and no commercial exposure of account/Worker/proxy topology | Complete |
 | CSRF/Origin and session security | HttpOnly/Secure cookies, CSRF double submit, trusted Origin checks, cookie-admin mutation Origin gate | Complete |
 | Audit, privacy and retention | Commercial audit rows, request/result redaction, session/check retention and non-deleting billing policy | Complete |
