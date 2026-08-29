@@ -14,6 +14,7 @@ const tests = [
   join("scripts", "pg-cutover.test.mjs"),
   join("scripts", "pg-reclaim.test.mjs"),
   join("scripts", "qa-hardening.test.mjs"),
+  join("scripts", "restore-security.test.mjs"),
   join("scripts", "secret-scan.test.mjs"),
   join("scripts", "sign-out-plan.test.mjs"),
   join("scripts", "verify-offsite-snapshot.test.mjs"),
