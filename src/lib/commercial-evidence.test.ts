@@ -18,7 +18,7 @@ async function database() {
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
     "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql",
     "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql",
-    "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql",
+    "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
@@ -54,6 +54,13 @@ test("commercial evidence expectations include global, active-provider and exact
   assert.ok(!expected.some((item) => item.requirement === "email_delivery"));
   assert.ok(expected.some((item) => item.requirement === "provider_rights" && item.subject === "openai"));
   assert.ok(expected.some((item) => item.requirement === "price_review" && item.subject === "price-evidence"));
+  const planSubjects = expected.filter((item) => item.requirement === "plan_review").map((item) => item.subject);
+  assert.equal(planSubjects.length, 2);
+  await pg.query("update relay_plans set monthly_fee_minor=123 where id='starter'");
+  const changedPlans = await expectedCommercialEvidence({ RELAY_SAAS_REGISTRATION_ENABLED: "0" } as NodeJS.ProcessEnv, db);
+  const changedStarter = changedPlans.find((item) => item.requirement === "plan_review" && item.subject.startsWith("starter:"))?.subject;
+  assert.ok(changedStarter);
+  assert.ok(!planSubjects.includes(changedStarter));
   const registration = await expectedCommercialEvidence({ RELAY_SAAS_REGISTRATION_ENABLED: "1" } as NodeJS.ProcessEnv, db);
   assert.ok(registration.some((item) => item.requirement === "email_delivery"));
   await pg.close();

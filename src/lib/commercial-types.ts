@@ -12,8 +12,12 @@ export type Tenant = {
   currency: string;
   balanceMinor: number;
   reservedMinor: number;
+  includedBalanceMinor: number;
+  includedReservedMinor: number;
   creditLimitMinor: number;
   monthlyBudgetMinor: number;
+  pendingPlanId: string | null;
+  planChangeEffectiveAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -58,9 +62,11 @@ export type UsageReservation = {
   tenantId: string;
   requestId: string;
   reservedMinor: number;
+  reservedIncludedMinor: number;
   price: PriceBookRow;
   replay: boolean;
   status: "reserved" | "settled" | "released";
   chargedMinor: number;
+  chargedIncludedMinor: number;
   providerResultCiphertext?: string | null;
 };

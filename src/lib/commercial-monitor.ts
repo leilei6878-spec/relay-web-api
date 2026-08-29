@@ -21,7 +21,7 @@ type DbLike = Pick<Sql, "query">;
 export async function collectCommercialSignals(db?: DbLike) {
   const sql = db || await getSql();
   const env = await effectiveCommercialEnv(process.env, sql);
-  const [workers, reservations, failures, lowBalances, paymentEvents, refundSettlements, checkoutCreates, openDisputes, missingCanaries] = await Promise.all([
+  const [workers, reservations, failures, lowBalances, paymentEvents, refundSettlements, checkoutCreates, openDisputes, missingCanaries, duePlanPeriods] = await Promise.all([
     sql.query<{ count: number }>("select count(*)::int as count from relay_workers where draining=false and last_beat > now()-interval '45 seconds'"),
     sql.query<{ count: number }>("select count(*)::int as count from relay_usage_charges where status='reserved' and created_at < now()-interval '20 minutes'"),
     sql.query<{ total: number; failed: number }>(
@@ -48,6 +48,12 @@ export async function collectCommercialSignals(db?: DbLike) {
         and not exists (select 1 from relay_provider_sandbox_runs r where r.provider=p.provider and r.model=p.model
           and r.capability=p.capability and r.status='passed' and r.finished_at>now()-interval '24 hours')`,
     ),
+    sql.query<{ count: number }>(
+      `select count(*)::int as count from relay_tenants t where t.status in ('trial','active') and (
+        t.current_period_end<=now() or not exists (
+          select 1 from relay_plan_periods p where p.tenant_id=t.id and p.period_start=t.current_period_start
+        ))`,
+    ),
   ]);
   const signals: CommercialSignal[] = [];
   if (Number(workers[0]?.count || 0) === 0) signals.push({ code: "WORKER_ZERO", severity: "critical", message: "No online worker is available" });
@@ -61,6 +67,7 @@ export async function collectCommercialSignals(db?: DbLike) {
   if (Number(checkoutCreates[0]?.count || 0) > 0) signals.push({ code: "CHECKOUT_CREATE_STUCK", severity: "warning", message: `${checkoutCreates[0]?.count} Checkout order(s) are stuck during creation` });
   if (Number(openDisputes[0]?.count || 0) > 0) signals.push({ code: "PAYMENT_DISPUTE_OPEN", severity: "critical", message: `${openDisputes[0]?.count} Stripe dispute(s) require evidence or review` });
   if (Number(missingCanaries[0]?.count || 0) > 0) signals.push({ code: "PROVIDER_CANARY_MISSING", severity: "critical", message: `${missingCanaries[0]?.count} active commercial route(s) lack a provider canary in the last 24 hours` });
+  if (Number(duePlanPeriods[0]?.count || 0) > 0) signals.push({ code: "PLAN_PERIOD_DUE", severity: env.RELAY_COMMERCIAL_ENABLED === "1" ? "critical" : "warning", message: `${duePlanPeriods[0]?.count} tenant plan period(s) require settlement` });
   const missingEvidence = (await commercialEvidenceStatus(env, sql)).filter((item) => !item.valid);
   if (missingEvidence.length > 0) signals.push({
     code: "COMMERCIAL_LAUNCH_EVIDENCE_MISSING",

@@ -16,10 +16,12 @@ type SessionBody = {
 };
 
 type BillingBody = {
-  tenant: { balanceMinor: number; reservedMinor: number; currency: string; planId: string; monthlyBudgetMinor: number };
+  tenant: { balanceMinor: number; reservedMinor: number; includedBalanceMinor: number; includedReservedMinor: number; currency: string; planId: string; pendingPlanId: string | null; planChangeEffectiveAt: string | null; monthlyBudgetMinor: number };
   transactions: Record<string, unknown>[];
   charges: Record<string, unknown>[];
   orders: Record<string, unknown>[];
+  plans: Record<string, unknown>[];
+  planPeriods: Record<string, unknown>[];
 };
 
 function money(value: unknown, currency = "USD") {
@@ -66,12 +68,21 @@ function Portal() {
       <div className="space-y-8">
         <header><Badge tone="ok">{session.tenant.status}</Badge><h1 className="mt-3 text-3xl font-semibold tracking-tight">欢迎，{session.user.name}</h1><p className="mt-2 text-sm text-muted">所有付费请求均走官方供应商，并经过余额预授权与用量结算。</p></header>
 
-        <section id="overview" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <section id="overview" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <Stat icon={<WalletCards className="size-4" />} label="可用余额" value={money(billing.tenant.balanceMinor - billing.tenant.reservedMinor, billing.tenant.currency)} />
           <Stat icon={<CreditCard className="size-4" />} label="预授权中" value={money(billing.tenant.reservedMinor, billing.tenant.currency)} />
+          <Stat icon={<WalletCards className="size-4" />} label="套餐额度" value={money(billing.tenant.includedBalanceMinor - billing.tenant.includedReservedMinor, billing.tenant.currency)} />
           <Stat icon={<CheckCircle2 className="size-4" />} label="当前套餐" value={billing.tenant.planId} />
           <Stat icon={<KeyRound className="size-4" />} label="有效密钥" value={String(keys.filter((key) => key.enabled && !key.revoked_at).length)} />
         </section>
+
+        <section className="rounded-xl border border-border bg-surface">
+          <div className="border-b border-border px-5 py-4"><h2 className="font-medium">套餐与下期变更</h2><p className="mt-1 text-xs text-subtle">月费从现金余额扣除；包含额度单独记账、不可退款并优先抵扣用量。变更在下一账期生效。</p></div>
+          <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">{billing.plans.map((plan) => <div key={String(plan.id)} className="rounded-lg border border-border bg-elevated p-4"><div className="flex items-center justify-between"><p className="font-medium">{String(plan.name)}</p><Badge tone={plan.id === billing.tenant.planId ? "ok" : plan.id === billing.tenant.pendingPlanId ? "warn" : "default"}>{plan.id === billing.tenant.planId ? "当前" : plan.id === billing.tenant.pendingPlanId ? "已排期" : "可选"}</Badge></div><p className="mt-3 text-sm">{money(plan.monthly_fee_minor, String(plan.currency))} / 月</p><p className="mt-1 text-xs text-muted">含 {money(plan.included_credit_minor, String(plan.currency))} 非退款 API 额度</p>{["owner", "admin", "billing"].includes(session.tenant.role) && plan.id !== billing.tenant.planId ? <Button className="mt-4 w-full" size="sm" variant="secondary" onClick={() => void schedulePlan(String(plan.id), load)}>下期切换</Button> : null}</div>)}</div>
+          {billing.tenant.pendingPlanId ? <p className="border-t border-border px-5 py-3 text-xs text-warn">已安排在 {date(billing.tenant.planChangeEffectiveAt)} 切换到 {billing.tenant.pendingPlanId}。</p> : null}
+        </section>
+
+        <section className="rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">套餐账期历史</h2><p className="mt-1 text-xs text-subtle">每个账期只有一条不可修改记录；未使用的包含额度在续费时到期。</p></div><Rows rows={billing.planPeriods} empty="尚未结算套餐账期" render={(row) => <><div><p className="text-sm font-medium">{String(row.plan_id)} · {date(row.period_start)} – {date(row.period_end)}</p><p className="text-xs text-subtle">月费 {money(row.monthly_fee_minor, String(row.currency))} · 发放 {money(row.included_credit_minor, String(row.currency))} · 到期 {money(row.expired_credit_minor, String(row.currency))}</p></div><Badge tone="ok">{String(row.status)}</Badge></>} /></section>
 
         <section id="keys" className="rounded-xl border border-border bg-surface">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4"><div><h2 className="font-medium">API 密钥</h2><p className="mt-1 text-xs text-subtle">完整密钥只显示一次，服务器只保存 SHA-256 哈希。</p></div><CreateKeyDialog onCreated={load} /></div>
@@ -115,6 +126,13 @@ function Rows({ rows, empty, render }: { rows: Record<string, unknown>[]; empty:
 async function revokeKey(id: string, reload: () => Promise<void>) {
   const response = await fetch("/api/saas/keys", { method: "DELETE", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ id }) });
   if (response.ok) { toast.success("密钥已撤销"); await reload(); } else toast.error("撤销失败");
+}
+
+async function schedulePlan(planId: string, reload: () => Promise<void>) {
+  const response = await fetch("/api/saas/billing", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ action: "change-plan", planId }) });
+  const body = await response.json() as { error?: string };
+  if (!response.ok) { toast.error(body.error || "套餐变更失败"); return; }
+  toast.success("套餐变更已安排在下一账期生效"); await reload();
 }
 
 function CreateKeyDialog({ onCreated }: { onCreated: () => Promise<void> }) {

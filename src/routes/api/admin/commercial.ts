@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertAdminMfa } from "@/lib/authz";
-import { commercialAdminSnapshot, postBalanceAdjustment, publishPrice, settleManualOrder } from "@/lib/saas-billing";
+import { commercialAdminSnapshot, postBalanceAdjustment, publishPrice, scheduleTenantPlanChange, settleManualOrder, settleTenantPlanPeriod } from "@/lib/saas-billing";
 import { getSql } from "@/lib/db";
 import { createStripeRefund, reconcileStripeOrder } from "@/lib/payments";
 import type { CommercialCapability } from "@/lib/commercial-types";
@@ -49,13 +49,9 @@ export const Route = createFileRoute("/api/admin/commercial")({
             if (!rows[0]) throw new Error("TENANT_UPDATE_FAILED");
             result = rows[0];
           } else if (action === "tenant-plan") {
-            const sql = await getSql();
-            const rows = await sql.query(
-              "update relay_tenants t set plan_id=p.id,updated_at=now() from relay_plans p where t.id=$1 and p.id=$2 and p.status='active' returning t.id,t.plan_id",
-              [String(body.tenantId || ""), String(body.planId || "")],
-            );
-            if (!rows[0]) throw new Error("TENANT_PLAN_UPDATE_FAILED");
-            result = rows[0];
+            result = await scheduleTenantPlanChange(String(body.tenantId || ""), String(body.planId || ""), "admin");
+          } else if (action === "settle-plan-period") {
+            result = await settleTenantPlanPeriod(String(body.tenantId || ""));
           } else if (action === "upsert-plan") {
             const sql = await getSql();
             const rows = await sql.query(

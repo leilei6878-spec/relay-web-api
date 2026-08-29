@@ -9,7 +9,10 @@
 3. Configure only official provider credentials.
    Vertex AI requires a dedicated service-account JSON with only the required
    `aiplatform.endpoints.predict` permission, its project ID and location.
-4. Publish active price versions using the Commercial Operations page.
+4. Configure plan monthly fees, non-refundable included credits, limits and
+   features. Fund a QA tenant, settle the period twice and verify only one fee,
+   one grant and a balanced ledger. Record the resulting `plan_review`
+   evidence. Publish active model price versions using Commercial Operations.
 5. Configure `RELAY_PAYMENT_PROVIDER=stripe`, a live `STRIPE_SECRET_KEY` (or
    restricted live key) and `STRIPE_WEBHOOK_SECRET`. Register the exact HTTPS
    endpoint `/api/webhooks/stripe` for `checkout.session.completed`,

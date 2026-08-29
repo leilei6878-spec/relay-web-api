@@ -10,6 +10,8 @@ The fixed catalog includes:
 
 - written commercial rights for every provider referenced by an active price;
 - independent review of every exact active price version;
+- independent review of every active plan snapshot; changing monthly fee,
+  included credit, limits or features creates a new hash-bound requirement;
 - Terms, Privacy, DPA and sales-scope legal approval;
 - Stripe Tax configuration or a written tax exemption decision;
 - live payment, Webhook, refund and dispute acceptance;

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertSaasSession } from "@/lib/saas-auth";
-import { createRechargeOrder, tenantBillingSummary } from "@/lib/saas-billing";
+import { createRechargeOrder, scheduleTenantPlanChange, tenantBillingSummary } from "@/lib/saas-billing";
 import { createStripeCheckout } from "@/lib/payments";
 import { uid } from "@/lib/utils";
 
@@ -18,6 +18,10 @@ export const Route = createFileRoute("/api/saas/billing")({
         const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
         try {
           const action = String(body.action || "checkout");
+          if (action === "change-plan") {
+            const result = await scheduleTenantPlanChange(auth.session.tenantId, String(body.planId || ""), `user:${auth.session.userId}`);
+            return Response.json({ ok: true, result });
+          }
           if (action === "checkout") {
             const result = await createStripeCheckout({
               tenantId: auth.session.tenantId,

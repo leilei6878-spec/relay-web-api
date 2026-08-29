@@ -90,6 +90,16 @@ funds-withdrawn and funds-reinstated events mirror the financial effect through
 separate idempotent ledger transactions. A won dispute restores funds but does
 not automatically reactivate access; an operator must review the account.
 
+## Plan periods
+
+Monthly plans are funded from the prepaid cash wallet. Cash and non-refundable
+included plan credit are separate balances and reservation buckets; usage
+consumes included credit first. Each UTC calendar period snapshots the plan,
+deducts its monthly fee, expires old included credit, grants the new allowance
+and appends a balanced immutable transaction. Concurrent settlement is unique
+per tenant/period. Plan changes are customer-visible but apply only at the next
+period boundary. See [`PLAN_BILLING.md`](./PLAN_BILLING.md).
+
 ## Data and privacy
 
 - Request content is redacted after the configured retention window (default

@@ -26,8 +26,12 @@ function mapTenant(row: Record<string, unknown>): Tenant {
     currency: String(row.currency),
     balanceMinor: Number(row.balance_minor || 0),
     reservedMinor: Number(row.reserved_minor || 0),
+    includedBalanceMinor: Number(row.included_balance_minor || 0),
+    includedReservedMinor: Number(row.included_reserved_minor || 0),
     creditLimitMinor: Number(row.credit_limit_minor || 0),
     monthlyBudgetMinor: Number(row.monthly_budget_minor || 0),
+    pendingPlanId: row.pending_plan_id ? String(row.pending_plan_id) : null,
+    planChangeEffectiveAt: row.plan_change_effective_at ? iso(row.plan_change_effective_at) : null,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   };
@@ -230,6 +234,144 @@ export async function postBalanceAdjustment(
   return { replay: false, transaction: rows[0] };
 }
 
+export async function settleTenantPlanPeriod(tenantId: string, db?: DbLike) {
+  const sql = await database(db);
+  const context = await sql.query<Record<string, unknown>>(
+    `select t.id,t.status,t.plan_id,t.pending_plan_id,t.plan_change_effective_at,t.currency,
+            t.balance_minor,t.reserved_minor,t.included_balance_minor,t.included_reserved_minor,
+            t.credit_limit_minor,t.current_period_start,t.current_period_end,
+            case when t.current_period_end<=now() then date_trunc('month',now()) else t.current_period_start end as target_start,
+            case when t.current_period_end<=now() then date_trunc('month',now())+interval '1 month' else t.current_period_end end as target_end,
+            case when t.current_period_end<=now() and t.pending_plan_id is not null and t.plan_change_effective_at<=now()
+                 then t.pending_plan_id else t.plan_id end as target_plan_id
+       from relay_tenants t where t.id=$1`,
+    [tenantId],
+  );
+  const tenant = context[0];
+  if (!tenant || !["trial", "active"].includes(String(tenant.status))) throw new Error("TENANT_SUSPENDED");
+  const existing = await sql.query<Record<string, unknown>>(
+    "select * from relay_plan_periods where tenant_id=$1 and period_start=$2 limit 1",
+    [tenantId, tenant.target_start],
+  );
+  if (existing[0]) return { replay: true, period: existing[0] };
+
+  const periodId = uid();
+  const transactionId = uid();
+  const rows = await sql.query<Record<string, unknown>>(
+    `with locked as (
+       select t.*,
+              t.current_period_end<=now() as rolling,
+              case when t.current_period_end<=now() then date_trunc('month',now()) else t.current_period_start end as target_start,
+              case when t.current_period_end<=now() then date_trunc('month',now())+interval '1 month' else t.current_period_end end as target_end,
+              case when t.current_period_end<=now() and t.pending_plan_id is not null and t.plan_change_effective_at<=now()
+                   then t.pending_plan_id else t.plan_id end as target_plan_id
+         from relay_tenants t where t.id=$1 and t.status in ('trial','active') for update
+     ), selected as (
+       select l.*,p.name as plan_name,p.status as plan_status,p.currency as plan_currency,
+              p.monthly_fee_minor,p.included_credit_minor,p.limits,p.features,
+              case when l.rolling then l.included_balance_minor else 0 end as expired_credit_minor
+         from locked l join relay_plans p on p.id=l.target_plan_id
+        where p.status='active' and p.currency=l.currency
+          and (not l.rolling or (l.reserved_minor=0 and l.included_reserved_minor=0))
+          and l.balance_minor+l.credit_limit_minor-l.reserved_minor>=p.monthly_fee_minor
+     ), period as (
+       insert into relay_plan_periods
+         (id,tenant_id,plan_id,period_start,period_end,currency,monthly_fee_minor,included_credit_minor,
+          expired_credit_minor,transaction_id,status,plan_snapshot,created_at)
+       select $2,id,target_plan_id,target_start,target_end,currency,monthly_fee_minor,included_credit_minor,
+              expired_credit_minor,$3,'settled',
+              jsonb_build_object('id',target_plan_id,'name',plan_name,'currency',plan_currency,
+                'monthlyFeeMinor',monthly_fee_minor,'includedCreditMinor',included_credit_minor,
+                'limits',limits,'features',features),now()
+         from selected
+        where not exists (select 1 from relay_plan_periods x where x.tenant_id=$1 and x.period_start=selected.target_start)
+       on conflict (tenant_id,period_start) do nothing returning *
+     ), updated as (
+       update relay_tenants t set
+         plan_id=s.target_plan_id,
+         pending_plan_id=case when s.target_plan_id<>s.plan_id then null else s.pending_plan_id end,
+         plan_change_effective_at=case when s.target_plan_id<>s.plan_id then null else s.plan_change_effective_at end,
+         balance_minor=t.balance_minor-s.monthly_fee_minor,
+         included_balance_minor=case when s.rolling then s.included_credit_minor else t.included_balance_minor+s.included_credit_minor end,
+         included_reserved_minor=case when s.rolling then 0 else t.included_reserved_minor end,
+         current_period_start=s.target_start,current_period_end=s.target_end,updated_at=now()
+         from selected s,period pp where t.id=s.id
+       returning t.id,t.balance_minor,t.included_balance_minor,t.currency
+     ), tx as (
+       insert into relay_billing_transactions
+         (id,tenant_id,kind,currency,amount_minor,balance_after_minor,idempotency_key,description,created_at,
+          extra)
+       select $3,$1,'plan_period',u.currency,-p.monthly_fee_minor,u.balance_minor,
+              'plan:period:'||$1||':'||extract(epoch from p.period_start)::bigint,
+              'Plan period '||p.plan_id||' '||p.period_start::date,
+              now(),jsonb_build_object('planPeriodId',p.id,'planId',p.plan_id,
+                'includedCreditMinor',p.included_credit_minor,'expiredCreditMinor',p.expired_credit_minor)
+         from period p join updated u on u.id=p.tenant_id returning *
+     ), wallet_entry as (
+       insert into relay_billing_entries(id,transaction_id,tenant_id,account_code,amount_minor,currency)
+       select $4,tx.id,tx.tenant_id,'tenant_wallet',-p.monthly_fee_minor,tx.currency from tx cross join period p
+     ), credit_entry as (
+       insert into relay_billing_entries(id,transaction_id,tenant_id,account_code,amount_minor,currency)
+       select $5,tx.id,tx.tenant_id,'tenant_included_credit',p.included_credit_minor-p.expired_credit_minor,tx.currency from tx cross join period p
+     ), revenue_entry as (
+       insert into relay_billing_entries(id,transaction_id,tenant_id,account_code,amount_minor,currency)
+       select $6,tx.id,tx.tenant_id,'subscription_revenue',p.monthly_fee_minor,tx.currency from tx cross join period p
+     ), issued_entry as (
+       insert into relay_billing_entries(id,transaction_id,tenant_id,account_code,amount_minor,currency)
+       select $7,tx.id,tx.tenant_id,'included_credit_issued',-p.included_credit_minor,tx.currency from tx cross join period p
+     ), expired_entry as (
+       insert into relay_billing_entries(id,transaction_id,tenant_id,account_code,amount_minor,currency)
+       select $8,tx.id,tx.tenant_id,'included_credit_expired',p.expired_credit_minor,tx.currency from tx cross join period p
+     )
+     select p.*,u.balance_minor as balance_after_minor,u.included_balance_minor as included_balance_after_minor
+       from period p join updated u on u.id=p.tenant_id`,
+    [tenantId, periodId, transactionId, uid(), uid(), uid(), uid(), uid()],
+  );
+  if (rows[0]) return { replay: false, period: rows[0] };
+  const replay = await sql.query<Record<string, unknown>>(
+    "select * from relay_plan_periods where tenant_id=$1 and period_start=$2 limit 1",
+    [tenantId, tenant.target_start],
+  );
+  if (replay[0]) return { replay: true, period: replay[0] };
+  const reason = await sql.query<Record<string, unknown>>(
+    `select t.status,t.currency,t.balance_minor,t.reserved_minor,t.included_reserved_minor,t.credit_limit_minor,
+            t.current_period_end,p.status as plan_status,p.currency as plan_currency,p.monthly_fee_minor
+       from relay_tenants t left join relay_plans p on p.id=$2 where t.id=$1`,
+    [tenantId, tenant.target_plan_id],
+  );
+  const state = reason[0];
+  if (!state || !["trial", "active"].includes(String(state.status))) throw new Error("TENANT_SUSPENDED");
+  if (state.plan_status !== "active" || state.plan_currency !== state.currency) throw new Error("PLAN_NOT_ACTIVE_OR_CURRENCY_MISMATCH");
+  if (new Date(String(state.current_period_end)).getTime() <= Date.now() && (Number(state.reserved_minor) || Number(state.included_reserved_minor))) {
+    throw new Error("PLAN_PERIOD_HAS_ACTIVE_RESERVATIONS");
+  }
+  if (Number(state.balance_minor) + Number(state.credit_limit_minor) - Number(state.reserved_minor) < Number(state.monthly_fee_minor)) {
+    throw new Error("PLAN_RENEWAL_PAYMENT_REQUIRED");
+  }
+  throw new Error("PLAN_PERIOD_SETTLEMENT_CONFLICT");
+}
+
+export async function scheduleTenantPlanChange(tenantId: string, planId: string, actor: string, db?: DbLike) {
+  const sql = await database(db);
+  const rows = await sql.query<Record<string, unknown>>(
+    `update relay_tenants t set
+       pending_plan_id=case when t.plan_id=p.id then null else p.id end,
+       plan_change_effective_at=case when t.plan_id=p.id then null else t.current_period_end end,
+       updated_at=now()
+      from relay_plans p
+     where t.id=$1 and p.id=$2 and p.status='active' and p.currency=t.currency and t.status in ('trial','active')
+     returning t.id,t.plan_id,t.pending_plan_id,t.plan_change_effective_at`,
+    [tenantId, planId],
+  );
+  if (!rows[0]) throw new Error("PLAN_CHANGE_INVALID");
+  await sql.query(
+    `insert into relay_commercial_audit(id,tenant_id,actor_type,actor_id,action,target_type,target_id,detail)
+     values ($1,$2,$3,$4,'plan.change.schedule','tenant',$2,$5::jsonb)`,
+    [uid(), tenantId, actor.startsWith("admin") ? "admin" : "user", actor.slice(0, 120), JSON.stringify({ planId, effectiveAt: rows[0].plan_change_effective_at || null })],
+  );
+  return rows[0];
+}
+
 export async function reserveUsage(
   input: {
     tenantId: string;
@@ -245,12 +387,7 @@ export async function reserveUsage(
   db?: DbLike,
 ): Promise<UsageReservation> {
   const sql = await database(db);
-  await sql.query(
-    `update relay_tenants set current_period_start=date_trunc('month',now()),
-       current_period_end=date_trunc('month',now())+interval '1 month',updated_at=now()
-      where id=$1 and current_period_end<=now()`,
-    [input.tenantId],
-  );
+  await settleTenantPlanPeriod(input.tenantId, sql);
   const tenant = await getTenant(input.tenantId, sql);
   if (!tenant || !["trial", "active"].includes(tenant.status)) throw new Error("TENANT_SUSPENDED");
   const price = await activePrice(input.provider, input.model, input.capability, tenant.currency, sql);
@@ -264,48 +401,58 @@ export async function reserveUsage(
   const chargeId = uid();
   const rows = await sql.query<Record<string, unknown>>(
     `with locked as (
-       select t.id,t.balance_minor,t.reserved_minor,t.credit_limit_minor,t.current_period_start,
+       select t.id,t.balance_minor,t.reserved_minor,t.included_balance_minor,t.included_reserved_minor,
+              t.credit_limit_minor,t.current_period_start,
               coalesce(nullif(t.monthly_budget_minor,0),nullif((p.limits->>'monthlySpendMinor')::bigint,0),0) as effective_monthly_budget
          from relay_tenants t join relay_plans p on p.id=t.plan_id
         where t.id=$1 and t.status in ('trial','active') for update of t
      ), period_spend as (
-       select coalesce(sum(charged_minor),0)::bigint as charged
-         from relay_usage_charges where tenant_id=$1 and status='settled'
+       select coalesce(sum(charged_minor) filter(where status='settled'),0)::bigint as charged,
+              coalesce(sum(reserved_minor) filter(where status='reserved'),0)::bigint as reserved
+         from relay_usage_charges where tenant_id=$1
            and created_at >= (select current_period_start from locked)
+     ), allocation as (
+       select least($2,greatest(0,l.included_balance_minor-l.included_reserved_minor))::bigint as included_reserved,
+              ($2-least($2,greatest(0,l.included_balance_minor-l.included_reserved_minor)))::bigint as cash_reserved
+         from locked l
      ), charge as (
        insert into relay_usage_charges
-         (id,tenant_id,api_key_id,request_id,provider,model,capability,price_book_id,reserved_minor,status,created_at)
-       select $3,$1,$4,$5,$6,$7,$8,$9,$2,'reserved',now() from locked l,period_spend p
-        where l.balance_minor+l.credit_limit_minor-l.reserved_minor >= $2
-          and (l.effective_monthly_budget=0 or p.charged+l.reserved_minor+$2 <= l.effective_monthly_budget)
+         (id,tenant_id,api_key_id,request_id,provider,model,capability,price_book_id,
+          reserved_minor,reserved_included_minor,status,created_at)
+       select $3,$1,$4,$5,$6,$7,$8,$9,$2,a.included_reserved,'reserved',now()
+         from locked l,period_spend p,allocation a
+        where l.balance_minor+l.credit_limit_minor-l.reserved_minor >= a.cash_reserved
+          and (l.effective_monthly_budget=0 or p.charged+p.reserved+$2 <= l.effective_monthly_budget)
        on conflict (tenant_id,request_id) do nothing
-       returning id
+       returning id,reserved_included_minor
      ), updated as (
        update relay_tenants t
-          set reserved_minor=t.reserved_minor+$2,updated_at=now()
-         from charge where t.id=$1 returning t.id
+          set reserved_minor=t.reserved_minor+a.cash_reserved,
+              included_reserved_minor=t.included_reserved_minor+a.included_reserved,updated_at=now()
+         from charge,allocation a where t.id=$1 returning t.id
      )
-     select charge.id from charge join updated on true`,
+     select charge.id,charge.reserved_included_minor from charge join updated on true`,
     [input.tenantId, reservedMinor, chargeId, input.apiKeyId, input.requestId, input.provider, input.model, input.capability, price.id],
   );
   if (!rows[0]) {
     const replay = await sql.query<Record<string, unknown>>(
-      "select id,reserved_minor,charged_minor,status,extra from relay_usage_charges where tenant_id=$1 and request_id=$2",
+      "select id,reserved_minor,reserved_included_minor,charged_minor,charged_included_minor,status,extra from relay_usage_charges where tenant_id=$1 and request_id=$2",
       [input.tenantId, input.requestId],
     );
     if (replay[0]) {
       const extra = replay[0].extra && typeof replay[0].extra === "object" ? replay[0].extra as Record<string, unknown> : {};
       return {
         chargeId: String(replay[0].id), tenantId: input.tenantId, requestId: input.requestId,
-        reservedMinor: Number(replay[0].reserved_minor), price, replay: true,
+        reservedMinor: Number(replay[0].reserved_minor), reservedIncludedMinor: Number(replay[0].reserved_included_minor || 0), price, replay: true,
         status: String(replay[0].status) as UsageReservation["status"],
         chargedMinor: Number(replay[0].charged_minor || 0),
+        chargedIncludedMinor: Number(replay[0].charged_included_minor || 0),
         providerResultCiphertext: typeof extra.providerResultCiphertext === "string" ? extra.providerResultCiphertext : null,
       };
     }
     throw new Error("INSUFFICIENT_BALANCE_OR_BUDGET");
   }
-  return { chargeId, tenantId: input.tenantId, requestId: input.requestId, reservedMinor, price, replay: false, status: "reserved", chargedMinor: 0, providerResultCiphertext: null };
+  return { chargeId, tenantId: input.tenantId, requestId: input.requestId, reservedMinor, reservedIncludedMinor: Number(rows[0].reserved_included_minor || 0), price, replay: false, status: "reserved", chargedMinor: 0, chargedIncludedMinor: 0, providerResultCiphertext: null };
 }
 
 export async function checkpointUsageProviderResult(
@@ -341,9 +488,11 @@ export async function releaseUsageReservation(chargeId: string, reason: string, 
     `with charge as (
        update relay_usage_charges set status='released',settled_at=now(),extra=jsonb_set(extra,'{releaseReason}',to_jsonb($2::text),true)
         where id=$1 and status='reserved'
-       returning tenant_id,reserved_minor
+       returning tenant_id,reserved_minor,reserved_included_minor
      ), tenant as (
-       update relay_tenants t set reserved_minor=greatest(0,t.reserved_minor-c.reserved_minor),updated_at=now()
+       update relay_tenants t set
+         reserved_minor=greatest(0,t.reserved_minor-(c.reserved_minor-c.reserved_included_minor)),
+         included_reserved_minor=greatest(0,t.included_reserved_minor-c.reserved_included_minor),updated_at=now()
          from charge c where t.id=c.tenant_id returning t.id
      ) select * from charge`,
     [chargeId, reason.slice(0, 500)],
@@ -366,7 +515,7 @@ export async function settleUsage(
   );
   const charge = rows[0];
   if (!charge) throw new Error("CHARGE_NOT_FOUND");
-  if (charge.status === "settled") return { replay: true, chargedMinor: Number(charge.charged_minor || 0) };
+  if (charge.status === "settled") return { replay: true, chargedMinor: Number(charge.charged_minor || 0), chargedIncludedMinor: Number(charge.charged_included_minor || 0) };
   if (charge.status !== "reserved") throw new Error("CHARGE_NOT_RESERVED");
   const price = mapPrice({
     id: charge.price_book_id,
@@ -384,34 +533,45 @@ export async function settleUsage(
     status: charge.price_status,
   });
   const chargedMinor = calculateChargeMinor(price, usage);
-  const delta = -chargedMinor;
   const transactionId = uid();
   const idempotency = `usage:settle:${chargeId}`;
   const result = await sql.query<Record<string, unknown>>(
     `with locked as (
-       select id,balance_minor,reserved_minor,credit_limit_minor,currency from relay_tenants where id=$1 for update
+       select id,balance_minor,reserved_minor,included_balance_minor,included_reserved_minor,credit_limit_minor,currency
+         from relay_tenants where id=$1 for update
+     ), allocation as (
+       select least($2::bigint,greatest(0,included_balance_minor-included_reserved_minor+$13::bigint))::bigint as included_charged,
+              ($2::bigint-least($2::bigint,greatest(0,included_balance_minor-included_reserved_minor+$13::bigint)))::bigint as cash_charged
+         from locked
      ), updated as (
        update relay_tenants t
-          set balance_minor=t.balance_minor-$2,reserved_minor=greatest(0,t.reserved_minor-$3),updated_at=now()
-         from locked l where t.id=l.id and l.balance_minor+l.credit_limit_minor-l.reserved_minor+$3 >= $2
+          set balance_minor=t.balance_minor-a.cash_charged,
+              reserved_minor=greatest(0,t.reserved_minor-($3::bigint-$13::bigint)),
+              included_balance_minor=greatest(0,t.included_balance_minor-a.included_charged),
+              included_reserved_minor=greatest(0,t.included_reserved_minor-$13::bigint),updated_at=now()
+         from locked l,allocation a where t.id=l.id
+          and l.balance_minor+l.credit_limit_minor-l.reserved_minor+($3::bigint-$13::bigint)>=a.cash_charged
        returning t.id,t.balance_minor,t.currency
      ), settled as (
        update relay_usage_charges c set status='settled',charged_minor=$2,
-         prompt_tokens=$4,completion_tokens=$5,images=$6,settled_at=now()
-       from updated u where c.id=$7 and c.status='reserved' returning c.*
+         charged_included_minor=a.included_charged,prompt_tokens=$4,completion_tokens=$5,images=$6,settled_at=now()
+       from updated u,allocation a where c.id=$7 and c.status='reserved' returning c.*
      ), tx as (
        insert into relay_billing_transactions
          (id,tenant_id,request_id,kind,currency,amount_minor,balance_after_minor,idempotency_key,description,created_at)
-       select $8,$1,request_id,'charge',u.currency,$9,u.balance_minor,$10,'Official provider usage',now()
-         from settled s join updated u on u.id=s.tenant_id
+       select $8,$1,request_id,'charge',u.currency,-a.cash_charged,u.balance_minor,$9,'Official provider usage',now()
+         from settled s join updated u on u.id=s.tenant_id cross join allocation a
        returning *
      ), wallet_entry as (
        insert into relay_billing_entries(id,transaction_id,tenant_id,account_code,amount_minor,currency)
-       select $11,id,tenant_id,'tenant_wallet',$9,currency from tx
+       select $10,tx.id,tx.tenant_id,'tenant_wallet',-a.cash_charged,tx.currency from tx cross join allocation a
+     ), included_entry as (
+       insert into relay_billing_entries(id,transaction_id,tenant_id,account_code,amount_minor,currency)
+       select $11,tx.id,tx.tenant_id,'tenant_included_credit',-a.included_charged,tx.currency from tx cross join allocation a
      ), revenue_entry as (
        insert into relay_billing_entries(id,transaction_id,tenant_id,account_code,amount_minor,currency)
-       select $12,id,tenant_id,'service_revenue',$2,currency from tx
-     ) select * from tx`,
+       select $12,tx.id,tx.tenant_id,'service_revenue',$2,tx.currency from tx
+     ) select tx.*,a.included_charged from tx cross join allocation a`,
     [
       String(charge.tenant_id),
       chargedMinor,
@@ -421,23 +581,24 @@ export async function settleUsage(
       Math.max(0, Math.floor(usage.images || 0)),
       chargeId,
       transactionId,
-      delta,
       idempotency,
       uid(),
       uid(),
+      uid(),
+      Number(charge.reserved_included_minor || 0),
     ],
   );
   if (!result[0]) {
     const latest = await sql.query<Record<string, unknown>>(
-      "select status,charged_minor from relay_usage_charges where id=$1",
+      "select status,charged_minor,charged_included_minor from relay_usage_charges where id=$1",
       [chargeId],
     );
     if (latest[0]?.status === "settled") {
-      return { replay: true, chargedMinor: Number(latest[0].charged_minor || 0) };
+      return { replay: true, chargedMinor: Number(latest[0].charged_minor || 0), chargedIncludedMinor: Number(latest[0].charged_included_minor || 0) };
     }
     throw new Error("SETTLEMENT_FAILED_OR_BALANCE_CHANGED");
   }
-  return { replay: false, chargedMinor, transactionId };
+  return { replay: false, chargedMinor, chargedIncludedMinor: Number(result[0].included_charged || 0), transactionId };
 }
 
 export async function tenantBillingSummary(tenantId: string, db?: DbLike) {
@@ -460,7 +621,15 @@ export async function tenantBillingSummary(tenantId: string, db?: DbLike) {
        from relay_orders where tenant_id=$1 order by created_at desc limit 100`,
     [tenantId],
   );
-  return { tenant, transactions, charges, orders };
+  const plans = await sql.query<Record<string, unknown>>(
+    "select id,name,currency,monthly_fee_minor,included_credit_minor,limits,features from relay_plans where status='active' and currency=$1 order by monthly_fee_minor,id",
+    [tenant.currency],
+  );
+  const planPeriods = await sql.query<Record<string, unknown>>(
+    "select * from relay_plan_periods where tenant_id=$1 order by period_start desc limit 24",
+    [tenantId],
+  );
+  return { tenant, transactions, charges, orders, plans, planPeriods };
 }
 
 export async function createRechargeOrder(
@@ -560,9 +729,10 @@ export async function publishPrice(
 
 export async function commercialAdminSnapshot(db?: DbLike) {
   const sql = await database(db);
-  const [tenants, plans, prices, orders, transactions, alerts, paymentEvents, refunds, disputes] = await Promise.all([
+  const [tenants, plans, planPeriods, prices, orders, transactions, alerts, paymentEvents, refunds, disputes] = await Promise.all([
     sql.query<Record<string, unknown>>("select * from relay_tenants order by created_at desc limit 500"),
     sql.query<Record<string, unknown>>("select * from relay_plans order by created_at asc"),
+    sql.query<Record<string, unknown>>("select * from relay_plan_periods order by period_start desc limit 500"),
     sql.query<Record<string, unknown>>("select * from relay_price_book order by created_at desc limit 500"),
     sql.query<Record<string, unknown>>(
       `select id,tenant_id,type,status,currency,amount_minor,payment_provider,provider_reference,
@@ -577,5 +747,5 @@ export async function commercialAdminSnapshot(db?: DbLike) {
     sql.query<Record<string, unknown>>("select * from relay_payment_refunds order by created_at desc limit 500"),
     sql.query<Record<string, unknown>>("select * from relay_payment_disputes order by created_at desc limit 500"),
   ]);
-  return { tenants, plans, prices, orders, transactions, alerts, paymentEvents, refunds, disputes };
+  return { tenants, plans, planPeriods, prices, orders, transactions, alerts, paymentEvents, refunds, disputes };
 }

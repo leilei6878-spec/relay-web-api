@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { test } from "node:test";
+import { describe, test } from "node:test";
 import "./test-env.ts";
 import { getCircuit, resetCircuit } from "./circuit.ts";
 import { resetCoordForTests } from "./coord.ts";
@@ -19,55 +19,59 @@ import { persistenceMode } from "./persist-mode.ts";
 import { seedPool } from "./qa-seed.ts";
 
 process.env.RELAY_SKIP_DB = "1";
-process.env.RELAY_WORKER_DEAD_MS = "40";
+process.env.RELAY_WORKER_DEAD_MS = "2000";
 process.env.RELAY_CLAIM_GRACE_MS = "5";
 
-async function finishOk(claimed: Awaited<ReturnType<typeof claimNext>>, text = "hello") {
-  return finishJob(claimed.job!.id, {
-    ok: true,
-    text,
-    leaseId: claimed.job!.leaseId,
-    fencingToken: claimed.job!.fencingToken,
-    attemptId: claimed.job!.attemptId,
-    workerId: claimed.job!.workerId,
-  });
-}
+describe("job queue chaos", { concurrency: false }, () => {
 
 test("chaos 1+13: kill / slow worker requeues, no lost request", async () => {
-  await seedPool(2);
-  const queued = await enqueueChat("slow", "chatgpt-web-auto", 200, [], { requestId: "R-slow" });
-  assert.equal(queued.ok, true);
-  if (!queued.ok) return;
-  const claimed = await claimNext("w-slow");
-  assert.ok(claimed.job);
-  await new Promise((r) => setTimeout(r, 80));
-  const job = await getJob(queued.job.id);
-  assert.ok(job);
-  assert.notEqual(job.status, "running");
-  assert.ok(job.status === "queued" || job.status === "dead" || job.status === "error");
-  assert.ok(job.requestId === "R-slow");
+  const previousDeadMs = process.env.RELAY_WORKER_DEAD_MS;
+  process.env.RELAY_WORKER_DEAD_MS = "40";
+  try {
+    await seedPool(2);
+    const queued = await enqueueChat("slow", "chatgpt-web-auto", 200, [], { requestId: "R-slow" });
+    assert.equal(queued.ok, true);
+    if (!queued.ok) return;
+    const claimed = await claimNext("w-slow");
+    assert.ok(claimed.job);
+    await new Promise((r) => setTimeout(r, 80));
+    const job = await getJob(queued.job.id);
+    assert.ok(job);
+    assert.notEqual(job.status, "running");
+    assert.ok(job.status === "queued" || job.status === "dead" || job.status === "error");
+    assert.ok(job.requestId === "R-slow");
+  } finally {
+    process.env.RELAY_WORKER_DEAD_MS = previousDeadMs;
+  }
 });
 
 test("chaos 2+14: recovered worker stale result rejected; duplicate callback rejected", async () => {
-  await seedPool(2);
-  const queued = await enqueueChat("dup", "chatgpt-web-auto", 8000, []);
-  assert.equal(queued.ok, true);
-  if (!queued.ok) return;
-  const first = await claimNext("w1");
-  assert.ok(first.job);
-  const staleProof = {
-    leaseId: first.job!.leaseId!,
-    fencingToken: first.job!.fencingToken!,
-    attemptId: first.job!.attemptId!,
-    workerId: "w1",
-  };
-  const ok = await finishJob(first.job!.id, { ok: true, text: "one", ...staleProof });
-  assert.equal(ok.ok, true);
-  const dup = await finishJob(first.job!.id, { ok: true, text: "two", ...staleProof });
-  assert.equal(dup.ok, false);
-  assert.match(dup.error || "", /STALE_LEASE|terminal/);
-  const job = await getJob(first.job!.id);
-  assert.equal(job?.text, "one");
+  const previousDeadMs = process.env.RELAY_WORKER_DEAD_MS;
+  process.env.RELAY_WORKER_DEAD_MS = "2000";
+  try {
+    await seedPool(2);
+    const queued = await enqueueChat("dup", "chatgpt-web-auto", 8000, []);
+    assert.equal(queued.ok, true);
+    if (!queued.ok) return;
+    const first = await claimNext("w1");
+    assert.ok(first.job);
+    const staleProof = {
+      leaseId: first.job!.leaseId!,
+      fencingToken: first.job!.fencingToken!,
+      attemptId: first.job!.attemptId!,
+      workerId: "w1",
+    };
+    const ok = await finishJob(first.job!.id, { ok: true, text: "one", ...staleProof });
+    assert.equal(ok.ok, true);
+    const dup = await finishJob(first.job!.id, { ok: true, text: "two", ...staleProof });
+    assert.equal(dup.ok, false);
+    assert.match(dup.error || "", /STALE_LEASE|terminal/);
+    const job = await getJob(first.job!.id);
+    assert.equal(job?.text, "one");
+  } finally {
+    if (previousDeadMs === undefined) delete process.env.RELAY_WORKER_DEAD_MS;
+    else process.env.RELAY_WORKER_DEAD_MS = previousDeadMs;
+  }
 });
 
 test("chaos 6: same Idempotency-Key x20 collapses to one job", async () => {
@@ -198,4 +202,6 @@ test("postgres SoT does not write jobs.json for scheduling", async () => {
   assert.equal(queued.ok, true);
   assert.equal(fileWriteCount(), before);
   delete process.env.RELAY_SOT;
+});
+
 });

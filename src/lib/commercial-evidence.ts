@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getSql, type Sql } from "./db";
 import { uid } from "./utils";
 
@@ -6,6 +7,7 @@ type DbLike = Pick<Sql, "query">;
 export type CommercialEvidenceRequirement =
   | "provider_rights"
   | "price_review"
+  | "plan_review"
   | "legal_documents"
   | "tax_review"
   | "payment_acceptance"
@@ -22,12 +24,13 @@ export type CommercialEvidenceDefinition = {
   label: string;
   description: string;
   maxValidityDays: number;
-  scope: "global" | "provider" | "price";
+  scope: "global" | "provider" | "price" | "plan";
 };
 
 export const COMMERCIAL_EVIDENCE_CATALOG: readonly CommercialEvidenceDefinition[] = [
   { requirement: "provider_rights", label: "供应商商业授权", description: "每个启用供应商的书面 API/商业使用权。", maxValidityDays: 365, scope: "provider" },
   { requirement: "price_review", label: "价格版本复核", description: "逐个有效价格版本核对供应商成本、币种、加价和亏损边界。", maxValidityDays: 365, scope: "price" },
+  { requirement: "plan_review", label: "套餐版本复核", description: "逐个有效套餐核对月费、非退款包含额度、限制和功能；任何字段变化都会产生新证据主题。", maxValidityDays: 365, scope: "plan" },
   { requirement: "legal_documents", label: "法务文件批准", description: "Terms、Privacy、DPA 和销售地域经法务批准。", maxValidityDays: 365, scope: "global" },
   { requirement: "tax_review", label: "税务方案批准", description: "Stripe Tax 配置或适用销售范围的书面免税结论。", maxValidityDays: 365, scope: "global" },
   { requirement: "payment_acceptance", label: "真实支付验收", description: "Live 支付、Webhook、退款和拒付流程验收。", maxValidityDays: 90, scope: "global" },
@@ -85,6 +88,22 @@ function publicEvidence(row: EvidenceRow) {
   };
 }
 
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function planSubject(plan: Record<string, unknown>) {
+  const snapshot = {
+    id: String(plan.id), currency: String(plan.currency), monthlyFeeMinor: Number(plan.monthly_fee_minor || 0),
+    includedCreditMinor: Number(plan.included_credit_minor || 0), limits: plan.limits || {}, features: plan.features || {},
+  };
+  return `${snapshot.id}:${createHash("sha256").update(canonical(snapshot)).digest("hex")}`;
+}
+
 function normalizeArtifactRef(value: string) {
   const ref = value.trim();
   if (ref.length < 3 || ref.length > 500 || /[\r\n\0]/.test(ref) || secretLike.test(ref)) {
@@ -112,6 +131,11 @@ async function normalizeSubject(requirement: CommercialEvidenceRequirement, valu
     if (!providerSubjects.has(subject)) throw new Error("COMMERCIAL_EVIDENCE_PROVIDER_INVALID");
     return subject;
   }
+  if (definition.scope === "plan") {
+    const plans = await db.query<Record<string, unknown>>("select id,currency,monthly_fee_minor,included_credit_minor,limits,features from relay_plans where status='active'");
+    if (!plans.some((plan) => planSubject(plan) === subject)) throw new Error("COMMERCIAL_EVIDENCE_PLAN_NOT_FOUND");
+    return subject;
+  }
   const price = await db.query<{ id: string }>("select id from relay_price_book where id=$1", [subject]);
   if (!price[0]) throw new Error("COMMERCIAL_EVIDENCE_PRICE_NOT_FOUND");
   return subject;
@@ -122,14 +146,18 @@ export async function expectedCommercialEvidence(env: NodeJS.ProcessEnv, db?: Db
   const globals = COMMERCIAL_EVIDENCE_CATALOG
     .filter((item) => item.scope === "global" && (item.requirement !== "email_delivery" || env.RELAY_SAAS_REGISTRATION_ENABLED === "1"))
     .map((item) => ({ requirement: item.requirement, subject: "global", label: item.label, description: item.description, maxValidityDays: item.maxValidityDays }));
-  const prices = await sql.query<{ id: string; provider: string; model: string; capability: string; version: number }>(
-    `select id,provider,model,capability,version from relay_price_book
-      where status='active' and effective_from<=now() and (effective_to is null or effective_to>now())
-      order by provider,model,capability,version`,
-  );
+  const [prices, plans] = await Promise.all([
+    sql.query<{ id: string; provider: string; model: string; capability: string; version: number }>(
+      `select id,provider,model,capability,version from relay_price_book
+        where status='active' and effective_from<=now() and (effective_to is null or effective_to>now())
+        order by provider,model,capability,version`,
+    ),
+    sql.query<Record<string, unknown>>("select id,name,currency,monthly_fee_minor,included_credit_minor,limits,features from relay_plans where status='active' order by id"),
+  ]);
   const providers = [...new Set(prices.map((price) => price.provider))].sort();
   const providerDefinition = definitionFor("provider_rights");
   const priceDefinition = definitionFor("price_review");
+  const planDefinition = definitionFor("plan_review");
   return [
     ...globals,
     ...providers.map((provider) => ({
@@ -145,6 +173,13 @@ export async function expectedCommercialEvidence(env: NodeJS.ProcessEnv, db?: Db
       label: `${priceDefinition.label} · ${price.provider}/${price.model}/${price.capability} v${price.version}`,
       description: priceDefinition.description,
       maxValidityDays: priceDefinition.maxValidityDays,
+    })),
+    ...plans.map((plan) => ({
+      requirement: "plan_review" as const,
+      subject: planSubject(plan),
+      label: `${planDefinition.label} · ${String(plan.name || plan.id)} · ${String(plan.currency)} ${Number(plan.monthly_fee_minor || 0) / 100}/月`,
+      description: planDefinition.description,
+      maxValidityDays: planDefinition.maxValidityDays,
     })),
   ];
 }

@@ -217,6 +217,7 @@ export function bootProductionGuard() {
     void import("./account-inspections").then((m) => m.startInspectionCleanupScheduler()).catch(() => undefined);
     void import("./commercial-monitor").then((m) => m.startCommercialMonitor()).catch(() => undefined);
     void import("./data-retention").then((m) => m.startDataRetentionScheduler()).catch(() => undefined);
+    void import("./plan-renewal-scheduler").then((m) => m.startPlanRenewalScheduler()).catch(() => undefined);
   }
 }
 

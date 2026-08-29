@@ -8,8 +8,11 @@ import {
   getTenant,
   postBalanceAdjustment,
   publishPrice,
+  releaseUsageReservation,
   reserveUsage,
+  scheduleTenantPlanChange,
   settleUsage,
+  settleTenantPlanPeriod,
   checkpointUsageProviderResult,
   decodeUsageProviderResult,
 } from "./saas-billing.ts";
@@ -25,7 +28,7 @@ async function database() {
     "0004_schema_meta.sql",
     "0005_account_operations.sql",
     "0006_account_availability_samples.sql",
-    "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql",
+    "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql",
   ]) {
     await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   }
@@ -238,5 +241,135 @@ test("expired billing periods roll forward and plan monthly budget is tenant-wid
     () => reserveUsage({ tenantId: created.tenantId, apiKeyId: "key-period", requestId: "period-2", provider: "openai", model: "gpt-image-period", capability: "image", images: 2 }, db),
     /INSUFFICIENT_BALANCE_OR_BUDGET/,
   );
+  await pg.close();
+});
+
+test("plan period settlement charges monthly cash, grants non-refundable credit once and balances five ledger accounts", async () => {
+  const { pg, db } = await database();
+  const created = await createTenantOwner({ tenantName: "Plan Co", ownerName: "Owner", email: "plan@example.test", password: "commercial-password-plan" }, db);
+  await postBalanceAdjustment({ tenantId: created.tenantId, deltaMinor: 3000, kind: "recharge", idempotencyKey: "plan-fund" }, db);
+  await pg.query("update relay_plans set monthly_fee_minor=2000,included_credit_minor=1000 where id='growth'");
+  await pg.query("update relay_tenants set plan_id='growth' where id=$1", [created.tenantId]);
+  const first = await settleTenantPlanPeriod(created.tenantId, db);
+  assert.equal(first.replay, false);
+  const replay = await settleTenantPlanPeriod(created.tenantId, db);
+  assert.equal(replay.replay, true);
+  const tenant = await getTenant(created.tenantId, db);
+  assert.equal(tenant?.balanceMinor, 1000);
+  assert.equal(tenant?.includedBalanceMinor, 1000);
+  const periods = await pg.query<Record<string, unknown>>("select * from relay_plan_periods where tenant_id=$1", [created.tenantId]);
+  assert.equal(periods.rows.length, 1);
+  assert.equal(Number(periods.rows[0]?.monthly_fee_minor), 2000);
+  assert.equal(Number(periods.rows[0]?.included_credit_minor), 1000);
+  const entries = await pg.query<{ account_code: string; amount: bigint }>(
+    `select e.account_code,sum(e.amount_minor)::bigint as amount from relay_billing_entries e
+      join relay_billing_transactions t on t.id=e.transaction_id
+     where t.tenant_id=$1 and t.kind='plan_period' group by e.account_code order by e.account_code`,
+    [created.tenantId],
+  );
+  assert.deepEqual(entries.rows.map((row) => [row.account_code, Number(row.amount)]), [
+    ["included_credit_expired", 0], ["included_credit_issued", -1000], ["subscription_revenue", 2000],
+    ["tenant_included_credit", 1000], ["tenant_wallet", -2000],
+  ]);
+  assert.equal(entries.rows.reduce((sum, row) => sum + Number(row.amount), 0), 0);
+  await assert.rejects(() => pg.query("delete from relay_plan_periods where tenant_id=$1", [created.tenantId]), /append-only/);
+  await pg.close();
+});
+
+test("usage reserves included credit before cash, settles split ledger and releases both buckets", async () => {
+  const { pg, db } = await database();
+  const created = await createTenantOwner({ tenantName: "Included Co", ownerName: "Owner", email: "included@example.test", password: "commercial-password-included" }, db);
+  await postBalanceAdjustment({ tenantId: created.tenantId, deltaMinor: 100, kind: "recharge", idempotencyKey: "included-cash" }, db);
+  await pg.query("update relay_plans set monthly_fee_minor=0,included_credit_minor=100 where id='growth'");
+  await pg.query("update relay_tenants set plan_id='growth' where id=$1", [created.tenantId]);
+  await settleTenantPlanPeriod(created.tenantId, db);
+  await pg.query(`insert into relay_tenant_api_keys(id,tenant_id,name,key_hash,key_prefix,key_hint,created_by) values ('included-key',$1,'default','included-hash','sk-included','sk-included…test',$2)`, [created.tenantId, created.userId]);
+  await pg.query(`insert into relay_price_book(id,version,provider,model,capability,currency,image_price_minor,effective_from,status) values ('included-price',1,'openai','gpt-included','image','USD',120,now()-interval '1 minute','active')`);
+  const reserved = await reserveUsage({ tenantId: created.tenantId, apiKeyId: "included-key", requestId: "included-use", provider: "openai", model: "gpt-included", capability: "image", images: 1 }, db);
+  assert.equal(reserved.reservedMinor, 120);
+  assert.equal(reserved.reservedIncludedMinor, 100);
+  let tenant = await getTenant(created.tenantId, db);
+  assert.equal(tenant?.reservedMinor, 20);
+  assert.equal(tenant?.includedReservedMinor, 100);
+  const settled = await settleUsage(reserved.chargeId, { images: 1 }, db);
+  assert.equal(settled.chargedMinor, 120);
+  assert.equal(settled.chargedIncludedMinor, 100);
+  tenant = await getTenant(created.tenantId, db);
+  assert.equal(tenant?.balanceMinor, 80);
+  assert.equal(tenant?.includedBalanceMinor, 0);
+  assert.equal(tenant?.reservedMinor, 0);
+  assert.equal(tenant?.includedReservedMinor, 0);
+  const split = await pg.query<{ account_code: string; amount: bigint }>(
+    `select e.account_code,e.amount_minor::bigint as amount from relay_billing_entries e
+      join relay_billing_transactions t on t.id=e.transaction_id where t.request_id='included-use' order by e.account_code`,
+  );
+  assert.deepEqual(split.rows.map((row) => [row.account_code, Number(row.amount)]), [
+    ["service_revenue", 120], ["tenant_included_credit", -100], ["tenant_wallet", -20],
+  ]);
+  await pg.query(`insert into relay_price_book(id,version,provider,model,capability,currency,image_price_minor,effective_from,status) values ('release-price',1,'openai','gpt-release','image','USD',20,now()-interval '1 minute','active')`);
+  const held = await reserveUsage({ tenantId: created.tenantId, apiKeyId: "included-key", requestId: "release-use", provider: "openai", model: "gpt-release", capability: "image", images: 1 }, db);
+  assert.equal(held.reservedIncludedMinor, 0);
+  assert.equal(await releaseUsageReservation(held.chargeId, "test", db), true);
+  tenant = await getTenant(created.tenantId, db);
+  assert.equal(tenant?.reservedMinor, 0);
+  await pg.close();
+});
+
+test("scheduled plan change applies only at rollover, expires unused credit and is idempotent", async () => {
+  const { pg, db } = await database();
+  const created = await createTenantOwner({ tenantName: "Upgrade Co", ownerName: "Owner", email: "upgrade@example.test", password: "commercial-password-upgrade" }, db);
+  await postBalanceAdjustment({ tenantId: created.tenantId, deltaMinor: 100, kind: "recharge", idempotencyKey: "upgrade-fund" }, db);
+  await pg.query("update relay_plans set included_credit_minor=100 where id='starter'");
+  await pg.query("update relay_plans set monthly_fee_minor=50,included_credit_minor=200 where id='growth'");
+  await pg.query("update relay_tenants set current_period_start=date_trunc('month',now())-interval '1 month',current_period_end=date_trunc('month',now())+interval '1 month' where id=$1", [created.tenantId]);
+  await settleTenantPlanPeriod(created.tenantId, db);
+  const scheduled = await scheduleTenantPlanChange(created.tenantId, "growth", `user:${created.userId}`, db);
+  assert.equal(scheduled.plan_id, "starter");
+  assert.equal(scheduled.pending_plan_id, "growth");
+  assert.equal((await getTenant(created.tenantId, db))?.planId, "starter");
+  await pg.query("update relay_tenants set current_period_start=now()-interval '2 months',current_period_end=now()-interval '1 month',plan_change_effective_at=now()-interval '1 month' where id=$1", [created.tenantId]);
+  const renewal = await settleTenantPlanPeriod(created.tenantId, db);
+  assert.equal(renewal.replay, false);
+  const tenant = await getTenant(created.tenantId, db);
+  assert.equal(tenant?.planId, "growth");
+  assert.equal(tenant?.pendingPlanId, null);
+  assert.equal(tenant?.balanceMinor, 50);
+  assert.equal(tenant?.includedBalanceMinor, 200);
+  const periods = await pg.query<{ expired_credit_minor: bigint }>("select expired_credit_minor from relay_plan_periods where tenant_id=$1 order by period_start", [created.tenantId]);
+  assert.deepEqual(periods.rows.map((row) => Number(row.expired_credit_minor)), [0, 100]);
+  assert.equal((await settleTenantPlanPeriod(created.tenantId, db)).replay, true);
+  await pg.close();
+});
+
+test("paid renewal fails closed without cash and does not grant included credit", async () => {
+  const { pg, db } = await database();
+  const created = await createTenantOwner({ tenantName: "Past Due Co", ownerName: "Owner", email: "pastdue@example.test", password: "commercial-password-pastdue" }, db);
+  await pg.query("update relay_plans set monthly_fee_minor=500,included_credit_minor=200 where id='growth'");
+  await pg.query("update relay_tenants set plan_id='growth',current_period_start=now()-interval '2 months',current_period_end=now()-interval '1 month' where id=$1", [created.tenantId]);
+  await assert.rejects(() => settleTenantPlanPeriod(created.tenantId, db), /PLAN_RENEWAL_PAYMENT_REQUIRED/);
+  const tenant = await getTenant(created.tenantId, db);
+  assert.equal(tenant?.balanceMinor, 0);
+  assert.equal(tenant?.includedBalanceMinor, 0);
+  const periods = await pg.query<{ count: number }>("select count(*)::int as count from relay_plan_periods where tenant_id=$1", [created.tenantId]);
+  assert.equal(periods.rows[0]?.count, 0);
+  const planTransactions = await pg.query<{ count: number }>("select count(*)::int as count from relay_billing_transactions where tenant_id=$1 and kind='plan_period'", [created.tenantId]);
+  assert.equal(planTransactions.rows[0]?.count, 0);
+  await pg.close();
+});
+
+test("concurrent plan settlement creates one period, one grant and one ledger transaction", async () => {
+  const { pg, db } = await database();
+  const created = await createTenantOwner({ tenantName: "Concurrent Plan", ownerName: "Owner", email: "concurrent-plan@example.test", password: "commercial-password-concurrent-plan" }, db);
+  await pg.query("update relay_plans set included_credit_minor=10 where id='starter'");
+  const [first, second] = await Promise.all([
+    settleTenantPlanPeriod(created.tenantId, db),
+    settleTenantPlanPeriod(created.tenantId, db),
+  ]);
+  assert.deepEqual([first.replay, second.replay].sort(), [false, true]);
+  assert.equal((await getTenant(created.tenantId, db))?.includedBalanceMinor, 10);
+  const periods = await pg.query<{ count: number }>("select count(*)::int as count from relay_plan_periods where tenant_id=$1", [created.tenantId]);
+  assert.equal(periods.rows[0]?.count, 1);
+  const transactions = await pg.query<{ count: number }>("select count(*)::int as count from relay_billing_transactions where tenant_id=$1 and kind='plan_period'", [created.tenantId]);
+  assert.equal(transactions.rows[0]?.count, 1);
   await pg.close();
 });
