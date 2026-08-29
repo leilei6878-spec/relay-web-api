@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc11`
-- schema: `13`
-- runtime commit: `29b5f564fb7ed2962caaeba1835822bff71a5752`
+- production version: `0.10.0-rc12`
+- schema: `14`
+- runtime commit: `192c99f2f145917d837fabad93feaa01f6393758`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -20,7 +20,7 @@ complete when only design intent or a narrow test exists.
 |---|---|---|
 | Commercial traffic uses only official/authorized upstreams | `commercial-gateway.ts` resolves only `openai:`, `google:`, `vertex:` and `leonardo:` official models; route-order tests prove the branch executes before web-account selection | Code complete; real upstream production calls blocked by missing contracts/credentials |
 | Existing web pool remains internal | Separate `sk-relay-*` and `sk-saas-*` principals; commercial gateway has no Worker/account selector import | Complete |
-| Tenants, users, RBAC and MFA | SQL tenant/user/membership/session/invite schema; owner/admin/billing/developer/viewer gates; TOTP and recovery-code tests; browser portal QA | Complete |
+| Tenants, users, RBAC and MFA | SQL tenant/user/membership/session/invite schema; owner/admin/billing/developer/viewer gates; session-level TOTP proof, bounded freshness, atomic one-time recovery and privileged mutation step-up | Complete in code/dark launch; real privileged-user enrollment pending |
 | Hash-only tenant API keys | 256-bit one-time secret, SHA-256 lookup, hints-only listing, revocation and tenant scoping tests | Complete |
 | Plans and limits | Plan features intersect key scopes/models; disjoint model sets deny all; plan/key RPM, concurrency, daily and monthly limits; customer/admin next-period changes; hash-bound plan-review evidence | Complete |
 | Monthly billing periods | Unique append-only UTC periods atomically debit monthly fee, expire old credit, grant new credit, snapshot plan and append balanced ledger; hourly retry/monitoring and concurrent replay tests | Complete |
@@ -30,7 +30,7 @@ complete when only design intent or a narrow test exists.
 | Customer self-service and commercial admin UI | Login/register/reset/verification, keys, balance, usage, members, Checkout; tenant/price/order/refund/dispute/admin controls; browser QA | Complete |
 | Official provider adapters and sandbox | OpenAI, Gemini API, Vertex AI and Leonardo request/usage adapters; every active provider requires its own current credential; cost-capped sandbox; append-only content-minimising provider/model/capability/currency Live evidence | Code and dark-launch acceptance complete; live Canary acceptance still requires contracts, credentials and reviewed prices |
 | Tenant data isolation | Tenant-bound sessions/keys, tenant-filtered history/usage and no commercial exposure of account/Worker/proxy topology | Complete |
-| CSRF/Origin and session security | Customer HttpOnly/Secure cookies and CSRF double submit; trusted Origin checks; administrator SHA-256-only short sessions, Strict cookies, revoke/logout, distributed login throttle and loopback-only root recovery | Complete |
+| CSRF/Origin and session security | Customer HttpOnly/Secure cookies, CSRF double submit and session-level fresh MFA for high-risk mutations; trusted Origin checks; administrator SHA-256-only short sessions, Strict cookies, revoke/logout, distributed login throttle and loopback-only root recovery | Complete |
 | Administrator MFA | Versioned encrypted TOTP, password+TOTP login, MFA-aware commercial administration guards and readiness blockers | Code/dark-launch complete; real authenticator enrollment intentionally pending |
 | Audit, privacy and retention | Commercial audit rows, request/result redaction, session/check retention and non-deleting billing policy | Complete |
 | Monitoring and alerting | Worker/failure/balance/reservation/payment/refund/dispute/evidence/plan-period/provider-credential/exact-Canary signals, durable deduplication and optional Webhook delivery | Complete in code; production alert receiver not configured |
@@ -40,12 +40,12 @@ complete when only design intent or a narrow test exists.
 | CI/CD release gates | GitHub Actions workflow runs all tests, type/lint/build, audit and SBOM | Workflow complete; cannot run remotely while GitHub push is denied |
 | HA production topology | Versioned contract requires 2 Gateways, 2 Workers, managed multi-AZ PostgreSQL/Redis and replicated object storage | Not deployed; current host is one Gateway, one Worker and one VPS data plane |
 | Offsite backup and recovery | Offsite mirroring script plus fail-closed full-Git check; same-host isolated full restore drill below | Same-host recovery proven; distinct-account/region offsite target missing |
-| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 13, remote-root denial, short-session, plan-period and exact-provider probes, hard MFA/Canary/evidence gates and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
+| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 14, remote-root denial, administrator/customer MFA session, plan-period and exact-provider probes, hard MFA/Canary/evidence gates and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
 
 ## Final recovery drill
 
 Latest accepted backup:
-`/opt/backups/relay-partial-tax-refund-final-20260829141946`
+`/opt/backups/relay-tenant-mfa-final-20260829145529`
 
 The first rc10 environment update contained an incorrect full commit suffix.
 Independent Git-bundle validation detected it; the Gateway was rebuilt from
@@ -70,7 +70,7 @@ The corrected backup then passed the complete drill:
 - all SHA-256 checks: pass;
 - PostgreSQL custom dump restored into an isolated database: pass;
 - live/restored database signature comparison: pass;
-- restored schema: 13;
+- restored schema: 14;
 - restored public tables: 43;
 - restored accounts: 5;
 - restored administrator sessions: 0;
@@ -78,7 +78,7 @@ The corrected backup then passed the complete drill:
 - distinct immutable billing/payment/config/sandbox/evidence/plan-period triggers: 7;
 - restored evidence/sandbox/configuration/tenant/order/ledger rows: 0;
 - filesystem storage extraction: 272 files;
-- MinIO volume extraction: 169 files at the latest drill;
+- MinIO volume extraction: 175 files at the latest drill;
 - independent Git clone/fsck and exact HEAD comparison: pass;
 - temporary database and restore directories removed after the drill.
 
