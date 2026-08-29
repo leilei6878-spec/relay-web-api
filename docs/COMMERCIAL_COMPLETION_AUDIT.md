@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc10`
+- production version: `0.10.0-rc11`
 - schema: `13`
-- runtime commit: `43d8185d38e8deed0b78210734766139936f82df`
+- runtime commit: `29b5f564fb7ed2962caaeba1835822bff71a5752`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -34,7 +34,7 @@ complete when only design intent or a narrow test exists.
 | Administrator MFA | Versioned encrypted TOTP, password+TOTP login, MFA-aware commercial administration guards and readiness blockers | Code/dark-launch complete; real authenticator enrollment intentionally pending |
 | Audit, privacy and retention | Commercial audit rows, request/result redaction, session/check retention and non-deleting billing policy | Complete |
 | Monitoring and alerting | Worker/failure/balance/reservation/payment/refund/dispute/evidence/plan-period/provider-credential/exact-Canary signals, durable deduplication and optional Webhook delivery | Complete in code; production alert receiver not configured |
-| Payment/tax/refund/dispute | Raw Stripe signature verification, exact identity/amount/currency checks, idempotent settlement, full taxed refunds and dispute fund events | Complete in code; live Stripe/Tax drill not possible without merchant configuration |
+| Payment/tax/refund/dispute | Raw Stripe signature verification, exact identity/amount/currency checks, cumulative single-line partial-tax allocation, ambiguous external refund rejection, idempotent balanced settlement and dispute fund events | Complete in code; live Stripe/Tax export drill not possible without merchant configuration |
 | Versioned commercial configuration | Fixed catalog, encrypted hint-only secret versions, fixed official connection tests, atomic activation/rollback, hard launch gates, audit and SSRF-resistant Webhooks | Complete |
 | External launch evidence | Append-only, SHA-256-bound, independently reviewed and expiring evidence for provider rights, model prices, canonical plan snapshots, legal/tax, live payments, email, HA, offsite restore, alerts, load, soak and CI; readiness/Checkout fail closed | Complete in code and dark-launch production; genuine external evidence is intentionally absent |
 | CI/CD release gates | GitHub Actions workflow runs all tests, type/lint/build, audit and SBOM | Workflow complete; cannot run remotely while GitHub push is denied |
@@ -45,12 +45,13 @@ complete when only design intent or a narrow test exists.
 ## Final recovery drill
 
 Latest accepted backup:
-`/opt/backups/relay-provider-readiness-corrected-20260829135821`
+`/opt/backups/relay-partial-tax-refund-final-20260829141946`
 
 The first rc10 environment update contained an incorrect full commit suffix.
 Independent Git-bundle validation detected it; the Gateway was rebuilt from
 `git rev-parse HEAD`, and runtime, `.deploy-rev` and source now match exactly.
-Only the corrected backup above is accepted as current evidence.
+The rc10 pre-correction backup remains excluded; the current backup above also
+passed the exact-identity check.
 
 The initial drill discovered that a bundle created from the server's historical
 shallow clone was checksum-valid but not independently clonable. This is why a
@@ -77,7 +78,7 @@ The corrected backup then passed the complete drill:
 - distinct immutable billing/payment/config/sandbox/evidence/plan-period triggers: 7;
 - restored evidence/sandbox/configuration/tenant/order/ledger rows: 0;
 - filesystem storage extraction: 272 files;
-- MinIO volume extraction: 163 files at the latest drill;
+- MinIO volume extraction: 169 files at the latest drill;
 - independent Git clone/fsck and exact HEAD comparison: pass;
 - temporary database and restore directories removed after the drill.
 
