@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import {
   buildObjectMediaManifest,
@@ -24,6 +25,9 @@ test("object-media manifest is deterministic, content-addressed and round-trips 
   assert.ok(manifest.files.every((entry) => /^[0-9a-f]{64}$/.test(entry.sha256)));
   assert.ok(manifest.files.every((entry) => !entry.path.includes("\\") && !entry.path.startsWith("/")));
   assert.deepEqual(await verifyObjectMediaManifest(root, manifest), { ok: true, fileCount: 2, totalBytes: 16 });
+  const cli = spawnSync(process.execPath, ["scripts/object-media-manifest.mjs", root, "--summary"], { encoding: "utf8" });
+  assert.equal(cli.status, 0, cli.stderr || cli.stdout);
+  assert.deepEqual(JSON.parse(cli.stdout), { ok: true, fileCount: 2, totalBytes: 16 });
   const manifestPath = join(root, "..", `manifest-${process.pid}.json`);
   t.after(() => rmSync(manifestPath, { force: true }));
   await writeObjectMediaManifest(manifestPath, manifest);

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { chmod, lstat, readdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 async function sha256File(path) {
   const hash = createHash("sha256");
@@ -102,3 +103,11 @@ export async function writeObjectMediaManifest(path, manifest) {
   return path;
 }
 
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const root = process.argv[2];
+  if (!root) throw new Error("usage: node scripts/object-media-manifest.mjs <directory> [--summary]");
+  const manifest = await buildObjectMediaManifest(root);
+  console.log(JSON.stringify(process.argv.includes("--summary")
+    ? { ok: true, fileCount: manifest.fileCount, totalBytes: manifest.totalBytes }
+    : manifest));
+}
