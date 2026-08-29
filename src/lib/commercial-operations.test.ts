@@ -61,6 +61,10 @@ test("offsite backup includes database/storage/git and mirrors object media", as
   const source = await readFile("scripts/offsite-backup.mjs", "utf8");
   assert.match(source, /backup\.mjs/);
   assert.match(source, /git", \["bundle"/);
+  assert.match(source, /--is-shallow-repository/);
+  assert.match(source, /refuses a shallow Git repository/);
+  assert.match(source, /git", \["clone"/);
+  assert.match(source, /restored Git bundle HEAD mismatch/);
   assert.match(source, /mc", \["mirror"/);
   assert.match(source, /MC_CONFIG_DIR/);
   assert.match(source, /rmSync\(configDir/);

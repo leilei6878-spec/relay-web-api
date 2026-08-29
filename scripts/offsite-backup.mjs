@@ -16,6 +16,14 @@ function run(command, args, env = process.env) {
   if (result.error || result.status !== 0) throw new Error(`${command} failed: ${result.error?.message || result.status}`);
 }
 
+function capture(command, args, env = process.env) {
+  const result = spawnSync(command, args, { encoding: "utf8", env, windowsHide: true });
+  if (result.error || result.status !== 0) {
+    throw new Error(`${command} failed: ${result.error?.message || result.stderr?.trim() || result.status}`);
+  }
+  return result.stdout.trim();
+}
+
 const targetEndpoint = required("RELAY_BACKUP_S3_ENDPOINT");
 const targetBucket = required("RELAY_BACKUP_S3_BUCKET");
 const targetKey = required("RELAY_BACKUP_S3_ACCESS_KEY");
@@ -33,7 +41,27 @@ mkdirSync(outputRoot, { recursive: true, mode: 0o700 });
 run(process.execPath, [resolve("scripts/backup.mjs"), "--storage", resolve(process.env.RELAY_STORAGE_DIR || "storage"), "--out", output, "--require-db"]);
 
 const bundle = join(output, "source.bundle");
-run("git", ["bundle", "create", bundle, "--all"]);
+if (capture("git", ["rev-parse", "--is-shallow-repository"]) === "true") {
+  throw new Error("offsite backup refuses a shallow Git repository; fetch complete history before backup");
+}
+run("git", ["fsck", "--full"]);
+const branch = capture("git", ["symbolic-ref", "--quiet", "--short", "HEAD"]);
+if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.startsWith("-") || branch.includes("..")) {
+  throw new Error("unsafe Git branch for backup");
+}
+run("git", ["bundle", "create", bundle, `refs/heads/${branch}`, "--tags"]);
+run("git", ["bundle", "verify", bundle]);
+const gitVerifyDir = mkdtempSync(join(tmpdir(), "relay-git-restore-"));
+try {
+  const restored = join(gitVerifyDir, "repository");
+  run("git", ["clone", "--quiet", "--branch", branch, bundle, restored]);
+  run("git", ["-C", restored, "fsck", "--full"]);
+  if (capture("git", ["-C", restored, "rev-parse", "HEAD"]) !== capture("git", ["rev-parse", "HEAD"])) {
+    throw new Error("restored Git bundle HEAD mismatch");
+  }
+} finally {
+  rmSync(gitVerifyDir, { recursive: true, force: true });
+}
 const digest = createHash("sha256").update(readFileSync(bundle)).digest("hex");
 writeFileSync(join(output, "source.bundle.sha256"), `${digest}  source.bundle\n`, { mode: 0o600 });
 
