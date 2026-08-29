@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc6`
-- schema: `10`
-- runtime commit: `9c9b4629a01d13704a114ee11882e0b7f03e54c8`
+- production version: `0.10.0-rc7`
+- schema: `11`
+- runtime commit: `cebf0dc361a6b6d9d287d59fd159626f61cbd49b`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -32,17 +32,18 @@ complete when only design intent or a narrow test exists.
 | Tenant data isolation | Tenant-bound sessions/keys, tenant-filtered history/usage and no commercial exposure of account/Worker/proxy topology | Complete |
 | CSRF/Origin and session security | HttpOnly/Secure cookies, CSRF double submit, trusted Origin checks, cookie-admin mutation Origin gate | Complete |
 | Audit, privacy and retention | Commercial audit rows, request/result redaction, session/check retention and non-deleting billing policy | Complete |
-| Monitoring and alerting | Worker/failure/balance/reservation/payment/refund/dispute signals, durable deduplication and optional Webhook delivery | Complete in code; production alert receiver not configured |
+| Monitoring and alerting | Worker/failure/balance/reservation/payment/refund/dispute/evidence signals, durable deduplication and optional Webhook delivery | Complete in code; production alert receiver not configured |
 | Payment/tax/refund/dispute | Raw Stripe signature verification, exact identity/amount/currency checks, idempotent settlement, full taxed refunds and dispute fund events | Complete in code; live Stripe/Tax drill not possible without merchant configuration |
 | Versioned commercial configuration | Fixed catalog, encrypted hint-only secret versions, fixed official connection tests, atomic activation/rollback, hard launch gates, audit and SSRF-resistant Webhooks | Complete |
+| External launch evidence | Append-only, SHA-256-bound, independently reviewed and expiring evidence for provider rights, prices, legal/tax, live payments, email, HA, offsite restore, alerts, load, soak and CI; readiness/Checkout fail closed | Complete in code and dark-launch production; genuine external evidence is intentionally absent |
 | CI/CD release gates | GitHub Actions workflow runs all tests, type/lint/build, audit and SBOM | Workflow complete; cannot run remotely while GitHub push is denied |
 | HA production topology | Versioned contract requires 2 Gateways, 2 Workers, managed multi-AZ PostgreSQL/Redis and replicated object storage | Not deployed; current host is one Gateway, one Worker and one VPS data plane |
 | Offsite backup and recovery | Offsite mirroring script plus fail-closed full-Git check; same-host isolated full restore drill below | Same-host recovery proven; distinct-account/region offsite target missing |
-| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 10, security probes, hard Canary gate and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
+| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 11, security probes, hard Canary/evidence gates and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
 
 ## Final recovery drill
 
-Latest backup: `/opt/backups/relay-commercial-sandbox-final-20260829105847`
+Latest backup: `/opt/backups/relay-commercial-evidence-final-20260829114202`
 
 The initial drill discovered that a bundle created from the server's historical
 shallow clone was checksum-valid but not independently clonable. This is why a
@@ -61,13 +62,13 @@ The corrected backup then passed the complete drill:
 - all SHA-256 checks: pass;
 - PostgreSQL custom dump restored into an isolated database: pass;
 - live/restored database signature comparison: pass;
-- restored schema: 10;
-- restored public tables: 40;
+- restored schema: 11;
+- restored public tables: 41;
 - restored accounts: 5;
-- distinct immutable billing/payment/config/sandbox triggers: 5;
-- restored sandbox/configuration/tenant/order/ledger rows: 0;
+- distinct immutable billing/payment/config/sandbox/evidence triggers: 6;
+- restored evidence/sandbox/configuration/tenant/order/ledger rows: 0;
 - filesystem storage extraction: 272 files;
-- MinIO volume extraction: 169 files at the latest drill;
+- MinIO volume extraction: 151 files at the latest drill;
 - independent Git clone/fsck and exact HEAD comparison: pass;
 - temporary database and restore directories removed after the drill.
 
