@@ -29,8 +29,11 @@
 10. Verify `/api/saas/readiness` returns `ready: true` and `paymentReady: true`.
 11. Complete a test-mode Checkout/payment/refund/reconciliation drill, then a
     separately approved live-mode minimum-value transaction and refund.
-12. Run the 200-request, 5×20 concurrency and 24-hour soak gates.
-13. Only then set `RELAY_SAAS_REGISTRATION_ENABLED=1`.
+12. Temporarily set `RELAY_ALLOW_LIVE_PROVIDER_CANARY=1`, run every exact active
+    provider/model/capability route in `/commercial-sandbox`, then close the
+    canary hard gate. Readiness must report `missingCanaries: 0`.
+13. Run the 200-request, 5×20 concurrency and 24-hour soak gates.
+14. Only then set `RELAY_SAAS_REGISTRATION_ENABLED=1`.
 
 ## Configuration and secret rotation
 

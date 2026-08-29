@@ -8,6 +8,7 @@ export type CommercialReadiness = {
   blockers: string[];
   officialProviders: { openai: boolean; google: boolean; vertex: boolean; leonardo: boolean };
   activePrices: number;
+  missingCanaries: number;
   onlineWorkers: number;
   gatewayReplicas: number;
   offsiteBackupConfigured: boolean;
@@ -37,6 +38,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     leonardo: Boolean(env.LEONARDO_API_KEY?.trim()),
   };
   let activePrices = 0;
+  let missingCanaries = 0;
   let onlineWorkers = 0;
   try {
     const sql = db || await getSql();
@@ -44,12 +46,26 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
       "select count(*)::int as count from relay_price_book where status='active' and effective_from <= now() and (effective_to is null or effective_to > now())",
     );
     activePrices = Number(rows[0]?.count || 0);
+    const canaryHours = Math.max(1, Math.min(168, Number(env.RELAY_PROVIDER_CANARY_MAX_AGE_HOURS || 24)));
+    const canaries = await sql.query<{ count: number }>(
+      `select count(*)::int as count from relay_price_book p
+        where p.status='active' and p.effective_from<=now() and (p.effective_to is null or p.effective_to>now())
+          and not exists (
+            select 1 from relay_provider_sandbox_runs r
+             where r.provider=p.provider and r.model=p.model and r.capability=p.capability
+               and r.mode='live' and r.status='passed'
+               and r.finished_at > now()-($1::text||' hours')::interval
+          )`,
+      [canaryHours],
+    );
+    missingCanaries = Number(canaries[0]?.count || 0);
     const workers = await sql.query<{ count: number }>(
       "select count(*)::int as count from relay_workers where draining=false and last_beat > now()-interval '45 seconds'",
     );
     onlineWorkers = Number(workers[0]?.count || 0);
   } catch {
     activePrices = 0;
+    missingCanaries = 0;
     onlineWorkers = 0;
   }
   const gatewayReplicas = Math.max(1, Number(env.RELAY_GATEWAY_REPLICA_COUNT || 1));
@@ -67,6 +83,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   const blockers: string[] = [];
   if (enabled && !Object.values(officialProviders).some(Boolean)) blockers.push("no official provider credential configured");
   if (enabled && activePrices === 0) blockers.push("no active commercial price book rows");
+  if (enabled && missingCanaries > 0) blockers.push(`${missingCanaries} active price route(s) lack recent live provider canary evidence`);
   if (enabled && !env.RELAY_PUBLIC_URL?.startsWith("https://")) blockers.push("RELAY_PUBLIC_URL must be HTTPS");
   if (enabled && !env.REDIS_URL?.trim()) blockers.push("Redis required for commercial rate/concurrency limits");
   if (enabled && onlineWorkers < minWorkers) blockers.push(`online workers ${onlineWorkers}/${minWorkers}`);
@@ -84,6 +101,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     blockers,
     officialProviders,
     activePrices,
+    missingCanaries,
     onlineWorkers,
     gatewayReplicas,
     offsiteBackupConfigured,

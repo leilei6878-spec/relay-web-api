@@ -110,6 +110,8 @@ not automatically reactivate access; an operator must review the account.
 - Stripe live API/restricted key, Webhook signing secret and payment-provider
   selection.
 - configured Stripe automatic tax or a documented approved exemption.
+- a recent exact passed live provider canary for every active
+  provider/model/capability price route.
 
 The required infrastructure contract is
 [`deploy/commercial-ha-contract.yaml`](../deploy/commercial-ha-contract.yaml).
@@ -126,6 +128,11 @@ environment variables remain recovery fallbacks and hard launch gates. See
 Actual replica counts, managed-HA topology, offsite account ownership, legal
 documents and upstream contracts are deliberately not mutable application
 configuration; Readiness must verify them as external facts.
+
+Real upstream evidence is managed at `/commercial-sandbox` with a separate
+deployment cost gate, fixed prompts, price-based maximum and content-free
+evidence rows. See
+[`COMMERCIAL_PROVIDER_SANDBOX.md`](./COMMERCIAL_PROVIDER_SANDBOX.md).
 
 ## Upstream source references
 

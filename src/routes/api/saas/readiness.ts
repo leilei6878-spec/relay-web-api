@@ -13,6 +13,7 @@ export const Route = createFileRoute("/api/saas/readiness")({
             registrationEnabled: readiness.registrationEnabled,
             providers: Object.entries(readiness.officialProviders).filter(([, configured]) => configured).map(([provider]) => provider),
             activePrices: readiness.activePrices,
+            missingCanaries: readiness.missingCanaries,
             onlineWorkers: readiness.onlineWorkers,
             gatewayReplicas: readiness.gatewayReplicas,
             offsiteBackupConfigured: readiness.offsiteBackupConfigured,

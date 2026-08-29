@@ -19,7 +19,7 @@ type DbLike = Pick<Sql, "query">;
 
 export async function collectCommercialSignals(db?: DbLike) {
   const sql = db || await getSql();
-  const [workers, reservations, failures, lowBalances, paymentEvents, refundSettlements, checkoutCreates, openDisputes] = await Promise.all([
+  const [workers, reservations, failures, lowBalances, paymentEvents, refundSettlements, checkoutCreates, openDisputes, missingCanaries] = await Promise.all([
     sql.query<{ count: number }>("select count(*)::int as count from relay_workers where draining=false and last_beat > now()-interval '45 seconds'"),
     sql.query<{ count: number }>("select count(*)::int as count from relay_usage_charges where status='reserved' and created_at < now()-interval '20 minutes'"),
     sql.query<{ total: number; failed: number }>(
@@ -40,6 +40,12 @@ export async function collectCommercialSignals(db?: DbLike) {
     sql.query<{ count: number }>(
       "select count(*)::int as count from relay_payment_disputes where status in ('warning_needs_response','warning_under_review','needs_response','under_review')",
     ),
+    sql.query<{ count: number }>(
+      `select count(*)::int as count from relay_price_book p where p.status='active'
+        and p.effective_from<=now() and (p.effective_to is null or p.effective_to>now())
+        and not exists (select 1 from relay_provider_sandbox_runs r where r.provider=p.provider and r.model=p.model
+          and r.capability=p.capability and r.status='passed' and r.finished_at>now()-interval '24 hours')`,
+    ),
   ]);
   const signals: CommercialSignal[] = [];
   if (Number(workers[0]?.count || 0) === 0) signals.push({ code: "WORKER_ZERO", severity: "critical", message: "No online worker is available" });
@@ -52,6 +58,7 @@ export async function collectCommercialSignals(db?: DbLike) {
   if (Number(refundSettlements[0]?.count || 0) > 0) signals.push({ code: "REFUND_SETTLEMENT_STUCK", severity: "critical", message: `${refundSettlements[0]?.count} refund(s) require ledger settlement` });
   if (Number(checkoutCreates[0]?.count || 0) > 0) signals.push({ code: "CHECKOUT_CREATE_STUCK", severity: "warning", message: `${checkoutCreates[0]?.count} Checkout order(s) are stuck during creation` });
   if (Number(openDisputes[0]?.count || 0) > 0) signals.push({ code: "PAYMENT_DISPUTE_OPEN", severity: "critical", message: `${openDisputes[0]?.count} Stripe dispute(s) require evidence or review` });
+  if (Number(missingCanaries[0]?.count || 0) > 0) signals.push({ code: "PROVIDER_CANARY_MISSING", severity: "critical", message: `${missingCanaries[0]?.count} active commercial route(s) lack a provider canary in the last 24 hours` });
   return signals;
 }
 

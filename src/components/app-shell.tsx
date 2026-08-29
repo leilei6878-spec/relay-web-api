@@ -8,6 +8,7 @@ import {
   ScrollText,
   Settings2,
   SlidersHorizontal,
+  TestTube2,
   WalletCards,
   TerminalSquare,
   Users,
@@ -30,6 +31,7 @@ const nav = [
   { to: "/settings", label: "API", icon: Settings2 },
   { to: "/commercial", label: "商业运营", icon: WalletCards },
   { to: "/commercial-config", label: "商业配置", icon: SlidersHorizontal },
+  { to: "/commercial-sandbox", label: "供应商沙箱", icon: TestTube2 },
 ];
 
 function redirectToLogin() {

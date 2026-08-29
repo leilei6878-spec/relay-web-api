@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as CommercialRouteImport } from './routes/commercial'
 import { Route as CommercialConfigRouteImport } from './routes/commercial-config'
+import { Route as CommercialSandboxRouteImport } from './routes/commercial-sandbox'
 import { Route as ConsoleRouteImport } from './routes/console'
 import { Route as HealthzRouteImport } from './routes/healthz'
 import { Route as LoginRouteImport } from './routes/login'
@@ -48,6 +49,7 @@ import { Route as ApiAdminInvokeRouteImport } from './routes/api/admin/invoke'
 import { Route as ApiAdminLoginPackRouteImport } from './routes/api/admin/login-pack'
 import { Route as ApiAdminMetricsRouteImport } from './routes/api/admin/metrics'
 import { Route as ApiAdminPlaneRouteImport } from './routes/api/admin/plane'
+import { Route as ApiAdminProviderSandboxRouteImport } from './routes/api/admin/provider-sandbox'
 import { Route as ApiAdminSessionRouteImport } from './routes/api/admin/session'
 import { Route as ApiAdminWorkerKitRouteImport } from './routes/api/admin/worker-kit'
 import { Route as ApiMediaIdRouteImport } from './routes/api/media/$id'
@@ -87,6 +89,11 @@ const CommercialRoute = CommercialRouteImport.update({
 const CommercialConfigRoute = CommercialConfigRouteImport.update({
   id: '/commercial-config',
   path: '/commercial-config',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CommercialSandboxRoute = CommercialSandboxRouteImport.update({
+  id: '/commercial-sandbox',
+  path: '/commercial-sandbox',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConsoleRoute = ConsoleRouteImport.update({
@@ -268,6 +275,11 @@ const ApiAdminPlaneRoute = ApiAdminPlaneRouteImport.update({
   path: '/api/admin/plane',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAdminProviderSandboxRoute = ApiAdminProviderSandboxRouteImport.update({
+  id: '/api/admin/provider-sandbox',
+  path: '/api/admin/provider-sandbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAdminSessionRoute = ApiAdminSessionRouteImport.update({
   id: '/api/admin/session',
   path: '/api/admin/session',
@@ -375,6 +387,7 @@ export interface FileRoutesByFullPath {
   '/accounts': typeof AccountsRoute
   '/commercial': typeof CommercialRoute
   '/commercial-config': typeof CommercialConfigRoute
+  '/commercial-sandbox': typeof CommercialSandboxRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
   '/login': typeof LoginRoute
@@ -410,6 +423,7 @@ export interface FileRoutesByFullPath {
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
   '/api/admin/plane': typeof ApiAdminPlaneRoute
+  '/api/admin/provider-sandbox': typeof ApiAdminProviderSandboxRoute
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
@@ -436,6 +450,7 @@ export interface FileRoutesByTo {
   '/accounts': typeof AccountsRoute
   '/commercial': typeof CommercialRoute
   '/commercial-config': typeof CommercialConfigRoute
+  '/commercial-sandbox': typeof CommercialSandboxRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
   '/login': typeof LoginRoute
@@ -471,6 +486,7 @@ export interface FileRoutesByTo {
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
   '/api/admin/plane': typeof ApiAdminPlaneRoute
+  '/api/admin/provider-sandbox': typeof ApiAdminProviderSandboxRoute
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
@@ -498,6 +514,7 @@ export interface FileRoutesById {
   '/accounts': typeof AccountsRoute
   '/commercial': typeof CommercialRoute
   '/commercial-config': typeof CommercialConfigRoute
+  '/commercial-sandbox': typeof CommercialSandboxRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
   '/login': typeof LoginRoute
@@ -533,6 +550,7 @@ export interface FileRoutesById {
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
   '/api/admin/plane': typeof ApiAdminPlaneRoute
+  '/api/admin/provider-sandbox': typeof ApiAdminProviderSandboxRoute
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
@@ -561,6 +579,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/commercial'
     | '/commercial-config'
+    | '/commercial-sandbox'
     | '/console'
     | '/healthz'
     | '/login'
@@ -596,6 +615,7 @@ export interface FileRouteTypes {
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
     | '/api/admin/plane'
+    | '/api/admin/provider-sandbox'
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
@@ -622,6 +642,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/commercial'
     | '/commercial-config'
+    | '/commercial-sandbox'
     | '/console'
     | '/healthz'
     | '/login'
@@ -657,6 +678,7 @@ export interface FileRouteTypes {
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
     | '/api/admin/plane'
+    | '/api/admin/provider-sandbox'
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
@@ -683,6 +705,7 @@ export interface FileRouteTypes {
     | '/accounts'
     | '/commercial'
     | '/commercial-config'
+    | '/commercial-sandbox'
     | '/console'
     | '/healthz'
     | '/login'
@@ -718,6 +741,7 @@ export interface FileRouteTypes {
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
     | '/api/admin/plane'
+    | '/api/admin/provider-sandbox'
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
@@ -745,6 +769,7 @@ export interface RootRouteChildren {
   AccountsRoute: typeof AccountsRoute
   CommercialRoute: typeof CommercialRoute
   CommercialConfigRoute: typeof CommercialConfigRoute
+  CommercialSandboxRoute: typeof CommercialSandboxRoute
   ConsoleRoute: typeof ConsoleRoute
   HealthzRoute: typeof HealthzRoute
   LoginRoute: typeof LoginRoute
@@ -780,6 +805,7 @@ export interface RootRouteChildren {
   ApiAdminLoginPackRoute: typeof ApiAdminLoginPackRoute
   ApiAdminMetricsRoute: typeof ApiAdminMetricsRoute
   ApiAdminPlaneRoute: typeof ApiAdminPlaneRoute
+  ApiAdminProviderSandboxRoute: typeof ApiAdminProviderSandboxRoute
   ApiAdminSessionRoute: typeof ApiAdminSessionRoute
   ApiAdminWorkerKitRoute: typeof ApiAdminWorkerKitRoute
   ApiMediaIdRoute: typeof ApiMediaIdRoute
@@ -830,6 +856,13 @@ declare module '@tanstack/react-router' {
       path: '/commercial-config'
       fullPath: '/commercial-config'
       preLoaderRoute: typeof CommercialConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/commercial-sandbox': {
+      id: '/commercial-sandbox'
+      path: '/commercial-sandbox'
+      fullPath: '/commercial-sandbox'
+      preLoaderRoute: typeof CommercialSandboxRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/console': {
@@ -1077,6 +1110,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAdminPlaneRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/admin/provider-sandbox': {
+      id: '/api/admin/provider-sandbox'
+      path: '/api/admin/provider-sandbox'
+      fullPath: '/api/admin/provider-sandbox'
+      preLoaderRoute: typeof ApiAdminProviderSandboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/admin/session': {
       id: '/api/admin/session'
       path: '/api/admin/session'
@@ -1225,6 +1265,7 @@ const rootRouteChildren: RootRouteChildren = {
   AccountsRoute: AccountsRoute,
   CommercialRoute: CommercialRoute,
   CommercialConfigRoute: CommercialConfigRoute,
+  CommercialSandboxRoute: CommercialSandboxRoute,
   ConsoleRoute: ConsoleRoute,
   HealthzRoute: HealthzRoute,
   LoginRoute: LoginRoute,
@@ -1260,6 +1301,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAdminLoginPackRoute: ApiAdminLoginPackRoute,
   ApiAdminMetricsRoute: ApiAdminMetricsRoute,
   ApiAdminPlaneRoute: ApiAdminPlaneRoute,
+  ApiAdminProviderSandboxRoute: ApiAdminProviderSandboxRoute,
   ApiAdminSessionRoute: ApiAdminSessionRoute,
   ApiAdminWorkerKitRoute: ApiAdminWorkerKitRoute,
   ApiMediaIdRoute: ApiMediaIdRoute,

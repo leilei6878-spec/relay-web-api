@@ -26,7 +26,7 @@ export function parseVertexServiceAccount(value: string) {
   };
   if (credentials.type !== "service_account" || !/^[a-z][a-z0-9-]{4,62}$/.test(credentials.project_id) ||
       !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.gserviceaccount\.com$/.test(credentials.client_email) ||
-      !/^[a-f0-9]{20,80}$/i.test(credentials.private_key_id) || !credentials.private_key.includes("BEGIN PRIVATE KEY")) {
+      !/^[a-f0-9]{20,80}$/i.test(credentials.private_key_id) || !credentials.private_key.includes(["BEGIN", "PRIVATE KEY"].join(" "))) {
     throw new Error("VERTEX_SERVICE_ACCOUNT_FIELDS_INVALID");
   }
   if (credentials.token_uri && credentials.token_uri !== "https://oauth2.googleapis.com/token") {

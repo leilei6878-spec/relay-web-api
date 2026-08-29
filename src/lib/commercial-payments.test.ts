@@ -12,7 +12,7 @@ async function database() {
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
     "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql",
-    "0008_commercial_payments.sql", "0009_commercial_config.sql",
+    "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   const db = { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows };
   const owner = await createTenantOwner({
@@ -21,6 +21,8 @@ async function database() {
   await pg.query("insert into relay_workers(id,name,last_beat,draining) values ('pay-w1','pay-w1',now(),false),('pay-w2','pay-w2',now(),false)");
   await pg.query(`insert into relay_price_book(id,version,provider,model,capability,currency,input_micros_per_million,output_micros_per_million,image_price_minor,markup_basis_points,effective_from,status)
     values ('pay-price',1,'openai','gpt-test','chat','USD',1,1,0,0,now(),'active')`);
+  await pg.query(`insert into relay_provider_sandbox_runs(id,provider,model,capability,mode,status,currency,estimated_charge_minor,initiated_by,started_at,finished_at)
+    values ('pay-canary','openai','gpt-test','chat','live','passed','USD',1,'test',now(),now())`);
   return { pg, db, owner };
 }
 
