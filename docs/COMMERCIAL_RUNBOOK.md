@@ -26,14 +26,21 @@
    separate environment.
 8. Configure `RELAY_ALERT_WEBHOOK_URL` and an external HTTPS uptime probe.
 9. Complete counsel review of terms/privacy/DPA; set `RELAY_LEGAL_APPROVED=1`.
-10. Verify `/api/saas/readiness` returns `ready: true` and `paymentReady: true`.
+10. Inspect `/api/saas/readiness` and resolve every infrastructure/configuration
+    blocker. `ready` must remain false until the evidence in step 14 is valid.
 11. Complete a test-mode Checkout/payment/refund/reconciliation drill, then a
     separately approved live-mode minimum-value transaction and refund.
 12. Temporarily set `RELAY_ALLOW_LIVE_PROVIDER_CANARY=1`, run every exact active
     provider/model/capability route in `/commercial-sandbox`, then close the
     canary hard gate. Readiness must report `missingCanaries: 0`.
 13. Run the 200-request, 5×20 concurrency and 24-hour soak gates.
-14. Only then set `RELAY_SAAS_REGISTRATION_ENABLED=1`.
+14. In `/commercial-readiness`, record the SHA-256 and external reference for
+    every requirement. Each passing item must name a reviewer other than the
+    recording administrator. Record a later failure or withdrawal as a new
+    `failed`/`revoked` version; never edit history.
+15. Verify `ready: true`, `paymentReady: true`, `missingEvidence: 0` and
+    `missingCanaries: 0`.
+16. Only then set `RELAY_SAAS_REGISTRATION_ENABLED=1`.
 
 ## Configuration and secret rotation
 
@@ -92,6 +99,8 @@ manifest can be read. Run a monthly restore in a separate project/account.
 Critical: zero Worker, stale reservation, ≥25% short-window failures.
 Warning: ≥10% failure rate or low/exhausted tenant wallet. Alert events remain
 in PostgreSQL, deduplicate while open and resolve automatically after recovery.
+`COMMERCIAL_LAUNCH_EVIDENCE_MISSING` is a dark-launch warning and becomes
+critical when commercial mode is enabled.
 
 ## Stripe reconciliation
 

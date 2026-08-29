@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { createStripeCheckout, createStripeRefund, parseStripeWebhook, processStripeWebhook, verifyStripeSignature } from "./payments.ts";
 import { createTenantOwner } from "./saas-billing.ts";
+import { expectedCommercialEvidence, recordCommercialEvidence } from "./commercial-evidence.ts";
 
 async function database() {
   const pg = new PGlite();
@@ -12,7 +13,7 @@ async function database() {
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
     "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql",
-    "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql",
+    "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   const db = { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows };
   const owner = await createTenantOwner({
@@ -23,6 +24,17 @@ async function database() {
     values ('pay-price',1,'openai','gpt-test','chat','USD',1,1,0,0,now(),'active')`);
   await pg.query(`insert into relay_provider_sandbox_runs(id,provider,model,capability,mode,status,currency,estimated_charge_minor,initiated_by,started_at,finished_at)
     values ('pay-canary','openai','gpt-test','chat','live','passed','USD',1,'test',now(),now())`);
+  for (const item of await expectedCommercialEvidence(env, db)) {
+    const identity = `${item.requirement}:${item.subject}`;
+    await recordCommercialEvidence({
+      requirement: item.requirement, subject: item.subject, status: "passed",
+      artifactRef: `PAYMENT-QA-${createHash("sha256").update(identity).digest("hex").slice(0, 12)}`,
+      artifactSha256: createHash("sha256").update(`artifact:${identity}`).digest("hex"),
+      note: "Independent payment test review", reviewer: "reviewer@example.test",
+      observedAt: new Date(Date.now() - 60_000).toISOString(), validUntil: new Date(Date.now() + 86_400_000).toISOString(),
+      confirmation: "EVIDENCE_REVIEWED", actor: "admin",
+    }, db);
+  }
   return { pg, db, owner };
 }
 

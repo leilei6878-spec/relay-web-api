@@ -1,5 +1,6 @@
 import { getSql, type Sql } from "./db";
 import { effectiveCommercialEnv } from "./commercial-config";
+import { commercialEvidenceStatus } from "./commercial-evidence";
 import { parseVertexServiceAccount, validateVertexProjectLocation } from "./vertex-auth";
 
 export type CommercialReadiness = {
@@ -9,6 +10,8 @@ export type CommercialReadiness = {
   officialProviders: { openai: boolean; google: boolean; vertex: boolean; leonardo: boolean };
   activePrices: number;
   missingCanaries: number;
+  evidenceTotal: number;
+  missingEvidence: string[];
   onlineWorkers: number;
   gatewayReplicas: number;
   offsiteBackupConfigured: boolean;
@@ -39,6 +42,9 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   };
   let activePrices = 0;
   let missingCanaries = 0;
+  let evidenceTotal = 0;
+  let missingEvidence: string[] = [];
+  let evidenceUnavailable = false;
   let onlineWorkers = 0;
   try {
     const sql = db || await getSql();
@@ -63,9 +69,15 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
       "select count(*)::int as count from relay_workers where draining=false and last_beat > now()-interval '45 seconds'",
     );
     onlineWorkers = Number(workers[0]?.count || 0);
+    const evidence = await commercialEvidenceStatus(env, sql);
+    evidenceTotal = evidence.length;
+    missingEvidence = evidence.filter((item) => !item.valid).map((item) => `${item.requirement}:${item.subject}:${item.reason}`);
   } catch {
     activePrices = 0;
     missingCanaries = 0;
+    evidenceTotal = 0;
+    missingEvidence = [];
+    evidenceUnavailable = true;
     onlineWorkers = 0;
   }
   const gatewayReplicas = Math.max(1, Number(env.RELAY_GATEWAY_REPLICA_COUNT || 1));
@@ -84,6 +96,8 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   if (enabled && !Object.values(officialProviders).some(Boolean)) blockers.push("no official provider credential configured");
   if (enabled && activePrices === 0) blockers.push("no active commercial price book rows");
   if (enabled && missingCanaries > 0) blockers.push(`${missingCanaries} active price route(s) lack recent live provider canary evidence`);
+  if (enabled && evidenceUnavailable) blockers.push("commercial launch evidence ledger unavailable");
+  if (enabled && !evidenceUnavailable && missingEvidence.length > 0) blockers.push(`${missingEvidence.length} commercial launch evidence requirement(s) missing, failed, revoked or expired`);
   if (enabled && !env.RELAY_PUBLIC_URL?.startsWith("https://")) blockers.push("RELAY_PUBLIC_URL must be HTTPS");
   if (enabled && !env.REDIS_URL?.trim()) blockers.push("Redis required for commercial rate/concurrency limits");
   if (enabled && onlineWorkers < minWorkers) blockers.push(`online workers ${onlineWorkers}/${minWorkers}`);
@@ -102,6 +116,8 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     officialProviders,
     activePrices,
     missingCanaries,
+    evidenceTotal,
+    missingEvidence,
     onlineWorkers,
     gatewayReplicas,
     offsiteBackupConfigured,

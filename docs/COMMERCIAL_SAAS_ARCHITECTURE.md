@@ -112,6 +112,9 @@ not automatically reactivate access; an operator must review the account.
 - configured Stripe automatic tax or a documented approved exemption.
 - a recent exact passed live provider canary for every active
   provider/model/capability price route.
+- valid append-only launch evidence for provider rights, every exact price
+  version, legal/tax approval, live payments, email delivery when registration
+  is enabled, HA, offsite restore, alert delivery, load, soak and CI gates.
 
 The required infrastructure contract is
 [`deploy/commercial-ha-contract.yaml`](../deploy/commercial-ha-contract.yaml).
@@ -127,7 +130,10 @@ environment variables remain recovery fallbacks and hard launch gates. See
 
 Actual replica counts, managed-HA topology, offsite account ownership, legal
 documents and upstream contracts are deliberately not mutable application
-configuration; Readiness must verify them as external facts.
+configuration. They are recorded as hashed, independently reviewed, expiring
+evidence at `/commercial-readiness`; a configuration flag cannot satisfy the
+evidence gate. See
+[`COMMERCIAL_LAUNCH_EVIDENCE.md`](./COMMERCIAL_LAUNCH_EVIDENCE.md).
 
 Real upstream evidence is managed at `/commercial-sandbox` with a separate
 deployment cost gate, fixed prompts, price-based maximum and content-free

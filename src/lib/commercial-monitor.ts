@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { assertPublicCommercialWebhookUrl, effectiveCommercialEnv } from "./commercial-config";
+import { commercialEvidenceStatus } from "./commercial-evidence";
 import { coordSetNx } from "./coord";
 import { getSql, type Sql } from "./db";
 import { uid } from "./utils";
@@ -19,6 +20,7 @@ type DbLike = Pick<Sql, "query">;
 
 export async function collectCommercialSignals(db?: DbLike) {
   const sql = db || await getSql();
+  const env = await effectiveCommercialEnv(process.env, sql);
   const [workers, reservations, failures, lowBalances, paymentEvents, refundSettlements, checkoutCreates, openDisputes, missingCanaries] = await Promise.all([
     sql.query<{ count: number }>("select count(*)::int as count from relay_workers where draining=false and last_beat > now()-interval '45 seconds'"),
     sql.query<{ count: number }>("select count(*)::int as count from relay_usage_charges where status='reserved' and created_at < now()-interval '20 minutes'"),
@@ -59,6 +61,13 @@ export async function collectCommercialSignals(db?: DbLike) {
   if (Number(checkoutCreates[0]?.count || 0) > 0) signals.push({ code: "CHECKOUT_CREATE_STUCK", severity: "warning", message: `${checkoutCreates[0]?.count} Checkout order(s) are stuck during creation` });
   if (Number(openDisputes[0]?.count || 0) > 0) signals.push({ code: "PAYMENT_DISPUTE_OPEN", severity: "critical", message: `${openDisputes[0]?.count} Stripe dispute(s) require evidence or review` });
   if (Number(missingCanaries[0]?.count || 0) > 0) signals.push({ code: "PROVIDER_CANARY_MISSING", severity: "critical", message: `${missingCanaries[0]?.count} active commercial route(s) lack a provider canary in the last 24 hours` });
+  const missingEvidence = (await commercialEvidenceStatus(env, sql)).filter((item) => !item.valid);
+  if (missingEvidence.length > 0) signals.push({
+    code: "COMMERCIAL_LAUNCH_EVIDENCE_MISSING",
+    severity: env.RELAY_COMMERCIAL_ENABLED === "1" ? "critical" : "warning",
+    message: `${missingEvidence.length} commercial launch evidence requirement(s) are missing, failed, revoked or expired`,
+    detail: { requirements: missingEvidence.slice(0, 25).map((item) => `${item.requirement}:${item.subject}:${item.reason}`) },
+  });
   return signals;
 }
 

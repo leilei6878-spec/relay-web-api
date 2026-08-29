@@ -2,6 +2,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   Activity,
   Cable,
+  ClipboardCheck,
   LayoutDashboard,
   Menu,
   Radio,
@@ -32,6 +33,7 @@ const nav = [
   { to: "/commercial", label: "商业运营", icon: WalletCards },
   { to: "/commercial-config", label: "商业配置", icon: SlidersHorizontal },
   { to: "/commercial-sandbox", label: "供应商沙箱", icon: TestTube2 },
+  { to: "/commercial-readiness", label: "发布证据", icon: ClipboardCheck },
 ];
 
 function redirectToLogin() {
