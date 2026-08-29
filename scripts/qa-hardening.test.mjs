@@ -39,8 +39,20 @@ test("offsite backup runner is opt-in, version-matched and cannot write source o
   assert.match(compose, /\$\{RELAY_STORAGE_HOST:-relay_storage\}:\/relay-storage:ro/);
   assert.match(compose, /\$\{RELAY_BACKUP_HOST:-\/opt\/backups\}:\/opt\/backups/);
   assert.doesNotMatch(compose, /\/var\/run\/docker\.sock/);
-  assert.match(dockerfile, /FROM postgres:16-bookworm/);
-  assert.match(dockerfile, /FROM minio\/mc:latest AS mc/);
+  assert.match(dockerfile, /FROM postgres:16-bookworm@sha256:[0-9a-f]{64}/);
+  assert.match(dockerfile, /FROM minio\/mc:latest@sha256:[0-9a-f]{64} AS mc/);
   assert.match(dockerfile, /COPY --from=mc \/usr\/bin\/mc \/usr\/local\/bin\/mc/);
   assert.match(dockerfile, /safe\.directory \/workspace/);
+});
+
+test("release container bases and production service images are digest-pinned", () => {
+  for (const path of ["Dockerfile", "Dockerfile.worker", "Dockerfile.backup"]) {
+    const fromLines = readFileSync(path, "utf8").split(/\r?\n/).filter((line) => line.startsWith("FROM "));
+    assert.ok(fromLines.length > 0);
+    assert.ok(fromLines.every((line) => /@sha256:[0-9a-f]{64}(?:\s|$)/.test(line)), `${path} has an unpinned base image`);
+  }
+  const compose = readFileSync("docker-compose.production.yml", "utf8");
+  const images = compose.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith("image: "));
+  assert.ok(images.length >= 4);
+  assert.ok(images.every((line) => /@sha256:[0-9a-f]{64}$/.test(line)), "Compose has an unpinned service image");
 });

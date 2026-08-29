@@ -5,6 +5,9 @@ dist/
 .grok/
 .output/
 coverage/
+sbom.cdx.json
+release-manifest.json
+release-manifest.json.sha256
 *.log
 *.pid
 
