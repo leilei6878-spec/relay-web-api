@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc9`
+- production version: `0.10.0-rc10`
 - schema: `13`
-- runtime commit: `a214ede7e2b69485c551a8cad8cab25177e98ce0`
+- runtime commit: `43d8185d38e8deed0b78210734766139936f82df`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -28,23 +28,29 @@ complete when only design intent or a narrow test exists.
 | Immutable usage/funds ledger | Append-only transaction/entry triggers, equal-and-opposite entries, tax/cash/wallet settlement and replay tests | Complete |
 | Token/image/model pricing | Versioned price book, integer minor-unit calculation, authoritative provider usage/count settlement | Complete in code; live provider pricing still absent |
 | Customer self-service and commercial admin UI | Login/register/reset/verification, keys, balance, usage, members, Checkout; tenant/price/order/refund/dispute/admin controls; browser QA | Complete |
-| Official provider adapters and sandbox | OpenAI, Gemini API, Vertex AI and Leonardo request/usage adapters; cost-capped administrator sandbox; append-only, content-minimising evidence; exact recent Canary readiness gate | Code and dark-launch acceptance complete; live Canary acceptance still requires contracts, credentials and reviewed prices |
+| Official provider adapters and sandbox | OpenAI, Gemini API, Vertex AI and Leonardo request/usage adapters; every active provider requires its own current credential; cost-capped sandbox; append-only content-minimising provider/model/capability/currency Live evidence | Code and dark-launch acceptance complete; live Canary acceptance still requires contracts, credentials and reviewed prices |
 | Tenant data isolation | Tenant-bound sessions/keys, tenant-filtered history/usage and no commercial exposure of account/Worker/proxy topology | Complete |
 | CSRF/Origin and session security | Customer HttpOnly/Secure cookies and CSRF double submit; trusted Origin checks; administrator SHA-256-only short sessions, Strict cookies, revoke/logout, distributed login throttle and loopback-only root recovery | Complete |
 | Administrator MFA | Versioned encrypted TOTP, password+TOTP login, MFA-aware commercial administration guards and readiness blockers | Code/dark-launch complete; real authenticator enrollment intentionally pending |
 | Audit, privacy and retention | Commercial audit rows, request/result redaction, session/check retention and non-deleting billing policy | Complete |
-| Monitoring and alerting | Worker/failure/balance/reservation/payment/refund/dispute/evidence/plan-period signals, durable deduplication and optional Webhook delivery | Complete in code; production alert receiver not configured |
+| Monitoring and alerting | Worker/failure/balance/reservation/payment/refund/dispute/evidence/plan-period/provider-credential/exact-Canary signals, durable deduplication and optional Webhook delivery | Complete in code; production alert receiver not configured |
 | Payment/tax/refund/dispute | Raw Stripe signature verification, exact identity/amount/currency checks, idempotent settlement, full taxed refunds and dispute fund events | Complete in code; live Stripe/Tax drill not possible without merchant configuration |
 | Versioned commercial configuration | Fixed catalog, encrypted hint-only secret versions, fixed official connection tests, atomic activation/rollback, hard launch gates, audit and SSRF-resistant Webhooks | Complete |
 | External launch evidence | Append-only, SHA-256-bound, independently reviewed and expiring evidence for provider rights, model prices, canonical plan snapshots, legal/tax, live payments, email, HA, offsite restore, alerts, load, soak and CI; readiness/Checkout fail closed | Complete in code and dark-launch production; genuine external evidence is intentionally absent |
 | CI/CD release gates | GitHub Actions workflow runs all tests, type/lint/build, audit and SBOM | Workflow complete; cannot run remotely while GitHub push is denied |
 | HA production topology | Versioned contract requires 2 Gateways, 2 Workers, managed multi-AZ PostgreSQL/Redis and replicated object storage | Not deployed; current host is one Gateway, one Worker and one VPS data plane |
 | Offsite backup and recovery | Offsite mirroring script plus fail-closed full-Git check; same-host isolated full restore drill below | Same-host recovery proven; distinct-account/region offsite target missing |
-| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 13, remote-root denial, short-session and plan-period probes, hard MFA/Canary/evidence gates and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
+| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 13, remote-root denial, short-session, plan-period and exact-provider probes, hard MFA/Canary/evidence gates and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
 
 ## Final recovery drill
 
-Latest backup: `/opt/backups/relay-plan-billing-final-20260829133452`
+Latest accepted backup:
+`/opt/backups/relay-provider-readiness-corrected-20260829135821`
+
+The first rc10 environment update contained an incorrect full commit suffix.
+Independent Git-bundle validation detected it; the Gateway was rebuilt from
+`git rev-parse HEAD`, and runtime, `.deploy-rev` and source now match exactly.
+Only the corrected backup above is accepted as current evidence.
 
 The initial drill discovered that a bundle created from the server's historical
 shallow clone was checksum-valid but not independently clonable. This is why a
@@ -71,7 +77,7 @@ The corrected backup then passed the complete drill:
 - distinct immutable billing/payment/config/sandbox/evidence/plan-period triggers: 7;
 - restored evidence/sandbox/configuration/tenant/order/ledger rows: 0;
 - filesystem storage extraction: 272 files;
-- MinIO volume extraction: 169 files at the latest drill;
+- MinIO volume extraction: 163 files at the latest drill;
 - independent Git clone/fsck and exact HEAD comparison: pass;
 - temporary database and restore directories removed after the drill.
 
