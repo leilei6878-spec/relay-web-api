@@ -122,9 +122,10 @@ critical when commercial mode is enabled.
 - Refunds reserve tenant credit before the Stripe API call. Successful refunds
   append an equal-and-opposite ledger transaction; failed calls release the
   reservation.
-- Taxed orders currently allow full remaining refunds only. Partial taxed
-  refunds fail closed until a Stripe Tax transaction-reversal workflow is
-  explicitly implemented and reconciled; do not work around this with a manual
+- Partial taxed refunds use the versioned cumulative single-line allocation in
+  `PARTIAL_TAX_REFUND.md`. Compare its net/tax/gross results with Stripe Tax
+  exports during acceptance. If an external gross refund is rejected as
+  ambiguous, reconcile it before any further refund; never guess with a manual
   balance edit.
 - The commercial admin page can retrieve a Checkout Session from Stripe and
   idempotently reconcile it. This path uses the same settlement key as Webhook

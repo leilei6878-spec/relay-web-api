@@ -7,7 +7,7 @@ test("release identity exposes version, exact commit, schema, and normalized bui
     RELAY_RELEASE_SHA: "ABCDEF1234567890ABCDEF1234567890ABCDEF12",
     RELAY_BUILD_TIME: "2026-08-28T00:00:00+08:00",
   } as NodeJS.ProcessEnv);
-  assert.equal(APP_VERSION, "0.10.0-rc10");
+  assert.equal(APP_VERSION, "0.10.0-rc11");
   assert.equal(release.commit, "abcdef1234567890abcdef1234567890abcdef12");
   assert.equal(release.buildTime, "2026-08-27T16:00:00.000Z");
   assert.equal(release.schema, 13);

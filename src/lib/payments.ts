@@ -394,24 +394,28 @@ async function releaseRefundReservation(refundId: string, status: string, sql: D
   );
 }
 
-function allocationForCredit(order: Record<string, unknown>, creditMinor: number) {
+export function allocationForCredit(order: Record<string, unknown>, creditMinor: number) {
   const totalCredit = Number(order.amount_minor);
   const totalTax = Number(order.tax_minor || 0);
   const totalGross = Number(order.gross_minor || totalCredit);
   const remainingCredit = totalCredit - Number(order.refunded_minor || 0);
   const remainingTax = totalTax - Number(order.refunded_tax_minor || 0);
   const remainingGross = totalGross - Number(order.refunded_gross_minor || 0);
+  const refundedCredit = totalCredit - remainingCredit;
+  const refundedTax = totalTax - remainingTax;
   if (creditMinor <= 0 || creditMinor > remainingCredit) throw new Error("REFUND_AMOUNT_INVALID");
-  if (remainingTax > 0 && creditMinor !== remainingCredit) throw new Error("PARTIAL_TAX_REFUND_REQUIRES_STRIPE_TAX_REVERSAL");
-  const taxMinor = creditMinor === remainingCredit
-    ? remainingTax
-    : Math.min(remainingTax, Math.max(0, Math.round(totalTax * creditMinor / totalCredit)));
+  const cumulativeCredit = refundedCredit + creditMinor;
+  const cumulativeTax = cumulativeCredit >= totalCredit
+    ? totalTax
+    : Math.floor(totalTax * cumulativeCredit / totalCredit);
+  const taxMinor = cumulativeTax - refundedTax;
+  if (taxMinor < 0 || taxMinor > remainingTax) throw new Error("REFUND_TAX_ALLOCATION_INVALID");
   const grossMinor = creditMinor + taxMinor;
   if (grossMinor > remainingGross) throw new Error("REFUND_ALLOCATION_INVALID");
   return { creditMinor, taxMinor, grossMinor };
 }
 
-function allocationForGross(order: Record<string, unknown>, grossMinor: number) {
+export function allocationForGross(order: Record<string, unknown>, grossMinor: number) {
   const totalCredit = Number(order.amount_minor);
   const totalTax = Number(order.tax_minor || 0);
   const totalGross = Number(order.gross_minor || totalCredit);
@@ -420,11 +424,16 @@ function allocationForGross(order: Record<string, unknown>, grossMinor: number) 
   const remainingGross = totalGross - Number(order.refunded_gross_minor || 0);
   if (grossMinor <= 0 || grossMinor > remainingGross) throw new Error("STRIPE_REFUND_AMOUNT_MISMATCH");
   if (grossMinor === remainingGross) return { creditMinor: remainingCredit, taxMinor: remainingTax, grossMinor };
-  if (remainingTax > 0) throw new Error("PARTIAL_TAX_REFUND_REQUIRES_STRIPE_TAX_REVERSAL");
-  const creditMinor = Math.min(remainingCredit, Math.max(1, Math.round(totalCredit * grossMinor / totalGross)));
-  const taxMinor = grossMinor - creditMinor;
-  if (taxMinor < 0 || taxMinor > remainingTax) throw new Error("STRIPE_REFUND_TAX_MISMATCH");
-  return { creditMinor, taxMinor, grossMinor };
+  let low = 1;
+  let high = remainingCredit;
+  while (low <= high) {
+    const creditMinor = Math.floor((low + high) / 2);
+    const allocation = allocationForCredit(order, creditMinor);
+    if (allocation.grossMinor === grossMinor) return allocation;
+    if (allocation.grossMinor < grossMinor) low = creditMinor + 1;
+    else high = creditMinor - 1;
+  }
+  throw new Error("STRIPE_REFUND_TAX_ALLOCATION_AMBIGUOUS");
 }
 
 async function finalizeRefund(
@@ -492,9 +501,10 @@ async function processRefundObject(object: Record<string, unknown>, eventRowId: 
     const allocation = allocationForGross(order, amount);
     refunds = await sql.query<Record<string, unknown>>(
       `insert into relay_payment_refunds
-        (id,tenant_id,order_id,provider,provider_refund_id,provider_payment_intent,status,amount_minor,credit_minor,tax_minor,reservation_minor,currency,reason,idempotency_key,created_by)
-       values ($1,$2,$3,'stripe',$4,$5,'received',$6,$7,$8,0,$9,'External Stripe refund',$10,'stripe-webhook') returning *`,
-      [uid(), order.tenant_id, orderId, providerRefundId, paymentIntent, amount, allocation.creditMinor, allocation.taxMinor, currency, `stripe-external:${providerRefundId}`],
+        (id,tenant_id,order_id,provider,provider_refund_id,provider_payment_intent,status,amount_minor,credit_minor,tax_minor,reservation_minor,currency,reason,idempotency_key,created_by,extra)
+       values ($1,$2,$3,'stripe',$4,$5,'received',$6,$7,$8,0,$9,'External Stripe refund',$10,'stripe-webhook',$11::jsonb) returning *`,
+      [uid(), order.tenant_id, orderId, providerRefundId, paymentIntent, amount, allocation.creditMinor, allocation.taxMinor, currency,
+        `stripe-external:${providerRefundId}`, JSON.stringify({ taxAllocation: "checkout_cumulative_proportional_v1", allocationSource: "gross" })],
     );
   }
   const refund = refunds[0]!;
@@ -640,8 +650,8 @@ export async function createStripeRefund(
         where o.id=$1 and o.payment_provider='stripe' and o.status in ('paid','partially_refunded') for update of o,t
      ), inserted as (
        insert into relay_payment_refunds
-        (id,tenant_id,order_id,provider,provider_payment_intent,status,amount_minor,credit_minor,tax_minor,reservation_minor,currency,reason,idempotency_key,created_by)
-       select $2,tenant_id,id,'stripe',provider_payment_intent,'creating',$5,$3,$4,$3,currency,$6,$7,$8 from locked
+        (id,tenant_id,order_id,provider,provider_payment_intent,status,amount_minor,credit_minor,tax_minor,reservation_minor,currency,reason,idempotency_key,created_by,extra)
+       select $2,tenant_id,id,'stripe',provider_payment_intent,'creating',$5,$3,$4,$3,currency,$6,$7,$8,$9::jsonb from locked
         where provider_payment_intent is not null and $3 <= amount_minor-refunded_minor
           and $4 <= tax_minor-refunded_tax_minor and $5 <= gross_minor-refunded_gross_minor
           and balance_minor-reserved_minor >= $3
@@ -650,7 +660,8 @@ export async function createStripeRefund(
        update relay_tenants t set reserved_minor=t.reserved_minor+i.reservation_minor,updated_at=now() from inserted i where t.id=i.tenant_id returning t.id
      ) select i.* from inserted i join reserved r on r.id=i.tenant_id`,
     [input.orderId, refundId, allocation.creditMinor, allocation.taxMinor, allocation.grossMinor,
-      input.reason.slice(0, 300), normalizedIdempotency, input.actor.slice(0, 120)],
+      input.reason.slice(0, 300), normalizedIdempotency, input.actor.slice(0, 120),
+      JSON.stringify({ taxAllocation: "checkout_cumulative_proportional_v1", allocationSource: "credit" })],
   );
   let refund = replayRefund || held[0];
   if (!refund) {

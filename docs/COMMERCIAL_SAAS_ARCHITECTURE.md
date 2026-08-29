@@ -78,6 +78,13 @@ PaymentIntent and may suspend a tenant whose wallet becomes negative. Payment
 events retain only the payload SHA-256 and reconciliation identifiers, not the
 raw Stripe payload.
 
+For the single Checkout wallet-credit line, partial taxed refunds use a
+cumulative proportional tax allocation so arbitrary partitions finish at the
+exact original net/tax/gross totals. Checkout refunds already affect Stripe Tax
+reports; Relay does not create a second custom Tax reversal. External gross
+refunds are accepted only when they map exactly back to one allocation. See
+[`PARTIAL_TAX_REFUND.md`](./PARTIAL_TAX_REFUND.md).
+
 Orders separate net wallet credit, tax and gross customer payment. With
 `RELAY_TAX_MODE=stripe_automatic`, Checkout collects the billing address and
 uses Stripe Tax. Settlement posts wallet credit and tax payable against gross
