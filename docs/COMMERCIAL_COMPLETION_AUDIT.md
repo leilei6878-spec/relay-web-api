@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc5`
-- schema: `9`
-- runtime commit: `e4b307b949bf726f5f9fc94acf43e9735bc55993`
+- production version: `0.10.0-rc6`
+- schema: `10`
+- runtime commit: `9c9b4629a01d13704a114ee11882e0b7f03e54c8`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -18,7 +18,7 @@ complete when only design intent or a narrow test exists.
 
 | Requirement | Evidence | Audit result |
 |---|---|---|
-| Commercial traffic uses only official/authorized upstreams | `commercial-gateway.ts` resolves only `openai:`, `google:` and `leonardo:` official models; route-order tests prove the branch executes before web-account selection | Code complete; real upstream production calls blocked by missing contracts/credentials |
+| Commercial traffic uses only official/authorized upstreams | `commercial-gateway.ts` resolves only `openai:`, `google:`, `vertex:` and `leonardo:` official models; route-order tests prove the branch executes before web-account selection | Code complete; real upstream production calls blocked by missing contracts/credentials |
 | Existing web pool remains internal | Separate `sk-relay-*` and `sk-saas-*` principals; commercial gateway has no Worker/account selector import | Complete |
 | Tenants, users, RBAC and MFA | SQL tenant/user/membership/session/invite schema; owner/admin/billing/developer/viewer gates; TOTP and recovery-code tests; browser portal QA | Complete |
 | Hash-only tenant API keys | 256-bit one-time secret, SHA-256 lookup, hints-only listing, revocation and tenant scoping tests | Complete |
@@ -28,7 +28,7 @@ complete when only design intent or a narrow test exists.
 | Immutable usage/funds ledger | Append-only transaction/entry triggers, equal-and-opposite entries, tax/cash/wallet settlement and replay tests | Complete |
 | Token/image/model pricing | Versioned price book, integer minor-unit calculation, authoritative provider usage/count settlement | Complete in code; live provider pricing still absent |
 | Customer self-service and commercial admin UI | Login/register/reset/verification, keys, balance, usage, members, Checkout; tenant/price/order/refund/dispute/admin controls; browser QA | Complete |
-| Official provider adapters and sandbox | OpenAI, Gemini API, Vertex AI and Leonardo request/usage adapters with mocked official response tests | Sandbox code complete; live sandbox acceptance missing credentials |
+| Official provider adapters and sandbox | OpenAI, Gemini API, Vertex AI and Leonardo request/usage adapters; cost-capped administrator sandbox; append-only, content-minimising evidence; exact recent Canary readiness gate | Code and dark-launch acceptance complete; live Canary acceptance still requires contracts, credentials and reviewed prices |
 | Tenant data isolation | Tenant-bound sessions/keys, tenant-filtered history/usage and no commercial exposure of account/Worker/proxy topology | Complete |
 | CSRF/Origin and session security | HttpOnly/Secure cookies, CSRF double submit, trusted Origin checks, cookie-admin mutation Origin gate | Complete |
 | Audit, privacy and retention | Commercial audit rows, request/result redaction, session/check retention and non-deleting billing policy | Complete |
@@ -38,11 +38,11 @@ complete when only design intent or a narrow test exists.
 | CI/CD release gates | GitHub Actions workflow runs all tests, type/lint/build, audit and SBOM | Workflow complete; cannot run remotely while GitHub push is denied |
 | HA production topology | Versioned contract requires 2 Gateways, 2 Workers, managed multi-AZ PostgreSQL/Redis and replicated object storage | Not deployed; current host is one Gateway, one Worker and one VPS data plane |
 | Offsite backup and recovery | Offsite mirroring script plus fail-closed full-Git check; same-host isolated full restore drill below | Same-host recovery proven; distinct-account/region offsite target missing |
-| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 8, security probes and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
+| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 10, security probes, hard Canary gate and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
 
 ## Final recovery drill
 
-Latest backup: `/opt/backups/relay-commercial-config-final-202608290957`
+Latest backup: `/opt/backups/relay-commercial-sandbox-final-20260829105847`
 
 The initial drill discovered that a bundle created from the server's historical
 shallow clone was checksum-valid but not independently clonable. This is why a
@@ -61,12 +61,13 @@ The corrected backup then passed the complete drill:
 - all SHA-256 checks: pass;
 - PostgreSQL custom dump restored into an isolated database: pass;
 - live/restored database signature comparison: pass;
-- restored schema: 9;
-- restored public tables: 39;
+- restored schema: 10;
+- restored public tables: 40;
 - restored accounts: 5;
-- immutable billing/payment/config triggers: 4;
+- distinct immutable billing/payment/config/sandbox triggers: 5;
+- restored sandbox/configuration/tenant/order/ledger rows: 0;
 - filesystem storage extraction: 272 files;
-- MinIO volume extraction: 157 files at the latest drill;
+- MinIO volume extraction: 169 files at the latest drill;
 - independent Git clone/fsck and exact HEAD comparison: pass;
 - temporary database and restore directories removed after the drill.
 
