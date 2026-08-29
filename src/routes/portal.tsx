@@ -1,0 +1,162 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { CheckCircle2, Copy, CreditCard, KeyRound, Plus, ShieldCheck, WalletCards } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
+import { SaasShell, saasMutationHeaders } from "@/components/saas-shell";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Input, Label } from "@/components/ui/input";
+
+export const Route = createFileRoute("/portal")({ component: Portal });
+
+type SessionBody = {
+  user: { id: string; email: string; name: string };
+  tenant: { id: string; name: string; status: string; role: string };
+};
+
+type BillingBody = {
+  tenant: { balanceMinor: number; reservedMinor: number; currency: string; planId: string; monthlyBudgetMinor: number };
+  transactions: Record<string, unknown>[];
+  charges: Record<string, unknown>[];
+  orders: Record<string, unknown>[];
+};
+
+function money(value: unknown, currency = "USD") {
+  return new Intl.NumberFormat("zh-CN", { style: "currency", currency }).format(Number(value || 0) / 100);
+}
+
+function date(value: unknown) {
+  if (!value) return "—";
+  return new Date(String(value)).toLocaleString("zh-CN", { hour12: false });
+}
+
+function Portal() {
+  const [session, setSession] = useState<SessionBody | null>(null);
+  const [billing, setBilling] = useState<BillingBody | null>(null);
+  const [keys, setKeys] = useState<Record<string, unknown>[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    const sessionResponse = await fetch("/api/saas/session", { credentials: "include" });
+    if (sessionResponse.status === 401) {
+      window.location.replace("/saas/login");
+      return;
+    }
+    const sessionBody = await sessionResponse.json() as SessionBody;
+    const [billingBody, keyBody] = await Promise.all([
+      fetch("/api/saas/billing", { credentials: "include" }).then((response) => response.json() as Promise<BillingBody>),
+      fetch("/api/saas/keys", { credentials: "include" }).then((response) => response.json() as Promise<{ keys?: Record<string, unknown>[] }>),
+    ]);
+    setSession(sessionBody);
+    setBilling(billingBody);
+    setKeys(keyBody.keys || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { void load().catch(() => setLoading(false)); }, [load]);
+
+  if (loading || !session || !billing) return <main className="grid min-h-dvh place-items-center bg-bg text-sm text-muted">正在加载客户控制台…</main>;
+
+  return (
+    <SaasShell tenant={session.tenant}>
+      <div className="space-y-8">
+        <header><Badge tone="ok">{session.tenant.status}</Badge><h1 className="mt-3 text-3xl font-semibold tracking-tight">欢迎，{session.user.name}</h1><p className="mt-2 text-sm text-muted">所有付费请求均走官方供应商，并经过余额预授权与用量结算。</p></header>
+
+        <section id="overview" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Stat icon={<WalletCards className="size-4" />} label="可用余额" value={money(billing.tenant.balanceMinor - billing.tenant.reservedMinor, billing.tenant.currency)} />
+          <Stat icon={<CreditCard className="size-4" />} label="预授权中" value={money(billing.tenant.reservedMinor, billing.tenant.currency)} />
+          <Stat icon={<CheckCircle2 className="size-4" />} label="当前套餐" value={billing.tenant.planId} />
+          <Stat icon={<KeyRound className="size-4" />} label="有效密钥" value={String(keys.filter((key) => key.enabled && !key.revoked_at).length)} />
+        </section>
+
+        <section id="keys" className="rounded-xl border border-border bg-surface">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4"><div><h2 className="font-medium">API 密钥</h2><p className="mt-1 text-xs text-subtle">完整密钥只显示一次，服务器只保存 SHA-256 哈希。</p></div><CreateKeyDialog onCreated={load} /></div>
+          <div className="divide-y divide-border">
+            {keys.map((key) => <div key={String(key.id)} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 text-sm"><div><p className="font-medium">{String(key.name)}</p><p className="mt-1 font-mono text-xs text-muted">{String(key.key_hint)}</p><p className="mt-1 text-[11px] text-subtle">权限 {(key.scopes as string[] || []).join(" · ")} · 最近使用 {date(key.last_used_at)}</p></div><div className="flex items-center gap-2"><Badge tone={key.enabled && !key.revoked_at ? "ok" : "default"}>{key.enabled && !key.revoked_at ? "启用" : "停用"}</Badge>{key.enabled && !key.revoked_at ? <Button variant="destructive" size="sm" onClick={() => void revokeKey(String(key.id), load)}>撤销</Button> : null}</div></div>)}
+            {!keys.length ? <p className="px-5 py-8 text-center text-sm text-subtle">尚未创建 API 密钥</p> : null}
+          </div>
+        </section>
+
+        <div className="grid gap-6 lg:grid-cols-2">
+          <section className="rounded-xl border border-border bg-surface">
+            <div className="flex items-center justify-between border-b border-border px-5 py-4"><div><h2 className="font-medium">充值订单</h2><p className="mt-1 text-xs text-subtle">MVP 使用人工审核到账，支付渠道后续接入。</p></div><RechargeDialog currency={billing.tenant.currency} onCreated={load} /></div>
+            <Rows rows={billing.orders} empty="暂无订单" render={(row) => <><div><p className="text-sm font-medium">{money(row.amount_minor, String(row.currency))}</p><p className="text-xs text-subtle">{date(row.created_at)}</p></div><Badge tone={row.status === "paid" ? "ok" : row.status === "pending" ? "warn" : "default"}>{String(row.status)}</Badge></>} />
+          </section>
+          <section className="rounded-xl border border-border bg-surface">
+            <div className="border-b border-border px-5 py-4"><h2 className="font-medium">资金流水</h2><p className="mt-1 text-xs text-subtle">不可修改的双录账本。</p></div>
+            <Rows rows={billing.transactions} empty="暂无流水" render={(row) => <><div><p className="text-sm font-medium">{String(row.kind)}</p><p className="text-xs text-subtle">{date(row.created_at)}</p></div><span className={Number(row.amount_minor) >= 0 ? "text-ok" : "text-danger"}>{money(row.amount_minor, String(row.currency))}</span></>} />
+          </section>
+        </div>
+
+        <section className="rounded-xl border border-border bg-surface">
+          <div className="border-b border-border px-5 py-4"><h2 className="font-medium">最近用量</h2><p className="mt-1 text-xs text-subtle">每笔请求对应价格版本、预授权和最终结算。</p></div>
+          <Rows rows={billing.charges} empty="暂无官方 API 调用" render={(row) => <><div><p className="text-sm font-medium">{String(row.provider)} · {String(row.model)}</p><p className="text-xs text-subtle">{String(row.capability)} · {date(row.created_at)}</p></div><div className="text-right"><Badge tone={row.status === "settled" ? "ok" : row.status === "reserved" ? "warn" : "default"}>{String(row.status)}</Badge><p className="mt-1 text-xs text-muted">{money(row.charged_minor, billing.tenant.currency)}</p></div></>} />
+        </section>
+
+        <section id="security" className="rounded-xl border border-border bg-surface p-5"><div className="flex items-center gap-2"><ShieldCheck className="size-4" /><h2 className="font-medium">账户安全</h2></div><p className="mt-2 text-sm text-muted">建议所有 Owner 和 Admin 启用 TOTP 多因素认证。</p><MfaDialog /></section>
+      </div>
+    </SaasShell>
+  );
+}
+
+function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return <div className="rounded-xl border border-border bg-surface p-4"><div className="flex items-center gap-2 text-subtle">{icon}<span className="text-xs">{label}</span></div><p className="mt-3 text-2xl font-medium tabular-nums">{value}</p></div>;
+}
+
+function Rows({ rows, empty, render }: { rows: Record<string, unknown>[]; empty: string; render: (row: Record<string, unknown>) => React.ReactNode }) {
+  return <div className="max-h-80 divide-y divide-border overflow-y-auto">{rows.slice(0, 30).map((row, index) => <div key={String(row.id || index)} className="flex items-center justify-between gap-3 px-5 py-3">{render(row)}</div>)}{!rows.length ? <p className="px-5 py-8 text-center text-sm text-subtle">{empty}</p> : null}</div>;
+}
+
+async function revokeKey(id: string, reload: () => Promise<void>) {
+  const response = await fetch("/api/saas/keys", { method: "DELETE", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ id }) });
+  if (response.ok) { toast.success("密钥已撤销"); await reload(); } else toast.error("撤销失败");
+}
+
+function CreateKeyDialog({ onCreated }: { onCreated: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("Production");
+  const [models, setModels] = useState("");
+  const [secret, setSecret] = useState("");
+  async function create() {
+    const response = await fetch("/api/saas/keys", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ name, scopes: ["chat", "image"], modelAllowlist: models.split(",").map((item) => item.trim()).filter(Boolean) }) });
+    const body = await response.json() as { secret?: string; error?: string };
+    if (!response.ok || !body.secret) { toast.error(body.error || "创建失败"); return; }
+    setSecret(body.secret); await onCreated();
+  }
+  return <Dialog open={open} onOpenChange={(value) => { setOpen(value); if (!value) setSecret(""); }}><DialogTrigger asChild><Button size="sm"><Plus className="size-3.5" />新建密钥</Button></DialogTrigger><DialogContent title="新建租户 API 密钥">{secret ? <div><p className="text-sm text-warn">完整密钥只显示这一次，请立即保存。</p><p className="mt-3 break-all rounded-md bg-elevated p-3 font-mono text-xs">{secret}</p><Button className="mt-3 w-full" onClick={() => { void navigator.clipboard.writeText(secret); toast.success("已复制"); }}><Copy className="size-4" />复制密钥</Button></div> : <div className="space-y-3"><Field label="名称"><Input value={name} onChange={(event) => setName(event.target.value)} /></Field><Field label="模型白名单（逗号分隔，留空允许套餐模型）"><Input value={models} onChange={(event) => setModels(event.target.value)} placeholder="openai:gpt-5-mini, google:gemini-3.7-flash" /></Field><Button className="w-full" onClick={() => void create()}>创建</Button></div>}</DialogContent></Dialog>;
+}
+
+function RechargeDialog({ currency, onCreated }: { currency: string; onCreated: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("10");
+  async function create() {
+    const response = await fetch("/api/saas/billing", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ amountMinor: Math.round(Number(amount) * 100), idempotencyKey: crypto.randomUUID() }) });
+    const body = await response.json() as { error?: string };
+    if (!response.ok) { toast.error(body.error || "订单创建失败"); return; }
+    toast.success("充值订单已创建，请等待管理员审核"); setOpen(false); await onCreated();
+  }
+  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button variant="secondary" size="sm">充值</Button></DialogTrigger><DialogContent title="创建充值订单"><div className="space-y-3"><Field label={`金额（${currency}）`}><Input type="number" min="1" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></Field><Button className="w-full" onClick={() => void create()}>提交人工充值订单</Button></div></DialogContent></Dialog>;
+}
+
+function MfaDialog() {
+  const [open, setOpen] = useState(false);
+  const [secret, setSecret] = useState("");
+  const [code, setCode] = useState("");
+  const [recovery, setRecovery] = useState<string[]>([]);
+  async function start() {
+    const response = await fetch("/api/saas/session", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ action: "mfa-start" }) });
+    const body = await response.json() as { secret?: string; error?: string };
+    if (!response.ok || !body.secret) { toast.error(body.error || "无法开始 MFA"); return; }
+    setSecret(body.secret);
+  }
+  async function confirm() {
+    const response = await fetch("/api/saas/session", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ action: "mfa-confirm", code }) });
+    const body = await response.json() as { ok?: boolean; recoveryCodes?: string[]; error?: string };
+    if (!response.ok || !body.ok) { toast.error(body.error || "验证码错误"); return; }
+    setRecovery(body.recoveryCodes || []); toast.success("MFA 已启用");
+  }
+  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button className="mt-4" variant="secondary">配置 MFA</Button></DialogTrigger><DialogContent title="TOTP 多因素认证">{recovery.length ? <div><p className="text-sm text-warn">请离线保存以下恢复码，每个恢复码只能使用一次。</p><pre className="mt-3 rounded-md bg-elevated p-3 text-xs">{recovery.join("\n")}</pre></div> : secret ? <div className="space-y-3"><p className="text-sm text-muted">在身份验证器中手动添加密钥：</p><p className="break-all rounded-md bg-elevated p-3 font-mono text-xs">{secret}</p><Field label="当前 6 位验证码"><Input inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} /></Field><Button className="w-full" onClick={() => void confirm()}>验证并启用</Button></div> : <div><p className="text-sm text-muted">启用后登录必须同时输入密码和身份验证器验证码。</p><Button className="mt-4 w-full" onClick={() => void start()}>生成 TOTP 密钥</Button></div>}</DialogContent></Dialog>;
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <div className="space-y-2"><Label>{label}</Label>{children}</div>; }

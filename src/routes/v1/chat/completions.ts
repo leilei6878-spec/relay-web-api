@@ -9,7 +9,7 @@ import { parseMessageContent } from "@/lib/media";
 import { prepareChatRequest } from "@/lib/provider/index";
 import type { ChatTurn } from "@/lib/provider/types";
 import { ingestReferenceImages, type ReferenceAsset } from "@/lib/reference-input";
-import type { ApiKeyRecord } from "@/lib/api-keys";
+import type { ApiClientRecord } from "@/lib/api-keys";
 import { completeRequest, createRelayRequest } from "@/lib/requests";
 import { attachSseLifecycle, enqueueWithBackpressure, sseUsageChunk } from "@/lib/sse-runtime";
 import { fallbackChat, openPreviewChatStream } from "@/lib/upstream";
@@ -18,11 +18,16 @@ import { estimateTokens } from "@/lib/tokens";
 import { uid } from "@/lib/utils";
 import { bootProductionGuard } from "@/lib/production-guard";
 import { publicRelayMeta } from "@/lib/public-relay-meta";
+import { commercialChatCompletion, openAiCompatibleCommercialChat } from "@/lib/commercial-gateway";
+import { enforceCommercialKeyLimits } from "@/lib/saas-api-keys";
+import type { CommercialApiKey } from "@/lib/commercial-types";
 
 type ChatBody = {
   messages?: { role?: string; content?: unknown }[];
   model?: string;
   stream?: boolean;
+  max_completion_tokens?: number;
+  temperature?: number;
 };
 
 type ChatOk = {
@@ -48,7 +53,7 @@ type ChatOk = {
 };
 type ChatFail = { ok: false; status: number; error: string };
 
-const ALLOWED = new Set(["messages", "model", "stream"]);
+const ALLOWED = new Set(["messages", "model", "stream", "max_completion_tokens", "temperature"]);
 
 export const Route = createFileRoute("/v1/chat/completions")({
   server: {
@@ -87,6 +92,33 @@ export async function handleChat(request: Request): Promise<Response> {
             { error: { message: "unsupported parameter: invalid chat image", type: "invalid_request_error" } },
             { status: 400, headers: cors() },
           );
+        }
+        if (auth.commercial) {
+          if (body.stream) {
+            return Response.json(
+              { error: { message: "Commercial streaming is temporarily disabled until authoritative settlement is guaranteed", type: "unsupported_parameter", param: "stream" } },
+              { status: 400, headers: cors() },
+            );
+          }
+          const commercialKey = auth.record as CommercialApiKey;
+          const commercialModel = body.model || "";
+          const limits = await enforceCommercialKeyLimits(commercialKey, "chat", commercialModel);
+          if (!limits.ok) {
+            return Response.json({ error: { message: limits.error, type: "rate_limit_error" } }, { status: limits.status, headers: { ...cors(), ...(limits.retryAfter ? { "Retry-After": String(limits.retryAfter) } : {}) } });
+          }
+          const requestId = request.headers.get("x-request-id") || uid();
+          const result = await commercialChatCompletion({
+            key: commercialKey,
+            requestId,
+            messages: body.messages || [],
+            model: commercialModel,
+            maxCompletionTokens: Number(body.max_completion_tokens || 4096),
+            temperature: typeof body.temperature === "number" ? body.temperature : undefined,
+          });
+          if (!result.ok) {
+            return Response.json({ error: { message: result.error, type: result.code } }, { status: result.status, headers: cors() });
+          }
+          return Response.json(openAiCompatibleCommercialChat(result, commercialModel), { headers: cors() });
         }
         if (imageOverflow) {
           return Response.json(
@@ -148,7 +180,7 @@ export async function handleChat(request: Request): Promise<Response> {
 }
 
 async function logUsage(
-  key: ApiKeyRecord,
+  key: ApiClientRecord,
   model: string,
   parsed: { images: string[] },
   prompt: string,
@@ -318,7 +350,7 @@ export function streamChat(
   prompt: string,
   model: string,
   images: string[],
-  key: ApiKeyRecord,
+  key: ApiClientRecord,
   idem?: string,
   requestId?: string,
   abortSignal?: AbortSignal,

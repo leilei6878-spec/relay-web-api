@@ -2,7 +2,7 @@
 
 export const APP_VERSION = "0.9.0-rc2";
 export const API_VERSION = "v1";
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 export const SELECTOR_PACK = {
   chatgpt: "chatgpt-v1",
   gemini: "gemini-v1",

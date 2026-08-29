@@ -198,6 +198,11 @@ const RELEASE_LUA =
 const RENEW_LUA =
   'if redis.call("GET",KEYS[1])==ARGV[1] then return redis.call("PEXPIRE",KEYS[1],ARGV[2]) else return 0 end';
 
+const SEMAPHORE_ACQUIRE_LUA =
+  'local n=tonumber(redis.call("GET",KEYS[1]) or "0"); local cap=tonumber(ARGV[1]); if n>=cap then return 0 end; n=redis.call("INCR",KEYS[1]); redis.call("PEXPIRE",KEYS[1],ARGV[2]); return n';
+const SEMAPHORE_RELEASE_LUA =
+  'local n=tonumber(redis.call("GET",KEYS[1]) or "0"); if n<=1 then redis.call("DEL",KEYS[1]); return 0 end; return redis.call("DECR",KEYS[1])';
+
 /** Atomic compare-and-delete. Redis uses EVAL; memory uses the same predicate. */
 export async function coordCompareDel(key: string, expected: string) {
   const r = await getRedis();
@@ -231,6 +236,34 @@ export async function coordCompareExpire(key: string, expected: string, ttlMs: n
     return true;
   }
   return false;
+}
+
+export async function coordSemaphoreAcquire(key: string, limit: number, ttlMs: number) {
+  const cap = Math.max(1, Math.floor(limit));
+  const r = await getRedis();
+  if (r) {
+    const result = Number((await r.send(["EVAL", SEMAPHORE_ACQUIRE_LUA, "1", key, String(cap), String(ttlMs)])) || "0");
+    return result > 0;
+  }
+  sweep();
+  const current = mem.get(key);
+  const count = Number(current?.value || "0");
+  if (count >= cap) return false;
+  mem.set(key, { value: String(count + 1), exp: Date.now() + ttlMs });
+  return true;
+}
+
+export async function coordSemaphoreRelease(key: string) {
+  const r = await getRedis();
+  if (r) {
+    await r.send(["EVAL", SEMAPHORE_RELEASE_LUA, "1", key]);
+    return;
+  }
+  sweep();
+  const current = mem.get(key);
+  const count = Number(current?.value || "0");
+  if (count <= 1) mem.delete(key);
+  else if (current) current.value = String(count - 1);
 }
 
 function looksLikeJobId(value: string) {
@@ -333,3 +366,5 @@ export function resetCoordForTests() {
 
 export const COORD_RELEASE_LUA = RELEASE_LUA;
 export const COORD_RENEW_LUA = RENEW_LUA;
+export const COORD_SEMAPHORE_ACQUIRE_LUA = SEMAPHORE_ACQUIRE_LUA;
+export const COORD_SEMAPHORE_RELEASE_LUA = SEMAPHORE_RELEASE_LUA;

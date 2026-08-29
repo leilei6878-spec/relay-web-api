@@ -11,6 +11,10 @@ import { estimateTokens } from "@/lib/tokens";
 import { publicRelayMeta } from "@/lib/public-relay-meta";
 import { LEONARDO_API_WAIT_MS, LEONARDO_JOB_TIMEOUT_MS } from "@/lib/image-timeout";
 import { uid } from "@/lib/utils";
+import { commercialImageGeneration, openAiCompatibleCommercialImages } from "@/lib/commercial-gateway";
+import { enforceCommercialKeyLimits } from "@/lib/saas-api-keys";
+import type { CommercialApiKey } from "@/lib/commercial-types";
+import { resolveOfficialModel } from "@/lib/official-providers";
 import { collectSizeInput, resolveImageSpec } from "@/lib/provider/image-size";
 import { getAdapter } from "@/lib/provider";
 import { ingestReferenceImages } from "@/lib/reference-input";
@@ -177,6 +181,40 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     return Response.json({ error: { message: "缺少 prompt 或参考图" } }, { status: 400, headers: cors() });
   }
   const model = parsed.model || "gemini-2.5-flash-image";
+  if (auth.commercial) {
+    if (kind === "edit" || parsed.images.length) {
+      return Response.json(
+        { error: { message: "Commercial image editing is disabled until official provider-specific upload flows are configured", type: "unsupported_parameter", param: "images" } },
+        { status: 400, headers: cors() },
+      );
+    }
+    let resolved;
+    try {
+      resolved = resolveOfficialModel(model);
+    } catch (error) {
+      return Response.json({ error: { message: error instanceof Error ? error.message : "COMMERCIAL_MODEL_MUST_BE_OFFICIAL" } }, { status: 400, headers: cors() });
+    }
+    const commercialKey = auth.record as CommercialApiKey;
+    const limits = await enforceCommercialKeyLimits(commercialKey, "image", model);
+    if (!limits.ok) {
+      return Response.json({ error: { message: limits.error, type: "rate_limit_error" } }, { status: limits.status, headers: { ...cors(), ...(limits.retryAfter ? { "Retry-After": String(limits.retryAfter) } : {}) } });
+    }
+    const n = Math.max(1, Math.min(resolved.provider === "leonardo" ? 8 : 4, Math.floor(parsed.n || 1)));
+    const requestId = request.headers.get("x-request-id") || uid();
+    const result = await commercialImageGeneration({
+      key: commercialKey,
+      requestId,
+      prompt,
+      model,
+      n,
+      size: parsed.size,
+      quality: parsed.quality,
+    });
+    if (!result.ok) {
+      return Response.json({ error: { message: result.error, type: result.code } }, { status: result.status, headers: cors() });
+    }
+    return Response.json(openAiCompatibleCommercialImages(result), { headers: cors() });
+  }
   const platform = isLeonardoModel(model) ? "leonardo" : "gemini";
   let n = 1;
   let size = "1024x1024";

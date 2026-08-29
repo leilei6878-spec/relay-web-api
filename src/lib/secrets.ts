@@ -40,6 +40,14 @@ function decrypt(raw: string) {
   return Buffer.concat([d.update(data), d.final()]).toString("utf8");
 }
 
+export function encryptSecretValue(value: string) {
+  return encrypt(value);
+}
+
+export function decryptSecretValue(value: string) {
+  return decrypt(value);
+}
+
 async function load(): Promise<Bag> {
   try {
     const bag = JSON.parse(await readFile(FILE, "utf8")) as Bag;

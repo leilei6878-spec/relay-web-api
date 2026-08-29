@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertApiKey } from "@/lib/control-plane";
 import { listJobs } from "@/lib/job-queue";
+import { getSql } from "@/lib/db";
+import type { CommercialApiKey } from "@/lib/commercial-types";
 
 export const Route = createFileRoute("/api/jobs")({
   server: {
@@ -8,6 +10,16 @@ export const Route = createFileRoute("/api/jobs")({
       GET: async ({ request }) => {
         const auth = await assertApiKey(request);
         if (!auth.ok) return Response.json({ error: auth.error }, { status: 401 });
+        if (auth.commercial) {
+          const key = auth.record as CommercialApiKey;
+          const sql = await getSql();
+          const jobs = await sql.query(
+            `select request_id as id,status,provider,model,capability,created_at,settled_at,charged_minor
+               from relay_usage_charges where tenant_id=$1 order by created_at desc limit 20`,
+            [key.tenantId],
+          );
+          return Response.json({ jobs, workers: [] });
+        }
         const store = await listJobs();
         const now = Date.now();
         return Response.json({

@@ -6,6 +6,10 @@ import { estimateTokens } from "@/lib/tokens";
 import { ingestReferenceImages } from "@/lib/reference-input";
 import { runChat, streamChat } from "./chat/completions";
 import { publicRelayMeta } from "@/lib/public-relay-meta";
+import { commercialChatCompletion } from "@/lib/commercial-gateway";
+import { enforceCommercialKeyLimits } from "@/lib/saas-api-keys";
+import type { CommercialApiKey } from "@/lib/commercial-types";
+import { uid } from "@/lib/utils";
 
 const ALLOWED = new Set(["model", "input", "stream"]);
 
@@ -88,6 +92,34 @@ export const Route = createFileRoute("/v1/responses")({
             { error: { message: "unsupported parameter: input images max 4", type: "invalid_request_error" } },
             { status: 400, headers: cors() },
           );
+        }
+        if (auth.commercial) {
+          if (body.stream) {
+            return Response.json({ error: { message: "Commercial streaming is temporarily disabled until authoritative settlement is guaranteed", type: "unsupported_parameter" } }, { status: 400, headers: cors() });
+          }
+          const model = body.model || "";
+          const key = auth.record as CommercialApiKey;
+          const limits = await enforceCommercialKeyLimits(key, "chat", model);
+          if (!limits.ok) {
+            return Response.json({ error: { message: limits.error, type: "rate_limit_error" } }, { status: limits.status, headers: { ...cors(), ...(limits.retryAfter ? { "Retry-After": String(limits.retryAfter) } : {}) } });
+          }
+          const result = await commercialChatCompletion({
+            key,
+            requestId: request.headers.get("x-request-id") || uid(),
+            messages,
+            model,
+          });
+          if (!result.ok) return Response.json({ error: { message: result.error, type: result.code } }, { status: result.status, headers: cors() });
+          return Response.json({
+            id: `resp-${result.id}`,
+            object: "response",
+            created_at: Math.floor(Date.now() / 1000),
+            model,
+            status: "completed",
+            output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: result.text }] }],
+            usage: { input_tokens: result.promptTokens, output_tokens: result.completionTokens, total_tokens: result.promptTokens + result.completionTokens },
+            relay: { backend_mode: "official_api", provider: result.provider, charge_id: result.chargeId, charged_minor: result.chargedMinor },
+          }, { headers: cors() });
         }
         const prepared = prepareChatRequest("chatgpt", { messages, model: body.model || "chatgpt-web-auto" });
         if (!prepared.webPrompt && !prepared.images.length) {

@@ -1,0 +1,77 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { Building2, CreditCard, DollarSign, RefreshCw, Scale, Tags } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
+import { AppShell } from "@/components/app-shell";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Input, Label } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+export const Route = createFileRoute("/commercial")({ component: CommercialPage });
+
+type Snapshot = { tenants: Record<string, unknown>[]; plans: Record<string, unknown>[]; prices: Record<string, unknown>[]; orders: Record<string, unknown>[]; transactions: Record<string, unknown>[] };
+
+function money(value: unknown, currency: unknown) {
+  return new Intl.NumberFormat("zh-CN", { style: "currency", currency: String(currency || "USD") }).format(Number(value || 0) / 100);
+}
+
+function CommercialPage() {
+  return <AppShell><CommercialView /></AppShell>;
+}
+
+function CommercialView() {
+  const [data, setData] = useState<Snapshot>({ tenants: [], plans: [], prices: [], orders: [], transactions: [] });
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    const response = await fetch("/api/admin/commercial", { credentials: "include" });
+    const body = await response.json() as Partial<Snapshot> & { error?: string };
+    if (!response.ok) { toast.error(body.error || "商业数据读取失败"); setLoading(false); return; }
+    setData({ tenants: body.tenants || [], plans: body.plans || [], prices: body.prices || [], orders: body.orders || [], transactions: body.transactions || [] });
+    setLoading(false);
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  const pending = data.orders.filter((order) => order.status === "pending");
+  const balance = data.tenants.reduce((sum, tenant) => sum + Number(tenant.balance_minor || 0), 0);
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-medium">商业运营</h1><p className="mt-1 text-sm text-muted">租户、套餐、官方模型价格、订单和不可变账本。</p></div><div className="flex gap-2"><PriceDialog onSaved={load} /><Button variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCw className="size-4" />刷新</Button></div></header>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Stat icon={<Building2 className="size-4" />} label="租户" value={String(data.tenants.length)} /><Stat icon={<CreditCard className="size-4" />} label="待审订单" value={String(pending.length)} /><Stat icon={<Tags className="size-4" />} label="有效价格" value={String(data.prices.filter((price) => price.status === "active").length)} /><Stat icon={<Scale className="size-4" />} label="租户余额合计" value={money(balance, "USD")} /></div>
+
+      <section className="overflow-x-auto rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">租户</h2></div><table className="w-full min-w-[900px] text-left text-sm"><thead className="text-xs text-subtle"><tr><th className="px-4 py-3">企业</th><th>状态</th><th>套餐</th><th>余额 / 预留</th><th>计费邮箱</th><th>创建时间</th><th>操作</th></tr></thead><tbody>{data.tenants.map((tenant) => <tr key={String(tenant.id)} className="border-t border-border"><td className="px-4 py-3"><p className="font-medium">{String(tenant.name)}</p><p className="font-mono text-[11px] text-subtle">{String(tenant.slug)}</p></td><td><Badge tone={tenant.status === "active" ? "ok" : tenant.status === "trial" ? "info" : "danger"}>{String(tenant.status)}</Badge></td><td>{String(tenant.plan_id)}</td><td>{money(tenant.balance_minor, tenant.currency)} / {money(tenant.reserved_minor, tenant.currency)}</td><td>{String(tenant.billing_email)}</td><td className="text-xs text-muted">{new Date(String(tenant.created_at)).toLocaleString("zh-CN")}</td><td><div className="flex gap-1"><AdjustmentDialog tenant={tenant} onSaved={load} /><Button variant="ghost" size="sm" onClick={() => void tenantStatus(String(tenant.id), tenant.status === "suspended" ? "active" : "suspended", load)}>{tenant.status === "suspended" ? "恢复" : "暂停"}</Button></div></td></tr>)}</tbody></table></section>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <section className="rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">待审核充值订单</h2></div><div className="divide-y divide-border">{pending.map((order) => <div key={String(order.id)} className="flex items-center justify-between gap-3 px-5 py-4"><div><p className="font-medium">{money(order.amount_minor, order.currency)}</p><p className="text-xs text-subtle">租户 {String(order.tenant_id)} · {new Date(String(order.created_at)).toLocaleString("zh-CN")}</p></div><Button size="sm" onClick={() => void settleOrder(String(order.id), load)}>确认到账</Button></div>)}{!pending.length ? <p className="px-5 py-8 text-center text-sm text-subtle">没有待处理订单</p> : null}</div></section>
+        <section className="rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">价格版本</h2></div><div className="max-h-96 divide-y divide-border overflow-y-auto">{data.prices.map((price) => <div key={String(price.id)} className="flex items-center justify-between gap-3 px-5 py-3 text-sm"><div><p className="font-medium">{String(price.provider)} · {String(price.model)}</p><p className="text-xs text-subtle">{String(price.capability)} · v{String(price.version)} · markup {Number(price.markup_basis_points || 0) / 100}%</p></div><Badge tone={price.status === "active" ? "ok" : "default"}>{String(price.status)}</Badge></div>)}</div></section>
+      </div>
+    </div>
+  );
+}
+
+function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) { return <div className="rounded-xl border border-border bg-surface p-4"><div className="flex items-center gap-2 text-xs text-subtle">{icon}{label}</div><p className="mt-3 text-2xl font-medium">{value}</p></div>; }
+
+async function action(body: Record<string, unknown>) {
+  const response = await fetch("/api/admin/commercial", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const result = await response.json() as { ok?: boolean; error?: string };
+  if (!response.ok || !result.ok) throw new Error(result.error || "操作失败");
+}
+
+async function tenantStatus(tenantId: string, status: string, reload: () => Promise<void>) { try { await action({ action: "tenant-status", tenantId, status }); toast.success("租户状态已更新"); await reload(); } catch (error) { toast.error(error instanceof Error ? error.message : "更新失败"); } }
+async function settleOrder(orderId: string, reload: () => Promise<void>) { try { await action({ action: "settle-order", orderId }); toast.success("订单已确认到账"); await reload(); } catch (error) { toast.error(error instanceof Error ? error.message : "结算失败"); } }
+
+function AdjustmentDialog({ tenant, onSaved }: { tenant: Record<string, unknown>; onSaved: () => Promise<void> }) {
+  const [open, setOpen] = useState(false); const [amount, setAmount] = useState("0"); const [description, setDescription] = useState("Administrator adjustment");
+  async function save() { try { await action({ action: "adjust-balance", tenantId: tenant.id, deltaMinor: Math.round(Number(amount) * 100), description, idempotencyKey: crypto.randomUUID() }); toast.success("余额已调整"); setOpen(false); await onSaved(); } catch (error) { toast.error(error instanceof Error ? error.message : "调整失败"); } }
+  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button variant="ghost" size="sm"><DollarSign className="size-3.5" />调账</Button></DialogTrigger><DialogContent title={`余额调整 · ${String(tenant.name)}`}><div className="space-y-3"><Field label={`金额（${String(tenant.currency)}，可为负数）`}><Input type="number" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></Field><Field label="原因"><Input value={description} onChange={(event) => setDescription(event.target.value)} /></Field><Button className="w-full" onClick={() => void save()}>提交不可变账务流水</Button></div></DialogContent></Dialog>;
+}
+
+function PriceDialog({ onSaved }: { onSaved: () => Promise<void> }) {
+  const [open, setOpen] = useState(false); const [provider, setProvider] = useState("openai"); const [model, setModel] = useState(""); const [capability, setCapability] = useState("chat"); const [inputRate, setInputRate] = useState("0"); const [outputRate, setOutputRate] = useState("0"); const [imagePrice, setImagePrice] = useState("0"); const [markup, setMarkup] = useState("20");
+  async function save() { try { await action({ action: "publish-price", provider, model, capability, currency: "USD", inputMicrosPerMillion: Math.round(Number(inputRate) * 1_000_000), outputMicrosPerMillion: Math.round(Number(outputRate) * 1_000_000), imagePriceMinor: Math.round(Number(imagePrice) * 100), markupBasisPoints: Math.round(Number(markup) * 100) }); toast.success("新价格版本已发布"); setOpen(false); await onSaved(); } catch (error) { toast.error(error instanceof Error ? error.message : "价格发布失败"); } }
+  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button><Tags className="size-4" />发布价格</Button></DialogTrigger><DialogContent title="发布官方模型价格版本"><div className="grid gap-3 sm:grid-cols-2"><Field label="供应商"><Select value={provider} onValueChange={setProvider}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="openai">OpenAI</SelectItem><SelectItem value="google">Google</SelectItem><SelectItem value="leonardo">Leonardo</SelectItem></SelectContent></Select></Field><Field label="能力"><Select value={capability} onValueChange={setCapability}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="chat">Chat</SelectItem><SelectItem value="image">Image</SelectItem></SelectContent></Select></Field><Field label="官方模型 ID"><Input value={model} onChange={(event) => setModel(event.target.value)} /></Field><Field label="加价率 %"><Input type="number" value={markup} onChange={(event) => setMarkup(event.target.value)} /></Field><Field label="输入 $ / 1M Tokens"><Input type="number" step="0.0001" value={inputRate} onChange={(event) => setInputRate(event.target.value)} /></Field><Field label="输出 $ / 1M Tokens"><Input type="number" step="0.0001" value={outputRate} onChange={(event) => setOutputRate(event.target.value)} /></Field><Field label="每张图片 $"><Input type="number" step="0.01" value={imagePrice} onChange={(event) => setImagePrice(event.target.value)} /></Field></div><Button className="mt-4 w-full" onClick={() => void save()}>发布新版本并停用旧版本</Button></DialogContent></Dialog>;
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <div className="space-y-2"><Label>{label}</Label>{children}</div>; }

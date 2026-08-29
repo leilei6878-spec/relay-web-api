@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { coordSetNx, coordGet, coordDel, coordCompareDel, coordCompareExpire, coordSet, resetCoordForTests, withLock } from "./coord.ts";
+import { coordSetNx, coordGet, coordDel, coordCompareDel, coordCompareExpire, coordSet, coordSemaphoreAcquire, coordSemaphoreRelease, resetCoordForTests, withLock } from "./coord.ts";
 
 test("lease race: only one NX winner", async () => {
   resetCoordForTests();
@@ -45,4 +45,16 @@ test("compare-and-renew is owner-safe in memory", async () => {
   assert.equal(await coordCompareExpire("lease:2", "tok-a", 2000), true);
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(await coordGet("lease:2"), "tok-a");
+});
+
+test("commercial semaphore enforces concurrency and releases capacity", async () => {
+  resetCoordForTests();
+  assert.equal(await coordSemaphoreAcquire("commercial:key", 2, 2000), true);
+  assert.equal(await coordSemaphoreAcquire("commercial:key", 2, 2000), true);
+  assert.equal(await coordSemaphoreAcquire("commercial:key", 2, 2000), false);
+  await coordSemaphoreRelease("commercial:key");
+  assert.equal(await coordSemaphoreAcquire("commercial:key", 2, 2000), true);
+  await coordSemaphoreRelease("commercial:key");
+  await coordSemaphoreRelease("commercial:key");
+  assert.equal(await coordGet("commercial:key"), null);
 });

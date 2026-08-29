@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getRequest } from "@tanstack/react-start/server";
 import { findApiKey, type ApiKeyRecord } from "./api-keys";
+import { findTenantApiKey } from "./saas-api-keys";
+import type { CommercialApiKey } from "./commercial-types";
 
 const DIR = resolve("storage");
 export const ADMIN_COOKIE = "relay_admin";
@@ -9,6 +11,7 @@ export const ADMIN_COOKIE = "relay_admin";
 export type Principal =
   | { kind: "admin"; token: string }
   | { kind: "customer"; token: string; record: ApiKeyRecord }
+  | { kind: "commercial"; token: string; record: CommercialApiKey }
   | { kind: "worker"; token: string };
 
 function mint(prefix: string) {
@@ -114,6 +117,11 @@ export async function classify(request: Request): Promise<Principal | null> {
   if (bearer) {
     if (bearer === admin) return { kind: "admin", token: bearer };
     if (bearer === worker) return { kind: "worker", token: bearer };
+    if (bearer.startsWith("sk-saas-")) {
+      const commercial = await findTenantApiKey(bearer);
+      if (commercial?.enabled) return { kind: "commercial", token: bearer, record: commercial };
+      return null;
+    }
     const rec = await findApiKey(bearer);
     if (rec?.enabled && rec.key.startsWith("sk-relay-")) {
       return { kind: "customer", token: bearer, record: rec };
@@ -127,7 +135,26 @@ export async function classify(request: Request): Promise<Principal | null> {
 export async function assertAdmin(request: Request) {
   const p = await classify(request);
   if (!p || p.kind !== "admin") return { ok: false as const, status: 401, error: "需要管理员凭证" };
+  const unsafe = !["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase());
+  const browserCookieAuth = !bearerToken(request) && Boolean(readCookie(request, ADMIN_COOKIE));
+  if (unsafe && browserCookieAuth && !trustedMutationOrigin(request)) {
+    return { ok: false as const, status: 403, error: "管理请求来源校验失败" };
+  }
   return { ok: true as const, principal: p };
+}
+
+export function trustedMutationOrigin(request: Request) {
+  const origin = request.headers.get("origin") || "";
+  if (!origin) return false;
+  const configured = (process.env.RELAY_PUBLIC_URL || "").trim().replace(/\/$/, "");
+  const proto = (request.headers.get("x-forwarded-proto") || new URL(request.url).protocol.replace(":", "")).split(",")[0]!.trim();
+  const host = (request.headers.get("x-forwarded-host") || request.headers.get("host") || new URL(request.url).host).split(",")[0]!.trim();
+  const expected = `${proto}://${host}`;
+  if (origin === expected || (configured && origin === configured)) return true;
+  if (process.env.NODE_ENV !== "production") {
+    return ["http://localhost:8080", "http://127.0.0.1:8080"].includes(origin);
+  }
+  return false;
 }
 
 export async function assertCustomer(request: Request, scope?: "chat" | "image") {
@@ -137,6 +164,17 @@ export async function assertCustomer(request: Request, scope?: "chat" | "image")
     return { ok: false as const, status: 403, error: "此 Key 没有该接口权限" };
   }
   return { ok: true as const, principal: p, record: p.record, key: p.record.key };
+}
+
+export async function assertApiClient(request: Request, scope?: "chat" | "image") {
+  const p = await classify(request);
+  if (!p || (p.kind !== "customer" && p.kind !== "commercial")) {
+    return { ok: false as const, status: 401, error: "无效的 API Key" };
+  }
+  if (scope && p.record.scopes.length && !p.record.scopes.includes(scope)) {
+    return { ok: false as const, status: 403, error: "此 Key 没有该接口权限" };
+  }
+  return { ok: true as const, principal: p, record: p.record, key: p.token, commercial: p.kind === "commercial" };
 }
 
 export async function assertWorker(request: Request) {

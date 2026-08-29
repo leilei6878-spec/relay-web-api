@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { audit } from "./audit";
 import { uid } from "./utils";
+import type { CommercialApiKey } from "./commercial-types";
 
 export type KeyScope = "chat" | "image";
 
@@ -15,6 +16,8 @@ export type ApiKeyRecord = {
   dailyLimit: number;
   createdAt: string;
 };
+
+export type ApiClientRecord = ApiKeyRecord | CommercialApiKey;
 
 type Store = { keys: ApiKeyRecord[] };
 

@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { primaryApiKey } from "./api-keys";
-import { assertCustomer } from "./authz";
+import { assertApiClient } from "./authz";
 import { isCanaryAccount } from "./canary";
 import { getCircuit } from "./circuit";
 import { coordIncr } from "./coord";
@@ -297,7 +297,7 @@ export async function ensureApiKey() {
 }
 
 export async function assertApiKey(request: Request, scope?: "chat" | "image") {
-  const auth = await assertCustomer(request, scope);
+  const auth = await assertApiClient(request, scope);
   if (!auth.ok) return auth;
   if (auth.record.dailyLimit > 0) {
     const day = new Date().toISOString().slice(0, 10);
@@ -306,5 +306,5 @@ export async function assertApiKey(request: Request, scope?: "chat" | "image") {
       return { ok: false as const, status: 429, error: `今日额度已用完（${auth.record.dailyLimit}）` };
     }
   }
-  return { ok: true as const, key: auth.key, record: auth.record };
+  return { ok: true as const, key: auth.key, record: auth.record, commercial: auth.commercial };
 }

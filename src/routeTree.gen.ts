@@ -11,12 +11,14 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountsRouteImport } from './routes/accounts'
+import { Route as CommercialRouteImport } from './routes/commercial'
 import { Route as ConsoleRouteImport } from './routes/console'
 import { Route as HealthzRouteImport } from './routes/healthz'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as PlaygroundRouteImport } from './routes/playground'
+import { Route as PortalRouteImport } from './routes/portal'
 import { Route as ProxiesRouteImport } from './routes/proxies'
 import { Route as ReadyzRouteImport } from './routes/readyz'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -26,6 +28,7 @@ import { Route as ApiReadyRouteImport } from './routes/api/ready'
 import { Route as ApiRuntimeRouteImport } from './routes/api/runtime'
 import { Route as ApiUsageRouteImport } from './routes/api/usage'
 import { Route as InternalReadinessRouteImport } from './routes/internal/readiness'
+import { Route as SaasLoginRouteImport } from './routes/saas/login'
 import { Route as V1ModelsRouteImport } from './routes/v1/models'
 import { Route as V1ResponsesRouteImport } from './routes/v1/responses'
 import { Route as ApiAccountsProbeRouteImport } from './routes/api/accounts/probe'
@@ -33,6 +36,7 @@ import { Route as ApiAdminAccountAnalyticsRouteImport } from './routes/api/admin
 import { Route as ApiAdminAccountChecksRouteImport } from './routes/api/admin/account-checks'
 import { Route as ApiAdminAccountInspectionsRouteImport } from './routes/api/admin/account-inspections'
 import { Route as ApiAdminAccountOperationsRouteImport } from './routes/api/admin/account-operations'
+import { Route as ApiAdminCommercialRouteImport } from './routes/api/admin/commercial'
 import { Route as ApiAdminInvokeRouteImport } from './routes/api/admin/invoke'
 import { Route as ApiAdminLoginPackRouteImport } from './routes/api/admin/login-pack'
 import { Route as ApiAdminMetricsRouteImport } from './routes/api/admin/metrics'
@@ -40,6 +44,9 @@ import { Route as ApiAdminPlaneRouteImport } from './routes/api/admin/plane'
 import { Route as ApiAdminSessionRouteImport } from './routes/api/admin/session'
 import { Route as ApiAdminWorkerKitRouteImport } from './routes/api/admin/worker-kit'
 import { Route as ApiMediaIdRouteImport } from './routes/api/media/$id'
+import { Route as ApiSaasBillingRouteImport } from './routes/api/saas/billing'
+import { Route as ApiSaasKeysRouteImport } from './routes/api/saas/keys'
+import { Route as ApiSaasSessionRouteImport } from './routes/api/saas/session'
 import { Route as ApiWorkerAccountInspectionsRouteImport } from './routes/api/worker/account-inspections'
 import { Route as ApiWorkerChunkRouteImport } from './routes/api/worker/chunk'
 import { Route as ApiWorkerControlRouteImport } from './routes/api/worker/control'
@@ -59,6 +66,11 @@ const IndexRoute = IndexRouteImport.update({
 const AccountsRoute = AccountsRouteImport.update({
   id: '/accounts',
   path: '/accounts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CommercialRoute = CommercialRouteImport.update({
+  id: '/commercial',
+  path: '/commercial',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConsoleRoute = ConsoleRouteImport.update({
@@ -89,6 +101,11 @@ const MetricsRoute = MetricsRouteImport.update({
 const PlaygroundRoute = PlaygroundRouteImport.update({
   id: '/playground',
   path: '/playground',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PortalRoute = PortalRouteImport.update({
+  id: '/portal',
+  path: '/portal',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ProxiesRoute = ProxiesRouteImport.update({
@@ -136,6 +153,11 @@ const InternalReadinessRoute = InternalReadinessRouteImport.update({
   path: '/internal/readiness',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SaasLoginRoute = SaasLoginRouteImport.update({
+  id: '/saas/login',
+  path: '/saas/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const V1ModelsRoute = V1ModelsRouteImport.update({
   id: '/v1/models',
   path: '/v1/models',
@@ -174,6 +196,11 @@ const ApiAdminAccountOperationsRoute =
     path: '/api/admin/account-operations',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiAdminCommercialRoute = ApiAdminCommercialRouteImport.update({
+  id: '/api/admin/commercial',
+  path: '/api/admin/commercial',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAdminInvokeRoute = ApiAdminInvokeRouteImport.update({
   id: '/api/admin/invoke',
   path: '/api/admin/invoke',
@@ -207,6 +234,21 @@ const ApiAdminWorkerKitRoute = ApiAdminWorkerKitRouteImport.update({
 const ApiMediaIdRoute = ApiMediaIdRouteImport.update({
   id: '/api/media/$id',
   path: '/api/media/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSaasBillingRoute = ApiSaasBillingRouteImport.update({
+  id: '/api/saas/billing',
+  path: '/api/saas/billing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSaasKeysRoute = ApiSaasKeysRouteImport.update({
+  id: '/api/saas/keys',
+  path: '/api/saas/keys',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSaasSessionRoute = ApiSaasSessionRouteImport.update({
+  id: '/api/saas/session',
+  path: '/api/saas/session',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiWorkerAccountInspectionsRoute =
@@ -264,12 +306,14 @@ const V1betaModelsSplatRoute = V1betaModelsSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/commercial': typeof CommercialRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/metrics': typeof MetricsRoute
   '/playground': typeof PlaygroundRoute
+  '/portal': typeof PortalRoute
   '/proxies': typeof ProxiesRoute
   '/readyz': typeof ReadyzRoute
   '/settings': typeof SettingsRoute
@@ -279,6 +323,7 @@ export interface FileRoutesByFullPath {
   '/api/runtime': typeof ApiRuntimeRoute
   '/api/usage': typeof ApiUsageRoute
   '/internal/readiness': typeof InternalReadinessRoute
+  '/saas/login': typeof SaasLoginRoute
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
@@ -286,6 +331,7 @@ export interface FileRoutesByFullPath {
   '/api/admin/account-checks': typeof ApiAdminAccountChecksRoute
   '/api/admin/account-inspections': typeof ApiAdminAccountInspectionsRoute
   '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
+  '/api/admin/commercial': typeof ApiAdminCommercialRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
@@ -293,6 +339,9 @@ export interface FileRoutesByFullPath {
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/saas/billing': typeof ApiSaasBillingRoute
+  '/api/saas/keys': typeof ApiSaasKeysRoute
+  '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
@@ -307,12 +356,14 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/commercial': typeof CommercialRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/metrics': typeof MetricsRoute
   '/playground': typeof PlaygroundRoute
+  '/portal': typeof PortalRoute
   '/proxies': typeof ProxiesRoute
   '/readyz': typeof ReadyzRoute
   '/settings': typeof SettingsRoute
@@ -322,6 +373,7 @@ export interface FileRoutesByTo {
   '/api/runtime': typeof ApiRuntimeRoute
   '/api/usage': typeof ApiUsageRoute
   '/internal/readiness': typeof InternalReadinessRoute
+  '/saas/login': typeof SaasLoginRoute
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
@@ -329,6 +381,7 @@ export interface FileRoutesByTo {
   '/api/admin/account-checks': typeof ApiAdminAccountChecksRoute
   '/api/admin/account-inspections': typeof ApiAdminAccountInspectionsRoute
   '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
+  '/api/admin/commercial': typeof ApiAdminCommercialRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
@@ -336,6 +389,9 @@ export interface FileRoutesByTo {
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/saas/billing': typeof ApiSaasBillingRoute
+  '/api/saas/keys': typeof ApiSaasKeysRoute
+  '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
@@ -351,12 +407,14 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
+  '/commercial': typeof CommercialRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
   '/login': typeof LoginRoute
   '/logs': typeof LogsRoute
   '/metrics': typeof MetricsRoute
   '/playground': typeof PlaygroundRoute
+  '/portal': typeof PortalRoute
   '/proxies': typeof ProxiesRoute
   '/readyz': typeof ReadyzRoute
   '/settings': typeof SettingsRoute
@@ -366,6 +424,7 @@ export interface FileRoutesById {
   '/api/runtime': typeof ApiRuntimeRoute
   '/api/usage': typeof ApiUsageRoute
   '/internal/readiness': typeof InternalReadinessRoute
+  '/saas/login': typeof SaasLoginRoute
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
@@ -373,6 +432,7 @@ export interface FileRoutesById {
   '/api/admin/account-checks': typeof ApiAdminAccountChecksRoute
   '/api/admin/account-inspections': typeof ApiAdminAccountInspectionsRoute
   '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
+  '/api/admin/commercial': typeof ApiAdminCommercialRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
@@ -380,6 +440,9 @@ export interface FileRoutesById {
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/saas/billing': typeof ApiSaasBillingRoute
+  '/api/saas/keys': typeof ApiSaasKeysRoute
+  '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
   '/api/worker/control': typeof ApiWorkerControlRoute
@@ -396,12 +459,14 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/accounts'
+    | '/commercial'
     | '/console'
     | '/healthz'
     | '/login'
     | '/logs'
     | '/metrics'
     | '/playground'
+    | '/portal'
     | '/proxies'
     | '/readyz'
     | '/settings'
@@ -411,6 +476,7 @@ export interface FileRouteTypes {
     | '/api/runtime'
     | '/api/usage'
     | '/internal/readiness'
+    | '/saas/login'
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
@@ -418,6 +484,7 @@ export interface FileRouteTypes {
     | '/api/admin/account-checks'
     | '/api/admin/account-inspections'
     | '/api/admin/account-operations'
+    | '/api/admin/commercial'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
@@ -425,6 +492,9 @@ export interface FileRouteTypes {
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
+    | '/api/saas/billing'
+    | '/api/saas/keys'
+    | '/api/saas/session'
     | '/api/worker/account-inspections'
     | '/api/worker/chunk'
     | '/api/worker/control'
@@ -439,12 +509,14 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/accounts'
+    | '/commercial'
     | '/console'
     | '/healthz'
     | '/login'
     | '/logs'
     | '/metrics'
     | '/playground'
+    | '/portal'
     | '/proxies'
     | '/readyz'
     | '/settings'
@@ -454,6 +526,7 @@ export interface FileRouteTypes {
     | '/api/runtime'
     | '/api/usage'
     | '/internal/readiness'
+    | '/saas/login'
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
@@ -461,6 +534,7 @@ export interface FileRouteTypes {
     | '/api/admin/account-checks'
     | '/api/admin/account-inspections'
     | '/api/admin/account-operations'
+    | '/api/admin/commercial'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
@@ -468,6 +542,9 @@ export interface FileRouteTypes {
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
+    | '/api/saas/billing'
+    | '/api/saas/keys'
+    | '/api/saas/session'
     | '/api/worker/account-inspections'
     | '/api/worker/chunk'
     | '/api/worker/control'
@@ -482,12 +559,14 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/accounts'
+    | '/commercial'
     | '/console'
     | '/healthz'
     | '/login'
     | '/logs'
     | '/metrics'
     | '/playground'
+    | '/portal'
     | '/proxies'
     | '/readyz'
     | '/settings'
@@ -497,6 +576,7 @@ export interface FileRouteTypes {
     | '/api/runtime'
     | '/api/usage'
     | '/internal/readiness'
+    | '/saas/login'
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
@@ -504,6 +584,7 @@ export interface FileRouteTypes {
     | '/api/admin/account-checks'
     | '/api/admin/account-inspections'
     | '/api/admin/account-operations'
+    | '/api/admin/commercial'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
@@ -511,6 +592,9 @@ export interface FileRouteTypes {
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
+    | '/api/saas/billing'
+    | '/api/saas/keys'
+    | '/api/saas/session'
     | '/api/worker/account-inspections'
     | '/api/worker/chunk'
     | '/api/worker/control'
@@ -526,12 +610,14 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountsRoute: typeof AccountsRoute
+  CommercialRoute: typeof CommercialRoute
   ConsoleRoute: typeof ConsoleRoute
   HealthzRoute: typeof HealthzRoute
   LoginRoute: typeof LoginRoute
   LogsRoute: typeof LogsRoute
   MetricsRoute: typeof MetricsRoute
   PlaygroundRoute: typeof PlaygroundRoute
+  PortalRoute: typeof PortalRoute
   ProxiesRoute: typeof ProxiesRoute
   ReadyzRoute: typeof ReadyzRoute
   SettingsRoute: typeof SettingsRoute
@@ -541,6 +627,7 @@ export interface RootRouteChildren {
   ApiRuntimeRoute: typeof ApiRuntimeRoute
   ApiUsageRoute: typeof ApiUsageRoute
   InternalReadinessRoute: typeof InternalReadinessRoute
+  SaasLoginRoute: typeof SaasLoginRoute
   V1ModelsRoute: typeof V1ModelsRoute
   V1ResponsesRoute: typeof V1ResponsesRoute
   ApiAccountsProbeRoute: typeof ApiAccountsProbeRoute
@@ -548,6 +635,7 @@ export interface RootRouteChildren {
   ApiAdminAccountChecksRoute: typeof ApiAdminAccountChecksRoute
   ApiAdminAccountInspectionsRoute: typeof ApiAdminAccountInspectionsRoute
   ApiAdminAccountOperationsRoute: typeof ApiAdminAccountOperationsRoute
+  ApiAdminCommercialRoute: typeof ApiAdminCommercialRoute
   ApiAdminInvokeRoute: typeof ApiAdminInvokeRoute
   ApiAdminLoginPackRoute: typeof ApiAdminLoginPackRoute
   ApiAdminMetricsRoute: typeof ApiAdminMetricsRoute
@@ -555,6 +643,9 @@ export interface RootRouteChildren {
   ApiAdminSessionRoute: typeof ApiAdminSessionRoute
   ApiAdminWorkerKitRoute: typeof ApiAdminWorkerKitRoute
   ApiMediaIdRoute: typeof ApiMediaIdRoute
+  ApiSaasBillingRoute: typeof ApiSaasBillingRoute
+  ApiSaasKeysRoute: typeof ApiSaasKeysRoute
+  ApiSaasSessionRoute: typeof ApiSaasSessionRoute
   ApiWorkerAccountInspectionsRoute: typeof ApiWorkerAccountInspectionsRoute
   ApiWorkerChunkRoute: typeof ApiWorkerChunkRoute
   ApiWorkerControlRoute: typeof ApiWorkerControlRoute
@@ -581,6 +672,13 @@ declare module '@tanstack/react-router' {
       path: '/accounts'
       fullPath: '/accounts'
       preLoaderRoute: typeof AccountsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/commercial': {
+      id: '/commercial'
+      path: '/commercial'
+      fullPath: '/commercial'
+      preLoaderRoute: typeof CommercialRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/console': {
@@ -623,6 +721,13 @@ declare module '@tanstack/react-router' {
       path: '/playground'
       fullPath: '/playground'
       preLoaderRoute: typeof PlaygroundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/portal': {
+      id: '/portal'
+      path: '/portal'
+      fullPath: '/portal'
+      preLoaderRoute: typeof PortalRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/proxies': {
@@ -688,6 +793,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InternalReadinessRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/saas/login': {
+      id: '/saas/login'
+      path: '/saas/login'
+      fullPath: '/saas/login'
+      preLoaderRoute: typeof SaasLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/v1/models': {
       id: '/v1/models'
       path: '/v1/models'
@@ -737,6 +849,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAdminAccountOperationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/admin/commercial': {
+      id: '/api/admin/commercial'
+      path: '/api/admin/commercial'
+      fullPath: '/api/admin/commercial'
+      preLoaderRoute: typeof ApiAdminCommercialRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/admin/invoke': {
       id: '/api/admin/invoke'
       path: '/api/admin/invoke'
@@ -784,6 +903,27 @@ declare module '@tanstack/react-router' {
       path: '/api/media/$id'
       fullPath: '/api/media/$id'
       preLoaderRoute: typeof ApiMediaIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/saas/billing': {
+      id: '/api/saas/billing'
+      path: '/api/saas/billing'
+      fullPath: '/api/saas/billing'
+      preLoaderRoute: typeof ApiSaasBillingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/saas/keys': {
+      id: '/api/saas/keys'
+      path: '/api/saas/keys'
+      fullPath: '/api/saas/keys'
+      preLoaderRoute: typeof ApiSaasKeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/saas/session': {
+      id: '/api/saas/session'
+      path: '/api/saas/session'
+      fullPath: '/api/saas/session'
+      preLoaderRoute: typeof ApiSaasSessionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/worker/account-inspections': {
@@ -862,12 +1002,14 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountsRoute: AccountsRoute,
+  CommercialRoute: CommercialRoute,
   ConsoleRoute: ConsoleRoute,
   HealthzRoute: HealthzRoute,
   LoginRoute: LoginRoute,
   LogsRoute: LogsRoute,
   MetricsRoute: MetricsRoute,
   PlaygroundRoute: PlaygroundRoute,
+  PortalRoute: PortalRoute,
   ProxiesRoute: ProxiesRoute,
   ReadyzRoute: ReadyzRoute,
   SettingsRoute: SettingsRoute,
@@ -877,6 +1019,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiRuntimeRoute: ApiRuntimeRoute,
   ApiUsageRoute: ApiUsageRoute,
   InternalReadinessRoute: InternalReadinessRoute,
+  SaasLoginRoute: SaasLoginRoute,
   V1ModelsRoute: V1ModelsRoute,
   V1ResponsesRoute: V1ResponsesRoute,
   ApiAccountsProbeRoute: ApiAccountsProbeRoute,
@@ -884,6 +1027,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAdminAccountChecksRoute: ApiAdminAccountChecksRoute,
   ApiAdminAccountInspectionsRoute: ApiAdminAccountInspectionsRoute,
   ApiAdminAccountOperationsRoute: ApiAdminAccountOperationsRoute,
+  ApiAdminCommercialRoute: ApiAdminCommercialRoute,
   ApiAdminInvokeRoute: ApiAdminInvokeRoute,
   ApiAdminLoginPackRoute: ApiAdminLoginPackRoute,
   ApiAdminMetricsRoute: ApiAdminMetricsRoute,
@@ -891,6 +1035,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAdminSessionRoute: ApiAdminSessionRoute,
   ApiAdminWorkerKitRoute: ApiAdminWorkerKitRoute,
   ApiMediaIdRoute: ApiMediaIdRoute,
+  ApiSaasBillingRoute: ApiSaasBillingRoute,
+  ApiSaasKeysRoute: ApiSaasKeysRoute,
+  ApiSaasSessionRoute: ApiSaasSessionRoute,
   ApiWorkerAccountInspectionsRoute: ApiWorkerAccountInspectionsRoute,
   ApiWorkerChunkRoute: ApiWorkerChunkRoute,
   ApiWorkerControlRoute: ApiWorkerControlRoute,

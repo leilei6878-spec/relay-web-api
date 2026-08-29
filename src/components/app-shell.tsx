@@ -7,6 +7,7 @@ import {
   Radio,
   ScrollText,
   Settings2,
+  WalletCards,
   TerminalSquare,
   Users,
 } from "lucide-react";
@@ -26,6 +27,7 @@ const nav = [
   { to: "/console", label: "API 测试", icon: Radio },
   { to: "/logs", label: "请求日志", icon: ScrollText },
   { to: "/settings", label: "API", icon: Settings2 },
+  { to: "/commercial", label: "商业运营", icon: WalletCards },
 ];
 
 function redirectToLogin() {

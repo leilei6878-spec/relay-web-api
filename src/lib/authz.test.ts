@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import "./test-env.ts";
 import { createApiKey } from "./api-keys.ts";
-import { ADMIN_COOKIE, adminCookieHeader, allowAutomaticAdminLogin, classify, ensureAdminToken } from "./authz.ts";
+import { ADMIN_COOKIE, adminCookieHeader, allowAutomaticAdminLogin, assertAdmin, classify, ensureAdminToken } from "./authz.ts";
 
 process.env.RELAY_SKIP_DB = "1";
 
@@ -87,4 +87,25 @@ test("admin cookie stays same-site on HTTP and HTTPS", () => {
   assert.match(https, /SameSite=Lax/);
   assert.match(https, /Secure/);
   assert.doesNotMatch(https, /SameSite=None/);
+});
+
+test("cookie-authenticated administrator mutations require the trusted origin", async () => {
+  const admin = await ensureAdminToken();
+  const cookie = `${ADMIN_COOKIE}=${encodeURIComponent(admin)}`;
+  const rejected = await assertAdmin(new Request("https://relay.test/api/admin/plane", {
+    method: "PUT",
+    headers: { Cookie: cookie, Origin: "https://evil.test", Host: "relay.test" },
+  }));
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.equal(rejected.status, 403);
+  const allowed = await assertAdmin(new Request("https://relay.test/api/admin/plane", {
+    method: "PUT",
+    headers: { Cookie: cookie, Origin: "https://relay.test", Host: "relay.test" },
+  }));
+  assert.equal(allowed.ok, true);
+  const bearer = await assertAdmin(new Request("https://relay.test/api/admin/plane", {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${admin}` },
+  }));
+  assert.equal(bearer.ok, true);
 });
