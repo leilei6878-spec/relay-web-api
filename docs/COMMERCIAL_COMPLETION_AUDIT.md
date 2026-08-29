@@ -10,7 +10,7 @@ complete when only design intent or a narrow test exists.
 
 - production version: `0.10.0-rc13`
 - schema: `15`
-- runtime commit: `fa56455eecc9fc06d45dfab1f91ca48031c4963b`
+- runtime commit: `031f1967f3bbc70549702056f60a6b8a62545ba3`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -37,7 +37,7 @@ complete when only design intent or a narrow test exists.
 | Payment/tax/refund/dispute | Raw Stripe signature verification, exact identity/amount/currency checks, cumulative single-line partial-tax allocation, ambiguous external refund rejection, idempotent balanced settlement and dispute fund events | Complete in code; live Stripe/Tax export drill not possible without merchant configuration |
 | Versioned commercial configuration | Fixed catalog including rotatable tenant-audit HMAC key, encrypted hint-only secret versions, fixed official connection tests, atomic activation/rollback, hard launch gates, audit and SSRF-resistant Webhooks | Complete |
 | External launch evidence | Append-only, SHA-256-bound, independently reviewed and expiring evidence for provider rights, model prices, canonical plan snapshots, legal/tax, live payments, email, HA, offsite restore, alerts, load, soak and CI; readiness/Checkout fail closed | Complete in code and dark-launch production; genuine external evidence is intentionally absent |
-| CI/CD release gates | GitHub Actions workflow runs all tests, type/lint/build, audit and SBOM | Workflow complete; cannot run remotely while GitHub push is denied |
+| CI/CD release gates | Full-history workflow runs tests/type/lint/build/audit; pinned Actions/images; schema/15-migration and exact-commit contract; production CycloneDX SBOM; commit/tree/file hashes and root release-manifest digest; commit-named retained artifact | Gate passed locally and on production; authoritative GitHub execution still unavailable while push is denied |
 | HA production topology | Versioned contract requires 2 Gateways, 2 Workers, managed multi-AZ PostgreSQL/Redis and replicated object storage | Not deployed; current host is one Gateway, one Worker and one VPS data plane |
 | Offsite backup and recovery | Opt-in PostgreSQL-16/Node/Git/`mc` runner; complete Git check; S3 object path/size/SHA-256 manifest; upload then remote re-download/byte verification; root manifest digest; standalone downloaded-snapshot verifier; same-host isolated full restore drill below | Tooling and same-host recovery proven; distinct-account/region target and genuine offsite restore evidence missing |
 | Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 15, remote-root denial, administrator/customer MFA session, plan-period, exact-provider and tenant-audit probes, hard MFA/Canary/evidence gates and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
