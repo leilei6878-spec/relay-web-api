@@ -1,6 +1,6 @@
 {
   "name": "app-builder-workspace",
-  "version": "0.10.0-rc9",
+  "version": "0.10.0-rc10",
   "private": true,
   "sideEffects": false,
   "type": "module",

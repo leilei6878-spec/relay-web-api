@@ -9,6 +9,8 @@ export type CommercialReadiness = {
   ready: boolean;
   blockers: string[];
   officialProviders: { openai: boolean; google: boolean; vertex: boolean; leonardo: boolean };
+  activeProviders: string[];
+  missingProviderCredentials: string[];
   activePrices: number;
   missingCanaries: number;
   evidenceTotal: number;
@@ -44,6 +46,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     leonardo: Boolean(env.LEONARDO_API_KEY?.trim()),
   };
   let activePrices = 0;
+  let activeProviders: string[] = [];
   let missingCanaries = 0;
   let evidenceTotal = 0;
   let missingEvidence: string[] = [];
@@ -55,13 +58,17 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
       "select count(*)::int as count from relay_price_book where status='active' and effective_from <= now() and (effective_to is null or effective_to > now())",
     );
     activePrices = Number(rows[0]?.count || 0);
+    const providerRows = await sql.query<{ provider: string }>(
+      "select distinct provider from relay_price_book where status='active' and effective_from<=now() and (effective_to is null or effective_to>now()) order by provider",
+    );
+    activeProviders = providerRows.map((row) => String(row.provider));
     const canaryHours = Math.max(1, Math.min(168, Number(env.RELAY_PROVIDER_CANARY_MAX_AGE_HOURS || 24)));
     const canaries = await sql.query<{ count: number }>(
       `select count(*)::int as count from relay_price_book p
         where p.status='active' and p.effective_from<=now() and (p.effective_to is null or p.effective_to>now())
           and not exists (
             select 1 from relay_provider_sandbox_runs r
-             where r.provider=p.provider and r.model=p.model and r.capability=p.capability
+             where r.provider=p.provider and r.model=p.model and r.capability=p.capability and r.currency=p.currency
                and r.mode='live' and r.status='passed'
                and r.finished_at > now()-($1::text||' hours')::interval
           )`,
@@ -77,6 +84,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     missingEvidence = evidence.filter((item) => !item.valid).map((item) => `${item.requirement}:${item.subject}:${item.reason}`);
   } catch {
     activePrices = 0;
+    activeProviders = [];
     missingCanaries = 0;
     evidenceTotal = 0;
     missingEvidence = [];
@@ -84,6 +92,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     onlineWorkers = 0;
   }
   const gatewayReplicas = Math.max(1, Number(env.RELAY_GATEWAY_REPLICA_COUNT || 1));
+  const missingProviderCredentials = activeProviders.filter((provider) => !officialProviders[provider as keyof typeof officialProviders]);
   const minWorkers = Math.max(1, Number(env.RELAY_COMMERCIAL_MIN_WORKERS || 2));
   const offsiteBackupConfigured = Boolean(env.RELAY_BACKUP_S3_ENDPOINT?.trim() && env.RELAY_BACKUP_S3_BUCKET?.trim());
   const legalApproved = env.RELAY_LEGAL_APPROVED === "1";
@@ -99,6 +108,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     (env.NODE_ENV !== "production" || stripeLiveKey) && taxReady;
   const blockers: string[] = [];
   if (enabled && !Object.values(officialProviders).some(Boolean)) blockers.push("no official provider credential configured");
+  if (enabled && missingProviderCredentials.length > 0) blockers.push(`official credential missing for active provider(s): ${missingProviderCredentials.join(",")}`);
   if (enabled && activePrices === 0) blockers.push("no active commercial price book rows");
   if (enabled && missingCanaries > 0) blockers.push(`${missingCanaries} active price route(s) lack recent live provider canary evidence`);
   if (enabled && evidenceUnavailable) blockers.push("commercial launch evidence ledger unavailable");
@@ -121,6 +131,8 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     ready: enabled && blockers.length === 0,
     blockers,
     officialProviders,
+    activeProviders,
+    missingProviderCredentials,
     activePrices,
     missingCanaries,
     evidenceTotal,

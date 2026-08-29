@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { commercialReadiness } from "./commercial-readiness.ts";
+import { collectCommercialSignals } from "./commercial-monitor.ts";
 import { listProviderSandboxRuns, runProviderSandbox } from "./provider-sandbox.ts";
 import type { officialChat, officialImage } from "./official-providers.ts";
 
@@ -105,5 +106,50 @@ test("commercial readiness requires a recent exact provider/model/capability can
   const ready = await commercialReadiness(env, db);
   assert.equal(ready.missingCanaries, 0);
   assert.ok(!ready.blockers.some((blocker) => blocker.includes("canary evidence")));
+  await pg.close();
+});
+
+test("commercial readiness requires a current credential for every active provider even when an old canary passed", async () => {
+  const { pg, db } = await database();
+  await price(pg, { id: "price-leonardo-credential", provider: "leonardo", model: "model-live", capability: "image", image: 10 });
+  await pg.query(`insert into relay_provider_sandbox_runs(id,provider,model,capability,mode,status,currency,estimated_charge_minor,initiated_by,started_at,finished_at) values ('credential-canary','leonardo','model-live','image','live','passed','USD',1,'admin',now(),now())`);
+  const base = { RELAY_COMMERCIAL_ENABLED: "1", OPENAI_API_KEY: "unrelated-provider-key" } as NodeJS.ProcessEnv;
+  const missing = await commercialReadiness(base, db);
+  assert.deepEqual(missing.activeProviders, ["leonardo"]);
+  assert.deepEqual(missing.missingProviderCredentials, ["leonardo"]);
+  assert.ok(missing.blockers.some((blocker) => blocker.includes("leonardo")));
+  const savedLeonardo = process.env.LEONARDO_API_KEY;
+  delete process.env.LEONARDO_API_KEY;
+  try {
+    const signals = await collectCommercialSignals(db);
+    assert.ok(signals.some((signal) => signal.code === "PROVIDER_CREDENTIAL_MISSING" && signal.message.includes("leonardo")));
+  } finally {
+    if (savedLeonardo === undefined) delete process.env.LEONARDO_API_KEY;
+    else process.env.LEONARDO_API_KEY = savedLeonardo;
+  }
+  const configured = await commercialReadiness({ ...base, LEONARDO_API_KEY: "leonardo-current-key" } as NodeJS.ProcessEnv, db);
+  assert.deepEqual(configured.missingProviderCredentials, []);
+  await pg.close();
+});
+
+test("provider canary evidence is isolated by currency and must be live", async () => {
+  const { pg, db } = await database();
+  await price(pg, { id: "price-currency-usd", provider: "openai", model: "gpt-currency", capability: "chat" });
+  await pg.query(
+    `insert into relay_price_book(id,version,provider,model,capability,currency,input_micros_per_million,output_micros_per_million,effective_from,status)
+     values ('price-currency-cny',2,'openai','gpt-currency','chat','CNY',1000000,1000000,now()-interval '1 minute','active')`,
+  );
+  await assert.rejects(
+    () => pg.query(`insert into relay_provider_sandbox_runs(id,provider,model,capability,mode,status,currency,estimated_charge_minor,initiated_by,started_at,finished_at) values ('structural-cny','openai','gpt-currency','chat','structural','passed','CNY',1,'admin',now(),now())`),
+    /check constraint/i,
+  );
+  await pg.query(`insert into relay_provider_sandbox_runs(id,provider,model,capability,mode,status,currency,estimated_charge_minor,initiated_by,started_at,finished_at) values ('live-usd','openai','gpt-currency','chat','live','passed','USD',1,'admin',now(),now())`);
+  const env = { RELAY_COMMERCIAL_ENABLED: "1", OPENAI_API_KEY: "configured" } as NodeJS.ProcessEnv;
+  const missing = await commercialReadiness(env, db);
+  assert.equal(missing.activePrices, 2);
+  assert.equal(missing.missingCanaries, 1);
+  await pg.query(`insert into relay_provider_sandbox_runs(id,provider,model,capability,mode,status,currency,estimated_charge_minor,initiated_by,started_at,finished_at) values ('live-cny','openai','gpt-currency','chat','live','passed','CNY',1,'admin',now(),now())`);
+  const exact = await commercialReadiness(env, db);
+  assert.equal(exact.missingCanaries, 0);
   await pg.close();
 });

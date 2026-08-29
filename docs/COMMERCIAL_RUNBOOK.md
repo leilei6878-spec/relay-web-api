@@ -37,7 +37,7 @@
 12. Complete a test-mode Checkout/payment/refund/reconciliation drill, then a
     separately approved live-mode minimum-value transaction and refund.
 13. Temporarily set `RELAY_ALLOW_LIVE_PROVIDER_CANARY=1`, run every exact active
-    provider/model/capability route in `/commercial-sandbox`, then close the
+    provider/model/capability/currency route in `/commercial-sandbox`, then close the
     canary hard gate. Readiness must report `missingCanaries: 0`.
 14. Run the 200-request, 5×20 concurrency and 24-hour soak gates.
 15. In `/commercial-readiness`, record the SHA-256 and external reference for

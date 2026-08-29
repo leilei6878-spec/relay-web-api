@@ -33,11 +33,14 @@ and common key prefixes before persistence.
 
 ## Readiness requirement
 
-For every active price-book route, Readiness requires an exact passed live
-canary for provider/model/capability within
+For every active price-book route, Readiness requires the corresponding
+provider credential to be currently valid in configuration and an exact passed
+live canary for provider/model/capability/currency within
 `RELAY_PROVIDER_CANARY_MAX_AGE_HOURS` (default 24 hours). Missing evidence is a
-critical durable alert. Republishing a model, changing capability or allowing
-evidence to expire blocks commercial readiness until a new run passes.
+critical durable alert. Changing provider/model/capability/currency, removing a
+currently required credential or allowing evidence to expire blocks commercial
+readiness until configuration and evidence are valid again. A credential from
+an unrelated provider cannot satisfy the route.
 
 ## Operating sequence
 

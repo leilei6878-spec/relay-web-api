@@ -115,7 +115,8 @@ period boundary. See [`PLAN_BILLING.md`](./PLAN_BILLING.md).
 
 `GET /api/saas/readiness` exposes non-secret state. Commercial readiness needs:
 
-- at least one official provider credential;
+- a current official credential for every provider referenced by an active
+  price route; an unrelated provider credential cannot satisfy this gate;
 - at least one active price-book row;
 - HTTPS public origin;
 - Redis;
@@ -127,7 +128,7 @@ period boundary. See [`PLAN_BILLING.md`](./PLAN_BILLING.md).
   selection.
 - configured Stripe automatic tax or a documented approved exemption.
 - a recent exact passed live provider canary for every active
-  provider/model/capability price route.
+  provider/model/capability/currency price route.
 - valid append-only launch evidence for provider rights, every exact price
   version, legal/tax approval, live payments, email delivery when registration
   is enabled, HA, offsite restore, alert delivery, load, soak and CI gates.
