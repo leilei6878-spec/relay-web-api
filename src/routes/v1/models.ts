@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { chatgptAdapter, geminiAdapter, leonardoAdapter } from "@/lib/provider/index";
 import { OFFICIAL_GPT_IMAGE_IDS, OFFICIAL_NANO_IDS } from "@/lib/provider/leonardo-models";
-import { classify } from "@/lib/authz";
+import { bearerToken, classify } from "@/lib/authz";
 import { getSql } from "@/lib/db";
 
 function asModel(id: string, owned: string, caps: ReturnType<typeof chatgptAdapter.capabilities>, description: string) {
@@ -64,6 +64,13 @@ export const Route = createFileRoute("/v1/models")({
         }),
       GET: async ({ request }) => {
         const principal = await classify(request);
+        const presented = bearerToken(request);
+        if (presented.startsWith("sk-saas-") && principal?.kind !== "commercial") {
+          return Response.json(
+            { error: { message: "Invalid commercial API key", type: "authentication_error" } },
+            { status: 401, headers: { "Access-Control-Allow-Origin": "*" } },
+          );
+        }
         let data = MODELS;
         if (principal?.kind === "commercial") {
           const sql = await getSql();

@@ -34,3 +34,10 @@ test("public commercial API branches before web-account selection", async () => 
   assert.match(jobs, /where tenant_id=\$1/);
   assert.match(jobs, /workers: \[\]/);
 });
+
+test("commercial-looking keys cannot downgrade to the anonymous model catalog", async () => {
+  const source = await readFile("src/routes/v1/models.ts", "utf8");
+  assert.match(source, /presented\.startsWith\("sk-saas-"\)/);
+  assert.match(source, /principal\?\.kind !== "commercial"/);
+  assert.match(source, /status: 401/);
+});
