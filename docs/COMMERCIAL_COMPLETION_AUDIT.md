@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc3`
-- schema: `8`
-- runtime/source commit: `0d9754f8dac2372568bca3a869a894294e6131b3`
+- production version: `0.10.0-rc4`
+- schema: `9`
+- runtime commit: `433b5c781659d0ec553329a4869860dba6aefc10`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -34,6 +34,7 @@ complete when only design intent or a narrow test exists.
 | Audit, privacy and retention | Commercial audit rows, request/result redaction, session/check retention and non-deleting billing policy | Complete |
 | Monitoring and alerting | Worker/failure/balance/reservation/payment/refund/dispute signals, durable deduplication and optional Webhook delivery | Complete in code; production alert receiver not configured |
 | Payment/tax/refund/dispute | Raw Stripe signature verification, exact identity/amount/currency checks, idempotent settlement, full taxed refunds and dispute fund events | Complete in code; live Stripe/Tax drill not possible without merchant configuration |
+| Versioned commercial configuration | Fixed catalog, encrypted hint-only secret versions, fixed official connection tests, atomic activation/rollback, hard launch gates, audit and SSRF-resistant Webhooks | Complete |
 | CI/CD release gates | GitHub Actions workflow runs all tests, type/lint/build, audit and SBOM | Workflow complete; cannot run remotely while GitHub push is denied |
 | HA production topology | Versioned contract requires 2 Gateways, 2 Workers, managed multi-AZ PostgreSQL/Redis and replicated object storage | Not deployed; current host is one Gateway, one Worker and one VPS data plane |
 | Offsite backup and recovery | Offsite mirroring script plus fail-closed full-Git check; same-host isolated full restore drill below | Same-host recovery proven; distinct-account/region offsite target missing |
@@ -41,7 +42,7 @@ complete when only design intent or a narrow test exists.
 
 ## Final recovery drill
 
-Backup: `/opt/backups/relay-commercial-final-202608290819`
+Latest backup: `/opt/backups/relay-commercial-config-final-202608290957`
 
 The initial drill discovered that a bundle created from the server's historical
 shallow clone was checksum-valid but not independently clonable. This is why a
@@ -60,12 +61,12 @@ The corrected backup then passed the complete drill:
 - all SHA-256 checks: pass;
 - PostgreSQL custom dump restored into an isolated database: pass;
 - live/restored database signature comparison: pass;
-- restored schema: 8;
-- restored public tables: 38;
+- restored schema: 9;
+- restored public tables: 39;
 - restored accounts: 5;
-- immutable billing/payment triggers: 3;
+- immutable billing/payment/config triggers: 4;
 - filesystem storage extraction: 272 files;
-- MinIO volume extraction: 169 files;
+- MinIO volume extraction: 157 files at the latest drill;
 - independent Git clone/fsck and exact HEAD comparison: pass;
 - temporary database and restore directories removed after the drill.
 
