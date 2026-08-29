@@ -12,7 +12,7 @@ export const Route = createFileRoute("/api/saas/keys")({
         return Response.json({ keys: await listTenantApiKeys(auth.session.tenantId) });
       },
       POST: async ({ request }) => {
-        const auth = await assertSaasSession(request, ["owner", "admin", "developer"], { requireCsrf: true });
+        const auth = await assertSaasSession(request, ["owner", "admin", "developer"], { requireCsrf: true, requireMfa: true });
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
         try {
@@ -34,7 +34,7 @@ export const Route = createFileRoute("/api/saas/keys")({
         }
       },
       DELETE: async ({ request }) => {
-        const auth = await assertSaasSession(request, ["owner", "admin", "developer"], { requireCsrf: true });
+        const auth = await assertSaasSession(request, ["owner", "admin", "developer"], { requireCsrf: true, requireMfa: true });
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         const body = (await request.json().catch(() => ({}))) as { id?: string };
         const ok = await revokeTenantApiKey(auth.session.tenantId, body.id || "");

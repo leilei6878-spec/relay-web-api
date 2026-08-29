@@ -5,6 +5,7 @@ import { PGlite } from "@electric-sql/pglite";
 import {
   assertSaasSession,
   confirmSaasMfa,
+  createSaasSession,
   getSaasSession,
   loginSaas,
   registerSaasOwner,
@@ -21,7 +22,7 @@ async function database() {
   await pg.waitReady;
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
-    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql",
+    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return {
     pg,
@@ -74,6 +75,7 @@ test("owner registration, login, HttpOnly session and CSRF role gate", async () 
   const session = await getSaasSession(sessionRequest, db);
   assert.equal(session?.tenantId, registered.tenantId);
   assert.equal(session?.role, "owner");
+  assert.equal(session?.mfaVerified, false);
   const mutation = request("/api/saas/keys", { method: "POST", headers: { cookie: cookies, "x-csrf-token": csrf } });
   assert.equal((await assertSaasSession(mutation, ["owner"], { requireCsrf: true }, db)).ok, true);
   const rejected = request("/api/saas/keys", { method: "POST", headers: { cookie: cookies, "x-csrf-token": "wrong" } });
@@ -101,10 +103,29 @@ test("MFA enrollment requires a current code and returns one-time recovery codes
   );
   const session = await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(registered.cookies) } }), db);
   assert.ok(session);
+  assert.equal(session?.mfaVerified, false);
+  const legacySession = await createSaasSession(registered.userId, registered.tenantId, request("/api/saas/session", { method: "POST" }), db, false);
   const enrollment = await startSaasMfa(session!, db);
   const confirmed = await confirmSaasMfa(session!, totpCode(enrollment.secret), db);
   assert.equal(confirmed.ok, true);
   if (confirmed.ok) assert.equal(confirmed.recoveryCodes.length, 8);
+  const refreshed = await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(registered.cookies) } }), db);
+  assert.equal(refreshed?.mfaVerified, true);
+  const legacy = await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(legacySession.cookies) } }), db);
+  assert.equal(legacy?.mfaVerified, false);
+  const previousMfaGate = process.env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA;
+  process.env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA = "1";
+  const currentMutation = request("/api/saas/keys", { method: "POST", headers: { cookie: cookieHeader(registered.cookies), "x-csrf-token": csrfFrom(registered.cookies) } });
+  assert.equal((await assertSaasSession(currentMutation, ["owner"], { requireCsrf: true, requireMfa: true }, db)).ok, true);
+  await pg.query("update relay_saas_sessions set mfa_verified_at=now()-interval '25 hours' where id=$1", [session!.sessionId]);
+  const expiredStepUp = await assertSaasSession(currentMutation, ["owner"], { requireCsrf: true, requireMfa: true }, db);
+  assert.equal(expiredStepUp.ok, false);
+  if (!expiredStepUp.ok) assert.equal(expiredStepUp.error, "MFA_STEP_UP_REQUIRED");
+  await pg.query("update relay_saas_sessions set mfa_verified_at=now() where id=$1", [session!.sessionId]);
+  const legacyMutation = request("/api/saas/keys", { method: "POST", headers: { cookie: cookieHeader(legacySession.cookies), "x-csrf-token": csrfFrom(legacySession.cookies) } });
+  const blockedLegacy = await assertSaasSession(legacyMutation, ["owner"], { requireCsrf: true, requireMfa: true }, db);
+  assert.equal(blockedLegacy.ok, false);
+  if (!blockedLegacy.ok) assert.equal(blockedLegacy.error, "MFA_STEP_UP_REQUIRED");
   await assert.rejects(
     () => loginSaas({ email: "mfa@example.test", password: "mfa-password-12345" }, request("/api/saas/session", { method: "POST" }), db),
     /MFA_REQUIRED/,
@@ -115,6 +136,22 @@ test("MFA enrollment requires a current code and returns one-time recovery codes
     db,
   );
   assert.equal(logged.user.email, "mfa@example.test");
+  assert.equal(logged.mfaVerified, true);
+  if (!confirmed.ok) throw new Error("MFA confirmation failed");
+  const recoveryAttempts = await Promise.allSettled([
+    loginSaas({ email: "mfa@example.test", password: "mfa-password-12345", recoveryCode: confirmed.recoveryCodes[0] }, request("/api/saas/session", { method: "POST" }), db),
+    loginSaas({ email: "mfa@example.test", password: "mfa-password-12345", recoveryCode: confirmed.recoveryCodes[0] }, request("/api/saas/session", { method: "POST" }), db),
+  ]);
+  assert.equal(recoveryAttempts.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(recoveryAttempts.filter((result) => result.status === "rejected").length, 1);
+  const recovered = recoveryAttempts.find((result) => result.status === "fulfilled")!.value;
+  assert.equal(recovered.mfaVerified, true);
+  await assert.rejects(
+    () => loginSaas({ email: "mfa@example.test", password: "mfa-password-12345", recoveryCode: confirmed.recoveryCodes[0] }, request("/api/saas/session", { method: "POST" }), db),
+    /MFA_REQUIRED/,
+  );
+  if (previousMfaGate === undefined) delete process.env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA;
+  else process.env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA = previousMfaGate;
   if (previous === undefined) delete process.env.RELAY_PUBLIC_URL;
   else process.env.RELAY_PUBLIC_URL = previous;
   await pg.close();
@@ -179,4 +216,11 @@ test("password reset is non-enumerating, one-time and revokes existing sessions"
   assert.equal(logged.user.email, "reset@example.test");
   if (previous === undefined) delete process.env.RELAY_PUBLIC_URL; else process.env.RELAY_PUBLIC_URL = previous;
   await pg.close();
+});
+
+test("billing, API-key and membership mutations are wired to the session-level MFA guard", async () => {
+  for (const path of ["src/routes/api/saas/billing.ts", "src/routes/api/saas/keys.ts", "src/routes/api/saas/members.ts"]) {
+    const source = await readFile(path, "utf8");
+    assert.match(source, /requireCsrf:\s*true,\s*requireMfa:\s*true/);
+  }
 });

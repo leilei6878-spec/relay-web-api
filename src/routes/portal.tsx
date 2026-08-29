@@ -11,8 +11,9 @@ import { Input, Label } from "@/components/ui/input";
 export const Route = createFileRoute("/portal")({ component: Portal });
 
 type SessionBody = {
-  user: { id: string; email: string; name: string };
+  user: { id: string; email: string; name: string; mfaEnabled: boolean };
   tenant: { id: string; name: string; status: string; role: string };
+  mfaVerified: boolean;
 };
 
 type BillingBody = {
@@ -67,6 +68,7 @@ function Portal() {
     <SaasShell tenant={session.tenant}>
       <div className="space-y-8">
         <header><Badge tone="ok">{session.tenant.status}</Badge><h1 className="mt-3 text-3xl font-semibold tracking-tight">欢迎，{session.user.name}</h1><p className="mt-2 text-sm text-muted">所有付费请求均走官方供应商，并经过余额预授权与用量结算。</p></header>
+        {["owner", "admin", "billing", "developer"].includes(session.tenant.role) && !session.mfaVerified ? <div className="rounded-xl border border-warn/30 bg-warn/5 p-4 text-sm text-warn">当前会话尚未通过 MFA。商业模式开启后，密钥、资金、套餐和成员变更将返回 <span className="font-mono">MFA_STEP_UP_REQUIRED</span>；请在本页“账户安全”中启用 MFA，或退出后使用验证码/恢复码重新登录。</div> : null}
 
         <section id="overview" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <Stat icon={<WalletCards className="size-4" />} label="可用余额" value={money(billing.tenant.balanceMinor - billing.tenant.reservedMinor, billing.tenant.currency)} />
@@ -182,7 +184,7 @@ function MfaDialog() {
     if (!response.ok || !body.ok) { toast.error(body.error || "验证码错误"); return; }
     setRecovery(body.recoveryCodes || []); toast.success("MFA 已启用");
   }
-  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button className="mt-4" variant="secondary">配置 MFA</Button></DialogTrigger><DialogContent title="TOTP 多因素认证">{recovery.length ? <div><p className="text-sm text-warn">请离线保存以下恢复码，每个恢复码只能使用一次。</p><pre className="mt-3 rounded-md bg-elevated p-3 text-xs">{recovery.join("\n")}</pre></div> : secret ? <div className="space-y-3"><p className="text-sm text-muted">在身份验证器中手动添加密钥：</p><p className="break-all rounded-md bg-elevated p-3 font-mono text-xs">{secret}</p><Field label="当前 6 位验证码"><Input inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} /></Field><Button className="w-full" onClick={() => void confirm()}>验证并启用</Button></div> : <div><p className="text-sm text-muted">启用后登录必须同时输入密码和身份验证器验证码。</p><Button className="mt-4 w-full" onClick={() => void start()}>生成 TOTP 密钥</Button></div>}</DialogContent></Dialog>;
+  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button className="mt-4" variant="secondary">配置 MFA</Button></DialogTrigger><DialogContent title="TOTP 多因素认证">{recovery.length ? <div><p className="text-sm text-warn">请离线保存以下恢复码，每个恢复码只能使用一次。</p><pre className="mt-3 rounded-md bg-elevated p-3 text-xs">{recovery.join("\n")}</pre><Button className="mt-4 w-full" onClick={() => window.location.reload()}>已安全保存，刷新会话状态</Button></div> : secret ? <div className="space-y-3"><p className="text-sm text-muted">在身份验证器中手动添加密钥：</p><p className="break-all rounded-md bg-elevated p-3 font-mono text-xs">{secret}</p><Field label="当前 6 位验证码"><Input inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} /></Field><Button className="w-full" onClick={() => void confirm()}>验证并启用</Button></div> : <div><p className="text-sm text-muted">启用后登录必须同时输入密码和身份验证器验证码。</p><Button className="mt-4 w-full" onClick={() => void start()}>生成 TOTP 密钥</Button></div>}</DialogContent></Dialog>;
 }
 
 function InviteMemberDialog({ onSaved }: { onSaved: () => Promise<void> }) {

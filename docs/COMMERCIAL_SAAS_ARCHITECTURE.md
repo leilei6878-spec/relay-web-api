@@ -40,6 +40,11 @@ official-provider usage/asset settlement paths are authoritative.
 - Customer sessions use HttpOnly/Secure cookies; mutations require matching
   CSRF header/cookie plus trusted Origin.
 - TOTP secrets use the encrypted secret store; recovery codes are hash-only.
+- Every SaaS session records whether and when TOTP or a one-time recovery code
+  was verified. Privileged key, billing, plan and membership mutations require
+  a fresh session-level proof when commercial mode is enabled; enabling MFA on
+  one session does not upgrade older sessions. See
+  [`TENANT_PRIVILEGED_MFA.md`](./TENANT_PRIVILEGED_MFA.md).
 - Tenant API keys are 256-bit `sk-saas-*` secrets, shown once and hash-only at
   rest. Listing returns hints only.
 - Administrator browsers receive short-lived random `as-relay-*` sessions;
@@ -140,6 +145,7 @@ period boundary. See [`PLAN_BILLING.md`](./PLAN_BILLING.md).
   version, legal/tax approval, live payments, email delivery when registration
   is enabled, HA, offsite restore, alert delivery, load, soak and CI gates.
 - administrator MFA hard gate plus a valid encrypted TOTP secret.
+- privileged customer-session MFA hard gate and a bounded verification age.
 
 The required infrastructure contract is
 [`deploy/commercial-ha-contract.yaml`](../deploy/commercial-ha-contract.yaml).

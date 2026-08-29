@@ -71,7 +71,7 @@ export function clearSaasCookies(request: Request) {
   ];
 }
 
-export async function createSaasSession(userId: string, tenantId: string, request: Request, db?: DbLike) {
+export async function createSaasSession(userId: string, tenantId: string, request: Request, db?: DbLike, mfaVerified = false) {
   const sql = await database(db);
   const token = secureToken(32);
   const csrf = secureToken(24);
@@ -79,12 +79,12 @@ export async function createSaasSession(userId: string, tenantId: string, reques
   const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
   const rows = await sql.query<{ id: string }>(
     `insert into relay_saas_sessions
-      (id,user_id,tenant_id,token_hash,csrf_hash,ip_address,user_agent,expires_at,last_seen_at,created_at)
-     select $1,m.user_id,m.tenant_id,$2,$3,$4,$5,$6,now(),now()
+      (id,user_id,tenant_id,token_hash,csrf_hash,ip_address,user_agent,expires_at,mfa_verified_at,last_seen_at,created_at)
+     select $1,m.user_id,m.tenant_id,$2,$3,$4,$5,$6,case when $9 then now() else null end,now(),now()
        from relay_tenant_memberships m join relay_tenants t on t.id=m.tenant_id
       where m.user_id=$7 and m.tenant_id=$8 and m.status='active' and t.status in ('trial','active')
      returning id`,
-    [sessionId, sha256(token), sha256(csrf), clientIp(request), (request.headers.get("user-agent") || "").slice(0, 500), expiresAt, userId, tenantId],
+    [sessionId, sha256(token), sha256(csrf), clientIp(request), (request.headers.get("user-agent") || "").slice(0, 500), expiresAt, userId, tenantId, mfaVerified],
   );
   if (!rows[0]) throw new Error("用户没有可用租户权限");
   const secure = secureRequest(request);
@@ -92,6 +92,7 @@ export async function createSaasSession(userId: string, tenantId: string, reques
     sessionId,
     csrf,
     expiresAt,
+    mfaVerified,
     cookies: [
       sessionCookie(SAAS_SESSION_COOKIE, token, 7 * 86_400, secure, true),
       sessionCookie(SAAS_CSRF_COOKIE, csrf, 7 * 86_400, secure, false),
@@ -253,7 +254,7 @@ export async function resetSaasPassword(token: string, password: string, request
 }
 
 export async function loginSaas(
-  input: { email: string; password: string; tenantId?: string; totp?: string },
+  input: { email: string; password: string; tenantId?: string; totp?: string; recoveryCode?: string },
   request: Request,
   db?: DbLike,
 ) {
@@ -270,9 +271,22 @@ export async function loginSaas(
   );
   const user = users[0];
   if (!user || !verifySaasPassword(input.password, String(user.password_hash || ""))) throw new Error("INVALID_CREDENTIALS");
+  let mfaVerified = false;
   if (user.mfa_enabled) {
     const encrypted = String(user.mfa_secret_ciphertext || "");
-    if (!encrypted || !input.totp || !verifyTotp(decryptSecretValue(encrypted), input.totp)) throw new Error("MFA_REQUIRED");
+    const totpOk = Boolean(encrypted && input.totp && verifyTotp(decryptSecretValue(encrypted), input.totp));
+    let recoveryOk = false;
+    if (!totpOk && input.recoveryCode?.trim()) {
+      const recoveryHash = sha256(input.recoveryCode.trim());
+      const consumed = await sql.query<{ id: string }>(
+        `update relay_saas_users set recovery_codes_hash=coalesce(recovery_codes_hash,'[]'::jsonb)-$2,updated_at=now()
+          where id=$1 and coalesce(recovery_codes_hash,'[]'::jsonb) ? $2 returning id`,
+        [user.id, recoveryHash],
+      );
+      recoveryOk = Boolean(consumed[0]);
+    }
+    if (!totpOk && !recoveryOk) throw new Error("MFA_REQUIRED");
+    mfaVerified = true;
   }
   const memberships = await sql.query<Record<string, unknown>>(
     `select m.*,t.name as tenant_name,t.status as tenant_status
@@ -286,7 +300,7 @@ export async function loginSaas(
     : memberships[0];
   if (!membership) throw new Error("NO_ACTIVE_TENANT");
   await sql.query("update relay_saas_users set last_login_at=now(),updated_at=now() where id=$1", [user.id]);
-  const session = await createSaasSession(String(user.id), String(membership.tenant_id), request, sql);
+  const session = await createSaasSession(String(user.id), String(membership.tenant_id), request, sql, mfaVerified);
   return {
     user: { id: String(user.id), email: String(user.email), name: String(user.name) },
     tenant: { id: String(membership.tenant_id), name: String(membership.tenant_name), role: String(membership.role) as TenantRole },
@@ -305,6 +319,9 @@ export type SaasSession = {
   role: TenantRole;
   csrfHash: string;
   expiresAt: string;
+  mfaVerified: boolean;
+  mfaVerifiedAt: string | null;
+  mfaEnabled: boolean;
 };
 
 export async function getSaasSession(request: Request, db?: DbLike): Promise<SaasSession | null> {
@@ -312,8 +329,8 @@ export async function getSaasSession(request: Request, db?: DbLike): Promise<Saa
   if (!token) return null;
   const sql = await database(db);
   const rows = await sql.query<Record<string, unknown>>(
-    `select s.id as session_id,s.user_id,s.tenant_id,s.csrf_hash,s.expires_at,
-            u.email,u.name,t.name as tenant_name,t.status as tenant_status,m.role
+    `select s.id as session_id,s.user_id,s.tenant_id,s.csrf_hash,s.expires_at,s.mfa_verified_at,
+            u.email,u.name,u.mfa_enabled,t.name as tenant_name,t.status as tenant_status,m.role
        from relay_saas_sessions s
        join relay_saas_users u on u.id=s.user_id
        join relay_tenants t on t.id=s.tenant_id
@@ -336,13 +353,16 @@ export async function getSaasSession(request: Request, db?: DbLike): Promise<Saa
     role: row.role as TenantRole,
     csrfHash: String(row.csrf_hash),
     expiresAt: row.expires_at instanceof Date ? row.expires_at.toISOString() : String(row.expires_at),
+    mfaVerified: Boolean(row.mfa_verified_at),
+    mfaVerifiedAt: row.mfa_verified_at ? (row.mfa_verified_at instanceof Date ? row.mfa_verified_at.toISOString() : String(row.mfa_verified_at)) : null,
+    mfaEnabled: Boolean(row.mfa_enabled),
   };
 }
 
 export async function assertSaasSession(
   request: Request,
   roles?: TenantRole[],
-  opts: { requireCsrf?: boolean } = {},
+  opts: { requireCsrf?: boolean; requireMfa?: boolean } = {},
   db?: DbLike,
 ) {
   const session = await getSaasSession(request, db);
@@ -354,6 +374,15 @@ export async function assertSaasSession(
     const cookieToken = cookie(request, SAAS_CSRF_COOKIE);
     if (!header || !cookieToken || header !== cookieToken || sha256(header) !== session.csrfHash) {
       return { ok: false as const, status: 403, error: "CSRF_INVALID" };
+    }
+  }
+  if (opts.requireMfa) {
+    const env = await effectiveCommercialEnv(process.env, db);
+    const required = env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA === "1" || env.RELAY_COMMERCIAL_ENABLED === "1";
+    const maxAgeHours = Math.max(1, Math.min(168, Number(env.RELAY_SAAS_MFA_MAX_AGE_HOURS || 24)));
+    const verifiedAt = session.mfaVerifiedAt ? Date.parse(session.mfaVerifiedAt) : Number.NaN;
+    if (required && (!Number.isFinite(verifiedAt) || verifiedAt < Date.now() - maxAgeHours * 60 * 60_000)) {
+      return { ok: false as const, status: 403, error: "MFA_STEP_UP_REQUIRED" };
     }
   }
   return { ok: true as const, session };
@@ -390,8 +419,11 @@ export async function confirmSaasMfa(session: SaasSession, code: string, db?: Db
   if (!encrypted || !verifyTotp(decryptSecretValue(encrypted), code)) return { ok: false as const, error: "MFA_CODE_INVALID" };
   const recoveryCodes = Array.from({ length: 8 }, () => secureToken(9));
   await sql.query(
-    "update relay_saas_users set mfa_enabled=true,recovery_codes_hash=$1::jsonb,updated_at=now() where id=$2",
-    [JSON.stringify(recoveryCodes.map(sha256)), session.userId],
+    `with enabled as (
+       update relay_saas_users set mfa_enabled=true,recovery_codes_hash=$1::jsonb,updated_at=now() where id=$2 returning id
+     ) update relay_saas_sessions s set mfa_verified_at=now(),last_seen_at=now()
+        from enabled u where s.id=$3 and s.user_id=u.id and s.revoked_at is null`,
+    [JSON.stringify(recoveryCodes.map(sha256)), session.userId, session.sessionId],
   );
   return { ok: true as const, recoveryCodes };
 }

@@ -33,11 +33,13 @@ function SaasLogin() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: mode, tenantName, ownerName, email, password, totp: totp || undefined }),
+        body: JSON.stringify({ action: mode, tenantName, ownerName, email, password,
+          totp: /^\d{6}$/.test(totp.trim()) ? totp.trim() : undefined,
+          recoveryCode: totp.trim() && !/^\d{6}$/.test(totp.trim()) ? totp.trim() : undefined }),
       });
       const body = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; verificationRequired?: boolean };
       if (!response.ok || !body.ok) {
-        if (body.error === "MFA_REQUIRED") setError("请输入身份验证器中的 6 位验证码");
+        if (body.error === "MFA_REQUIRED") setError("请输入身份验证器中的 6 位验证码或一个未使用的恢复码");
         else if (body.error === "REGISTRATION_DISABLED") setError("公开注册尚未开放，请联系销售开通租户");
         else setError(body.error || "操作失败");
         return;
@@ -77,7 +79,7 @@ function SaasLogin() {
           {mode === "register" ? <><Field label="企业名称"><Input value={tenantName} onChange={(event) => setTenantName(event.target.value)} required /></Field><Field label="联系人"><Input value={ownerName} onChange={(event) => setOwnerName(event.target.value)} required /></Field></> : null}
           <Field label="邮箱"><Input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></Field>
           <Field label="密码"><Input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={10} /></Field>
-          {mode === "login" ? <Field label="MFA 验证码（启用后必填）"><Input inputMode="numeric" maxLength={6} value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, ""))} /></Field> : null}
+          {mode === "login" ? <Field label="MFA 验证码或恢复码（启用后必填）"><Input autoComplete="one-time-code" maxLength={64} value={totp} onChange={(event) => setTotp(event.target.value.trim())} /></Field> : null}
           {error ? <p role="alert" className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2.5 text-sm text-danger">{error}</p> : null}
           {notice ? <p className="rounded-lg border border-ok/30 bg-ok/5 px-3 py-2.5 text-sm text-ok">{notice}</p> : null}
           <Button type="submit" className="w-full" disabled={busy}>{busy ? "请稍候…" : mode === "login" ? "登录" : "创建租户"}</Button>

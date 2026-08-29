@@ -6,6 +6,9 @@
 2. Configure administrator TOTP following `ADMIN_SECURITY.md`; verify a fresh
    MFA login, logout/revocation and host-local root-token recovery. Keep remote
    root-token login and Bearer overrides disabled.
+   Then follow `TENANT_PRIVILEGED_MFA.md`: enroll privileged QA users, verify an
+   old session is rejected and a recovery code is single-use, and open both the
+   database and deployment customer-MFA gates.
 3. Configure only official provider credentials.
    Vertex AI requires a dedicated service-account JSON with only the required
    `aiplatform.endpoints.predict` permission, its project ID and location.

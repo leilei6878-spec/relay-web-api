@@ -12,7 +12,7 @@ export const Route = createFileRoute("/api/saas/members")({
         return Response.json({ members: await listTenantMembers(auth.session.tenantId) });
       },
       POST: async ({ request }) => {
-        const auth = await assertSaasSession(request, ["owner", "admin"], { requireCsrf: true });
+        const auth = await assertSaasSession(request, ["owner", "admin"], { requireCsrf: true, requireMfa: true });
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         const body = (await request.json().catch(() => ({}))) as { email?: string; role?: TenantRole };
         try {
@@ -22,7 +22,7 @@ export const Route = createFileRoute("/api/saas/members")({
         }
       },
       PATCH: async ({ request }) => {
-        const auth = await assertSaasSession(request, ["owner", "admin"], { requireCsrf: true });
+        const auth = await assertSaasSession(request, ["owner", "admin"], { requireCsrf: true, requireMfa: true });
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         const body = (await request.json().catch(() => ({}))) as { userId?: string; role?: TenantRole; status?: "active" | "disabled" };
         try {

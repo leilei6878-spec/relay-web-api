@@ -35,7 +35,7 @@ export const Route = createFileRoute("/api/saas/session")({
       GET: async ({ request }) => {
         const session = await getSaasSession(request);
         return session
-          ? Response.json({ ok: true, user: { id: session.userId, email: session.email, name: session.name }, tenant: { id: session.tenantId, name: session.tenantName, status: session.tenantStatus, role: session.role } }, { headers: { "Cache-Control": "no-store" } })
+          ? Response.json({ ok: true, user: { id: session.userId, email: session.email, name: session.name, mfaEnabled: session.mfaEnabled }, tenant: { id: session.tenantId, name: session.tenantName, status: session.tenantStatus, role: session.role }, mfaVerified: session.mfaVerified }, { headers: { "Cache-Control": "no-store" } })
           : Response.json({ ok: false, error: "SAAS_UNAUTHORIZED" }, { status: 401, headers: { "Cache-Control": "no-store" } });
       },
       POST: async ({ request }) => {
@@ -63,10 +63,10 @@ export const Route = createFileRoute("/api/saas/session")({
           }
           if (action === "login") {
             const result = await loginSaas(
-              { email: String(body.email || ""), password: String(body.password || ""), tenantId: body.tenantId ? String(body.tenantId) : undefined, totp: body.totp ? String(body.totp) : undefined },
+              { email: String(body.email || ""), password: String(body.password || ""), tenantId: body.tenantId ? String(body.tenantId) : undefined, totp: body.totp ? String(body.totp) : undefined, recoveryCode: body.recoveryCode ? String(body.recoveryCode) : undefined },
               request,
             );
-            return responseWithCookies({ ok: true, user: result.user, tenant: result.tenant, csrf: result.csrf }, result.cookies);
+            return responseWithCookies({ ok: true, user: result.user, tenant: result.tenant, csrf: result.csrf, mfaVerified: result.mfaVerified }, result.cookies);
           }
           if (action === "verify-email") {
             return Response.json(await verifySaasEmail(String(body.token || ""), request));

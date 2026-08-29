@@ -21,6 +21,7 @@ export type CommercialReadiness = {
   legalApproved: boolean;
   adminMfaRequired: boolean;
   adminMfaConfigured: boolean;
+  customerPrivilegedMfaRequired: boolean;
   registrationEnabled: boolean;
   paymentProvider: string;
   paymentReady: boolean;
@@ -98,6 +99,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   const legalApproved = env.RELAY_LEGAL_APPROVED === "1";
   const adminMfaRequired = env.RELAY_REQUIRE_ADMIN_MFA === "1";
   const adminMfaConfigured = validAdminMfaConfig(env);
+  const customerPrivilegedMfaRequired = env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA === "1";
   const paymentProvider = (env.RELAY_PAYMENT_PROVIDER || "disabled").trim();
   const stripeSecret = env.STRIPE_SECRET_KEY?.trim() || "";
   const stripeWebhookSecret = env.STRIPE_WEBHOOK_SECRET?.trim() || "";
@@ -121,6 +123,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   if (enabled && !legalApproved) blockers.push("commercial legal approval not recorded");
   if (enabled && !adminMfaRequired) blockers.push("administrator MFA hard gate not enabled");
   if (enabled && !adminMfaConfigured) blockers.push("administrator TOTP secret missing or invalid");
+  if (enabled && !customerPrivilegedMfaRequired) blockers.push("privileged customer MFA hard gate not enabled");
   if (enabled && paymentProvider !== "stripe") blockers.push("Stripe payment provider not configured");
   if (enabled && paymentProvider === "stripe" && (!stripeSecret || !stripeWebhookSecret)) blockers.push("Stripe API or webhook secret missing");
   if (enabled && env.NODE_ENV === "production" && paymentProvider === "stripe" && !stripeLiveKey) blockers.push("Stripe live restricted/secret key required");
@@ -143,6 +146,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     legalApproved,
     adminMfaRequired,
     adminMfaConfigured,
+    customerPrivilegedMfaRequired,
     registrationEnabled: enabled && env.RELAY_SAAS_REGISTRATION_ENABLED === "1",
     paymentProvider,
     paymentReady,

@@ -13,7 +13,7 @@ export const Route = createFileRoute("/api/saas/billing")({
         return Response.json(await tenantBillingSummary(auth.session.tenantId));
       },
       POST: async ({ request }) => {
-        const auth = await assertSaasSession(request, ["owner", "admin", "billing"], { requireCsrf: true });
+        const auth = await assertSaasSession(request, ["owner", "admin", "billing"], { requireCsrf: true, requireMfa: true });
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
         try {

@@ -21,7 +21,7 @@ async function database() {
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
     "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql",
-    "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql",
+    "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
@@ -86,15 +86,22 @@ test("hard gates require deployment authorization while safe values hot-reload",
   await activateCommercialConfigVersion(provider.id, "admin", db);
   const mfaSecret = await createCommercialConfigVersion({ key: "security.adminTotpSecret", value: "jbsw y3dp ehpk 3pxp", reason: "administrator MFA", actor: "admin" }, db);
   const mfaRequired = await createCommercialConfigVersion({ key: "security.adminMfaRequired", value: true, reason: "administrator MFA gate", actor: "admin" }, db);
+  const customerMfaRequired = await createCommercialConfigVersion({ key: "security.customerPrivilegedMfaRequired", value: true, reason: "customer privileged MFA gate", actor: "admin" }, db);
+  const customerMfaAge = await createCommercialConfigVersion({ key: "security.customerMfaMaxAgeHours", value: 12, reason: "customer MFA freshness", actor: "admin" }, db);
   await activateCommercialConfigVersion(mfaSecret.id, "admin", db);
   await activateCommercialConfigVersion(mfaRequired.id, "admin", db);
+  await activateCommercialConfigVersion(customerMfaRequired.id, "admin", db);
+  await activateCommercialConfigVersion(customerMfaAge.id, "admin", db);
   const closed = await effectiveCommercialEnv({ RELAY_COMMERCIAL_ENABLED: "0", RELAY_PAYMENT_PROVIDER: "disabled" } as NodeJS.ProcessEnv, db);
   assert.equal(closed.RELAY_COMMERCIAL_ENABLED, "0");
   assert.equal(closed.RELAY_PAYMENT_PROVIDER, "stripe");
   assert.equal(closed.RELAY_REQUIRE_ADMIN_MFA, "0");
-  const opened = await effectiveCommercialEnv({ RELAY_COMMERCIAL_ENABLED: "1", RELAY_PAYMENT_PROVIDER: "disabled", RELAY_REQUIRE_ADMIN_MFA: "1" } as NodeJS.ProcessEnv, db);
+  assert.equal(closed.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA, "0");
+  const opened = await effectiveCommercialEnv({ RELAY_COMMERCIAL_ENABLED: "1", RELAY_PAYMENT_PROVIDER: "disabled", RELAY_REQUIRE_ADMIN_MFA: "1", RELAY_REQUIRE_PRIVILEGED_SAAS_MFA: "1" } as NodeJS.ProcessEnv, db);
   assert.equal(opened.RELAY_COMMERCIAL_ENABLED, "1");
   assert.equal(opened.RELAY_REQUIRE_ADMIN_MFA, "1");
+  assert.equal(opened.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA, "1");
+  assert.equal(opened.RELAY_SAAS_MFA_MAX_AGE_HOURS, "12");
   assert.equal(opened.RELAY_ADMIN_TOTP_SECRET, "JBSWY3DPEHPK3PXP");
   await assert.rejects(
     () => createCommercialConfigVersion({ key: "security.adminTotpSecret", value: "not-base32", reason: "bad", actor: "admin" }, db),
