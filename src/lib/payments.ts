@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { getSql, type Sql } from "./db";
 import { commercialReadiness } from "./commercial-readiness";
+import { effectiveCommercialEnv } from "./commercial-config";
 import { postBalanceAdjustment } from "./saas-billing";
 import { uid } from "./utils";
 
@@ -111,8 +112,8 @@ export async function createStripeCheckout(
   input: { tenantId: string; amountMinor: number; idempotencyKey: string },
   options: { env?: NodeJS.ProcessEnv; db?: DbLike; fetcher?: FetchLike } = {},
 ) {
-  const env = options.env || process.env;
   const sql = await dbOrDefault(options.db);
+  const env = options.env || await effectiveCommercialEnv(process.env, sql);
   const fetcher = options.fetcher || fetch;
   const { publicUrl } = stripeConfig(env);
   if (env.RELAY_COMMERCIAL_ENABLED !== "1") throw new Error("COMMERCIAL_NOT_ENABLED");
@@ -572,8 +573,8 @@ export async function processStripeWebhook(
   parsed: { event: StripeEvent; signatureTimestamp: number; payloadSha256: string },
   options: { env?: NodeJS.ProcessEnv; db?: DbLike } = {},
 ) {
-  const env = options.env || process.env;
   const sql = await dbOrDefault(options.db);
+  const env = options.env || await effectiveCommercialEnv(process.env, sql);
   const { event } = parsed;
   if (env.NODE_ENV === "production" && event.livemode !== true) throw new Error("STRIPE_LIVEMODE_EVENT_REQUIRED");
   const recorded = await recordEvent(parsed, sql);
@@ -609,8 +610,8 @@ export async function createStripeRefund(
   input: { orderId: string; amountMinor: number; reason: string; idempotencyKey: string; actor: string },
   options: { env?: NodeJS.ProcessEnv; db?: DbLike; fetcher?: FetchLike } = {},
 ) {
-  const env = options.env || process.env;
   const sql = await dbOrDefault(options.db);
+  const env = options.env || await effectiveCommercialEnv(process.env, sql);
   const fetcher = options.fetcher || fetch;
   stripeConfig(env);
   const amount = safeInteger(input.amountMinor, "REFUND_AMOUNT");
@@ -701,8 +702,8 @@ export async function reconcileStripeOrder(
   orderId: string,
   options: { env?: NodeJS.ProcessEnv; db?: DbLike; fetcher?: FetchLike } = {},
 ) {
-  const env = options.env || process.env;
   const sql = await dbOrDefault(options.db);
+  const env = options.env || await effectiveCommercialEnv(process.env, sql);
   const rows = await sql.query<Record<string, unknown>>("select * from relay_orders where id=$1 and payment_provider='stripe'", [orderId]);
   const order = rows[0];
   if (!order?.provider_session_id) throw new Error("STRIPE_ORDER_SESSION_NOT_FOUND");

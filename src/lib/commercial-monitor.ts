@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { assertPublicCommercialWebhookUrl, effectiveCommercialEnv } from "./commercial-config";
 import { coordSetNx } from "./coord";
 import { getSql, type Sql } from "./db";
 import { uid } from "./utils";
@@ -54,9 +55,11 @@ export async function collectCommercialSignals(db?: DbLike) {
   return signals;
 }
 
-async function deliverAlert(signal: CommercialSignal) {
-  const url = process.env.RELAY_ALERT_WEBHOOK_URL?.trim();
+async function deliverAlert(signal: CommercialSignal, db?: DbLike) {
+  const env = await effectiveCommercialEnv(process.env, db);
+  const url = env.RELAY_ALERT_WEBHOOK_URL?.trim();
   if (!url) return { delivered: false, reason: "not_configured" };
+  await assertPublicCommercialWebhookUrl(url);
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -81,7 +84,7 @@ export async function persistCommercialSignals(signals: CommercialSignal[], db?:
     );
     const id = rows[0]?.id;
     if (id && rows[0]?.created && await coordSetNx(`alert:deliver:${fp}`, "1", 15 * 60_000)) {
-      await deliverAlert(signal).catch(() => ({ delivered: false }));
+      await deliverAlert(signal, sql).catch(() => ({ delivered: false }));
     }
   }
   const open = await sql.query<{ id: string; fingerprint: string }>("select id,fingerprint from relay_alert_events where status='open'");

@@ -114,6 +114,19 @@ not automatically reactivate access; an operator must review the account.
 The required infrastructure contract is
 [`deploy/commercial-ha-contract.yaml`](../deploy/commercial-ha-contract.yaml).
 
+## Versioned configuration
+
+Application-level provider, payment, delivery and retention configuration is
+versioned in PostgreSQL and managed at `/commercial-config`. Secret values are
+AES-256-GCM encrypted, hint-only in every response, connection-tested against a
+fixed official endpoint and activated atomically with audit history. Deployment
+environment variables remain recovery fallbacks and hard launch gates. See
+[`COMMERCIAL_CONFIG_CENTER.md`](./COMMERCIAL_CONFIG_CENTER.md).
+
+Actual replica counts, managed-HA topology, offsite account ownership, legal
+documents and upstream contracts are deliberately not mutable application
+configuration; Readiness must verify them as external facts.
+
 ## Upstream source references
 
 - OpenAI Chat Completions accepts official model messages and exposes

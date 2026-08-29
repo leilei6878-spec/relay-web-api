@@ -1,4 +1,5 @@
 import { getSql } from "./db";
+import { effectiveCommercialEnv } from "./commercial-config";
 
 function boundedDays(raw: string | undefined, fallback: number, min: number, max: number) {
   const value = Number(raw || fallback);
@@ -16,6 +17,7 @@ export function retentionPolicy(env: NodeJS.ProcessEnv = process.env) {
 }
 
 export async function runDataRetention(env: NodeJS.ProcessEnv = process.env) {
+  if (env === process.env) env = await effectiveCommercialEnv(env);
   const policy = retentionPolicy(env);
   const sql = await getSql();
   const [chargeResults, jobs, sessions, checks, usage, checkoutUrls, audit] = await Promise.all([

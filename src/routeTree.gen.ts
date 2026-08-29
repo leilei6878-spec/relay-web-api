@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AccountsRouteImport } from './routes/accounts'
 import { Route as CommercialRouteImport } from './routes/commercial'
+import { Route as CommercialConfigRouteImport } from './routes/commercial-config'
 import { Route as ConsoleRouteImport } from './routes/console'
 import { Route as HealthzRouteImport } from './routes/healthz'
 import { Route as LoginRouteImport } from './routes/login'
@@ -42,6 +43,7 @@ import { Route as ApiAdminAccountChecksRouteImport } from './routes/api/admin/ac
 import { Route as ApiAdminAccountInspectionsRouteImport } from './routes/api/admin/account-inspections'
 import { Route as ApiAdminAccountOperationsRouteImport } from './routes/api/admin/account-operations'
 import { Route as ApiAdminCommercialRouteImport } from './routes/api/admin/commercial'
+import { Route as ApiAdminCommercialConfigRouteImport } from './routes/api/admin/commercial-config'
 import { Route as ApiAdminInvokeRouteImport } from './routes/api/admin/invoke'
 import { Route as ApiAdminLoginPackRouteImport } from './routes/api/admin/login-pack'
 import { Route as ApiAdminMetricsRouteImport } from './routes/api/admin/metrics'
@@ -80,6 +82,11 @@ const AccountsRoute = AccountsRouteImport.update({
 const CommercialRoute = CommercialRouteImport.update({
   id: '/commercial',
   path: '/commercial',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CommercialConfigRoute = CommercialConfigRouteImport.update({
+  id: '/commercial-config',
+  path: '/commercial-config',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ConsoleRoute = ConsoleRouteImport.update({
@@ -235,6 +242,12 @@ const ApiAdminCommercialRoute = ApiAdminCommercialRouteImport.update({
   path: '/api/admin/commercial',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAdminCommercialConfigRoute =
+  ApiAdminCommercialConfigRouteImport.update({
+    id: '/api/admin/commercial-config',
+    path: '/api/admin/commercial-config',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAdminInvokeRoute = ApiAdminInvokeRouteImport.update({
   id: '/api/admin/invoke',
   path: '/api/admin/invoke',
@@ -361,6 +374,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/commercial': typeof CommercialRoute
+  '/commercial-config': typeof CommercialConfigRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
   '/login': typeof LoginRoute
@@ -391,6 +405,7 @@ export interface FileRoutesByFullPath {
   '/api/admin/account-inspections': typeof ApiAdminAccountInspectionsRoute
   '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
   '/api/admin/commercial': typeof ApiAdminCommercialRoute
+  '/api/admin/commercial-config': typeof ApiAdminCommercialConfigRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
@@ -420,6 +435,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/commercial': typeof CommercialRoute
+  '/commercial-config': typeof CommercialConfigRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
   '/login': typeof LoginRoute
@@ -450,6 +466,7 @@ export interface FileRoutesByTo {
   '/api/admin/account-inspections': typeof ApiAdminAccountInspectionsRoute
   '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
   '/api/admin/commercial': typeof ApiAdminCommercialRoute
+  '/api/admin/commercial-config': typeof ApiAdminCommercialConfigRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
@@ -480,6 +497,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/accounts': typeof AccountsRoute
   '/commercial': typeof CommercialRoute
+  '/commercial-config': typeof CommercialConfigRoute
   '/console': typeof ConsoleRoute
   '/healthz': typeof HealthzRoute
   '/login': typeof LoginRoute
@@ -510,6 +528,7 @@ export interface FileRoutesById {
   '/api/admin/account-inspections': typeof ApiAdminAccountInspectionsRoute
   '/api/admin/account-operations': typeof ApiAdminAccountOperationsRoute
   '/api/admin/commercial': typeof ApiAdminCommercialRoute
+  '/api/admin/commercial-config': typeof ApiAdminCommercialConfigRoute
   '/api/admin/invoke': typeof ApiAdminInvokeRoute
   '/api/admin/login-pack': typeof ApiAdminLoginPackRoute
   '/api/admin/metrics': typeof ApiAdminMetricsRoute
@@ -541,6 +560,7 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/commercial'
+    | '/commercial-config'
     | '/console'
     | '/healthz'
     | '/login'
@@ -571,6 +591,7 @@ export interface FileRouteTypes {
     | '/api/admin/account-inspections'
     | '/api/admin/account-operations'
     | '/api/admin/commercial'
+    | '/api/admin/commercial-config'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
@@ -600,6 +621,7 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/commercial'
+    | '/commercial-config'
     | '/console'
     | '/healthz'
     | '/login'
@@ -630,6 +652,7 @@ export interface FileRouteTypes {
     | '/api/admin/account-inspections'
     | '/api/admin/account-operations'
     | '/api/admin/commercial'
+    | '/api/admin/commercial-config'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
@@ -659,6 +682,7 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/commercial'
+    | '/commercial-config'
     | '/console'
     | '/healthz'
     | '/login'
@@ -689,6 +713,7 @@ export interface FileRouteTypes {
     | '/api/admin/account-inspections'
     | '/api/admin/account-operations'
     | '/api/admin/commercial'
+    | '/api/admin/commercial-config'
     | '/api/admin/invoke'
     | '/api/admin/login-pack'
     | '/api/admin/metrics'
@@ -719,6 +744,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AccountsRoute: typeof AccountsRoute
   CommercialRoute: typeof CommercialRoute
+  CommercialConfigRoute: typeof CommercialConfigRoute
   ConsoleRoute: typeof ConsoleRoute
   HealthzRoute: typeof HealthzRoute
   LoginRoute: typeof LoginRoute
@@ -749,6 +775,7 @@ export interface RootRouteChildren {
   ApiAdminAccountInspectionsRoute: typeof ApiAdminAccountInspectionsRoute
   ApiAdminAccountOperationsRoute: typeof ApiAdminAccountOperationsRoute
   ApiAdminCommercialRoute: typeof ApiAdminCommercialRoute
+  ApiAdminCommercialConfigRoute: typeof ApiAdminCommercialConfigRoute
   ApiAdminInvokeRoute: typeof ApiAdminInvokeRoute
   ApiAdminLoginPackRoute: typeof ApiAdminLoginPackRoute
   ApiAdminMetricsRoute: typeof ApiAdminMetricsRoute
@@ -796,6 +823,13 @@ declare module '@tanstack/react-router' {
       path: '/commercial'
       fullPath: '/commercial'
       preLoaderRoute: typeof CommercialRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/commercial-config': {
+      id: '/commercial-config'
+      path: '/commercial-config'
+      fullPath: '/commercial-config'
+      preLoaderRoute: typeof CommercialConfigRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/console': {
@@ -1008,6 +1042,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAdminCommercialRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/admin/commercial-config': {
+      id: '/api/admin/commercial-config'
+      path: '/api/admin/commercial-config'
+      fullPath: '/api/admin/commercial-config'
+      preLoaderRoute: typeof ApiAdminCommercialConfigRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/admin/invoke': {
       id: '/api/admin/invoke'
       path: '/api/admin/invoke'
@@ -1183,6 +1224,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AccountsRoute: AccountsRoute,
   CommercialRoute: CommercialRoute,
+  CommercialConfigRoute: CommercialConfigRoute,
   ConsoleRoute: ConsoleRoute,
   HealthzRoute: HealthzRoute,
   LoginRoute: LoginRoute,
@@ -1213,6 +1255,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAdminAccountInspectionsRoute: ApiAdminAccountInspectionsRoute,
   ApiAdminAccountOperationsRoute: ApiAdminAccountOperationsRoute,
   ApiAdminCommercialRoute: ApiAdminCommercialRoute,
+  ApiAdminCommercialConfigRoute: ApiAdminCommercialConfigRoute,
   ApiAdminInvokeRoute: ApiAdminInvokeRoute,
   ApiAdminLoginPackRoute: ApiAdminLoginPackRoute,
   ApiAdminMetricsRoute: ApiAdminMetricsRoute,

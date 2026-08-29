@@ -7,6 +7,7 @@ import {
   Radio,
   ScrollText,
   Settings2,
+  SlidersHorizontal,
   WalletCards,
   TerminalSquare,
   Users,
@@ -28,6 +29,7 @@ const nav = [
   { to: "/logs", label: "请求日志", icon: ScrollText },
   { to: "/settings", label: "API", icon: Settings2 },
   { to: "/commercial", label: "商业运营", icon: WalletCards },
+  { to: "/commercial-config", label: "商业配置", icon: SlidersHorizontal },
 ];
 
 function redirectToLogin() {

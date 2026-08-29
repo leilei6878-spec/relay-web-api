@@ -30,6 +30,16 @@
 12. Run the 200-request, 5×20 concurrency and 24-hour soak gates.
 13. Only then set `RELAY_SAAS_REGISTRATION_ENABLED=1`.
 
+## Configuration and secret rotation
+
+Use `/commercial-config` to create a new immutable version, run its fixed
+connection test, then activate it. Do not overwrite an active secret. Keep the
+previous vendor credential valid through the observation window so a tested
+version rollback remains possible. Environment launch gates retain final veto.
+
+Back up `RELAY_SECRETS_KEY` in the external secret manager; it is required to
+decrypt versioned provider/payment secrets after a database restore.
+
 ## Billing incident
 
 - Never edit `relay_billing_transactions` or `relay_billing_entries`; the DB

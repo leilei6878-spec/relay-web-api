@@ -24,7 +24,7 @@ async function database() {
     "0004_schema_meta.sql",
     "0005_account_operations.sql",
     "0006_account_availability_samples.sql",
-    "0007_commercial_saas.sql", "0008_commercial_payments.sql",
+    "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql",
   ]) {
     await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   }

@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { parseStripeWebhook, processStripeWebhook } from "@/lib/payments";
+import { effectiveCommercialEnv } from "@/lib/commercial-config";
 
 export const Route = createFileRoute("/api/webhooks/stripe")({
   server: {
@@ -10,8 +11,9 @@ export const Route = createFileRoute("/api/webhooks/stripe")({
         try {
           // Signature verification must use the exact raw body before any JSON parsing.
           const rawBody = await request.text();
-          const parsed = parseStripeWebhook(rawBody, request.headers.get("stripe-signature") || "");
-          const result = await processStripeWebhook(parsed);
+          const env = await effectiveCommercialEnv();
+          const parsed = parseStripeWebhook(rawBody, request.headers.get("stripe-signature") || "", env);
+          const result = await processStripeWebhook(parsed, { env });
           return Response.json({ received: true, replay: result.replay });
         } catch (error) {
           const message = error instanceof Error ? error.message : "STRIPE_WEBHOOK_FAILED";

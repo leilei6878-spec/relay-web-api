@@ -1,3 +1,6 @@
+import { effectiveCommercialEnv } from "./commercial-config";
+import type { Sql } from "./db";
+
 export type OfficialProvider = "openai" | "google" | "leonardo";
 
 export type ResolvedOfficialModel = {
@@ -99,10 +102,10 @@ export async function officialChat(
     temperature?: number;
     tenantId: string;
   },
-  opts: { fetcher?: typeof fetch; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
+  opts: { fetcher?: typeof fetch; env?: NodeJS.ProcessEnv; timeoutMs?: number; db?: Pick<Sql, "query"> } = {},
 ): Promise<OfficialChatResult> {
   const fetcher = opts.fetcher || fetch;
-  const env = opts.env || process.env;
+  const env = opts.env || await effectiveCommercialEnv(process.env, opts.db);
   const timeout = opts.timeoutMs || 180_000;
   if (input.resolved.provider === "leonardo") {
     return { ok: false, provider: "leonardo", status: 400, error: "Leonardo official API does not provide chat completions", code: "CAPABILITY_NOT_SUPPORTED" };
@@ -202,10 +205,10 @@ export async function officialImage(
     quality?: string;
     tenantId: string;
   },
-  opts: { fetcher?: typeof fetch; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
+  opts: { fetcher?: typeof fetch; env?: NodeJS.ProcessEnv; timeoutMs?: number; db?: Pick<Sql, "query"> } = {},
 ): Promise<OfficialImageResult> {
   const fetcher = opts.fetcher || fetch;
-  const env = opts.env || process.env;
+  const env = opts.env || await effectiveCommercialEnv(process.env, opts.db);
   const timeout = opts.timeoutMs || 300_000;
   if (input.resolved.provider === "openai") {
     const key = env.OPENAI_API_KEY || "";

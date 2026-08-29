@@ -43,11 +43,14 @@ export const Route = createFileRoute("/api/saas/session")({
         const action = String(body.action || "login");
         try {
           if (action === "register") {
-            if (process.env.NODE_ENV === "production" && process.env.RELAY_SAAS_REGISTRATION_ENABLED !== "1") {
-              return Response.json({ ok: false, error: "REGISTRATION_DISABLED" }, { status: 503 });
-            }
-            if (process.env.NODE_ENV === "production" && !(await cachedCommercialReadiness()).ready) {
-              return Response.json({ ok: false, error: "COMMERCIAL_NOT_READY" }, { status: 503 });
+            if (process.env.NODE_ENV === "production") {
+              const readiness = await cachedCommercialReadiness();
+              if (!readiness.registrationEnabled) {
+                return Response.json({ ok: false, error: "REGISTRATION_DISABLED" }, { status: 503 });
+              }
+              if (!readiness.ready) {
+                return Response.json({ ok: false, error: "COMMERCIAL_NOT_READY" }, { status: 503 });
+              }
             }
             const result = await registerSaasOwner(
               {

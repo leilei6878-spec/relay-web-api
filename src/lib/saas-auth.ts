@@ -1,5 +1,6 @@
 import { getSql, type Sql } from "./db";
 import { coordIncr } from "./coord";
+import { assertPublicCommercialWebhookUrl, effectiveCommercialEnv } from "./commercial-config";
 import { createTenantOwner } from "./saas-billing";
 import {
   generateTotpSecret,
@@ -108,7 +109,7 @@ export async function registerSaasOwner(
   const ip = clientIp(request);
   const attempts = await coordIncr(`saas:register:${ip}:${new Date().toISOString().slice(0, 13)}`, 2 * 60 * 60_000);
   if (attempts > 10) throw new Error("REGISTRATION_RATE_LIMITED");
-  const env = opts.env || process.env;
+  const env = opts.env || await effectiveCommercialEnv(process.env, db);
   const verificationRequired = env.NODE_ENV === "production"
     ? env.RELAY_SAAS_EMAIL_VERIFICATION_REQUIRED !== "0"
     : env.RELAY_SAAS_EMAIL_VERIFICATION_REQUIRED === "1";
@@ -161,10 +162,11 @@ export async function sendSaasVerification(
        values ($2,$1,'email',$3,now()+interval '24 hours',now())`,
     [users[0].id, uid(), sha256(token)],
   );
-  const env = opts.env || process.env;
+  const env = opts.env || await effectiveCommercialEnv(process.env, db);
   const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || new URL(request.url).origin;
   const delivery = env.RELAY_EMAIL_WEBHOOK_URL?.trim();
   if (!delivery) throw new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
+  if (env.NODE_ENV === "production" && !opts.fetcher) await assertPublicCommercialWebhookUrl(delivery);
   const response = await (opts.fetcher || fetch)(delivery, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -215,9 +217,10 @@ export async function requestSaasPasswordReset(
     "insert into relay_saas_verifications(id,user_id,kind,token_hash,expires_at,created_at) values ($1,$2,'password_reset',$3,now()+interval '1 hour',now())",
     [uid(), users[0].id, sha256(token)],
   );
-  const env = opts.env || process.env;
+  const env = opts.env || await effectiveCommercialEnv(process.env, db);
   const delivery = env.RELAY_EMAIL_WEBHOOK_URL?.trim();
   if (!delivery) throw new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
+  if (env.NODE_ENV === "production" && !opts.fetcher) await assertPublicCommercialWebhookUrl(delivery);
   const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || new URL(request.url).origin;
   const response = await (opts.fetcher || fetch)(delivery, {
     method: "POST",

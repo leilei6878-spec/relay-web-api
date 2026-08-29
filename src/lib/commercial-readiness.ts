@@ -1,4 +1,5 @@
 import { getSql, type Sql } from "./db";
+import { effectiveCommercialEnv } from "./commercial-config";
 
 export type CommercialReadiness = {
   enabled: boolean;
@@ -17,6 +18,7 @@ export type CommercialReadiness = {
 };
 
 export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, db?: Pick<Sql, "query">): Promise<CommercialReadiness> {
+  if (env === process.env) env = await effectiveCommercialEnv(env, db);
   const enabled = env.RELAY_COMMERCIAL_ENABLED === "1";
   const officialProviders = {
     openai: Boolean(env.OPENAI_API_KEY?.trim()),
@@ -85,7 +87,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
 let cached: { at: number; value: CommercialReadiness } | null = null;
 
 export async function cachedCommercialReadiness(env: NodeJS.ProcessEnv = process.env) {
-  if (cached && Date.now() - cached.at < 10_000) return cached.value;
+  if (cached && Date.now() - cached.at < 5_000) return cached.value;
   const value = await commercialReadiness(env);
   cached = { at: Date.now(), value };
   return value;
