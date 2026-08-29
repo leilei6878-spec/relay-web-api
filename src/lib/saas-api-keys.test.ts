@@ -57,3 +57,48 @@ test("commercial API keys are hash-only, tenant-scoped and revocable", async () 
   assert.equal(await findTenantApiKey(created.token, db), null);
   await pg.close();
 });
+
+test("plan features, model catalog and plan limits constrain every tenant key", async () => {
+  const { pg, db } = await database();
+  const owner = await createTenantOwner(
+    { tenantName: "Plan Guard Co", ownerName: "Owner", email: "plan-owner@example.test", password: "commercial-password-plan" },
+    db,
+  );
+  await pg.query(
+    `update relay_plans set limits='{"requestsPerMinute":3,"concurrency":2,"dailyRequestLimit":5,"monthlySpendMinor":25}'::jsonb,
+       features='{"chat":true,"image":false,"models":["openai:gpt-plan"]}'::jsonb where id='starter'`,
+  );
+  const created = await createTenantApiKey(
+    { tenantId: owner.tenantId, createdBy: owner.userId, name: "Plan inherited", scopes: ["chat", "image"] },
+    db,
+  );
+  const found = await findTenantApiKey(created.token, db);
+  assert.deepEqual(found?.scopes, ["chat"]);
+  assert.deepEqual(found?.modelAllowlist, ["openai:gpt-plan"]);
+  assert.equal(found?.requestsPerMinute, 3);
+  assert.equal(found?.concurrencyLimit, 2);
+  assert.equal(found?.dailyRequestLimit, 5);
+  assert.equal(found?.monthlySpendLimitMinor, 25);
+  const image = await enforceCommercialKeyLimits(found!, "image", "openai:gpt-plan", new Date(), db);
+  assert.equal(image.ok, false);
+  const wrongModel = await enforceCommercialKeyLimits(found!, "chat", "openai:gpt-other", new Date(), db);
+  assert.equal(wrongModel.ok, false);
+  const disjoint = await createTenantApiKey(
+    { tenantId: owner.tenantId, createdBy: owner.userId, name: "Disjoint", scopes: ["chat"], modelAllowlist: ["openai:gpt-other"] },
+    db,
+  );
+  const disjointFound = await findTenantApiKey(disjoint.token, db);
+  assert.equal(disjointFound?.modelAccessDenied, true);
+  const disjointDenied = await enforceCommercialKeyLimits(disjointFound!, "chat", "openai:gpt-plan", new Date(), db);
+  assert.equal(disjointDenied.ok, false);
+  await pg.query(
+    `insert into relay_usage_charges
+      (id,tenant_id,api_key_id,request_id,provider,model,capability,reserved_minor,charged_minor,status,created_at)
+     values ('plan-spend',$1,$2,'plan-request','openai','gpt-plan','chat',0,25,'settled',now())`,
+    [owner.tenantId, created.id],
+  );
+  const spent = await enforceCommercialKeyLimits(found!, "chat", "openai:gpt-plan", new Date(), db);
+  assert.equal(spent.ok, false);
+  if (!spent.ok) assert.equal(spent.error, "MONTHLY_SPEND_LIMIT_REACHED");
+  await pg.close();
+});

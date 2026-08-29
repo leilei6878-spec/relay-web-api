@@ -245,6 +245,12 @@ export async function reserveUsage(
   db?: DbLike,
 ): Promise<UsageReservation> {
   const sql = await database(db);
+  await sql.query(
+    `update relay_tenants set current_period_start=date_trunc('month',now()),
+       current_period_end=date_trunc('month',now())+interval '1 month',updated_at=now()
+      where id=$1 and current_period_end<=now()`,
+    [input.tenantId],
+  );
   const tenant = await getTenant(input.tenantId, sql);
   if (!tenant || !["trial", "active"].includes(tenant.status)) throw new Error("TENANT_SUSPENDED");
   const price = await activePrice(input.provider, input.model, input.capability, tenant.currency, sql);
@@ -258,8 +264,10 @@ export async function reserveUsage(
   const chargeId = uid();
   const rows = await sql.query<Record<string, unknown>>(
     `with locked as (
-       select id,balance_minor,reserved_minor,credit_limit_minor,monthly_budget_minor,current_period_start
-         from relay_tenants where id=$1 and status in ('trial','active') for update
+       select t.id,t.balance_minor,t.reserved_minor,t.credit_limit_minor,t.current_period_start,
+              coalesce(nullif(t.monthly_budget_minor,0),nullif((p.limits->>'monthlySpendMinor')::bigint,0),0) as effective_monthly_budget
+         from relay_tenants t join relay_plans p on p.id=t.plan_id
+        where t.id=$1 and t.status in ('trial','active') for update of t
      ), period_spend as (
        select coalesce(sum(charged_minor),0)::bigint as charged
          from relay_usage_charges where tenant_id=$1 and status='settled'
@@ -269,7 +277,7 @@ export async function reserveUsage(
          (id,tenant_id,api_key_id,request_id,provider,model,capability,price_book_id,reserved_minor,status,created_at)
        select $3,$1,$4,$5,$6,$7,$8,$9,$2,'reserved',now() from locked l,period_spend p
         where l.balance_minor+l.credit_limit_minor-l.reserved_minor >= $2
-          and (l.monthly_budget_minor=0 or p.charged+l.reserved_minor+$2 <= l.monthly_budget_minor)
+          and (l.effective_monthly_budget=0 or p.charged+l.reserved_minor+$2 <= l.effective_monthly_budget)
        on conflict (tenant_id,request_id) do nothing
        returning id
      ), updated as (

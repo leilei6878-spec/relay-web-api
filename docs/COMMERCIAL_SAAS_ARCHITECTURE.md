@@ -41,6 +41,15 @@ official-provider usage/asset settlement paths are authoritative.
 - TOTP secrets use the encrypted secret store; recovery codes are hash-only.
 - Tenant API keys are 256-bit `sk-saas-*` secrets, shown once and hash-only at
   rest. Listing returns hints only.
+- Effective key scopes and model allowlists are the intersection of the key and
+  its plan features. A disjoint plan/key model set denies every model rather
+  than falling back to unrestricted access.
+- Plan RPM, concurrency, daily request and monthly-spend limits apply whenever
+  a key does not define a stricter override. Tenant monthly budget is enforced
+  across all keys, including active reservations.
+- Expired monthly billing periods roll to the current calendar month before a
+  new reservation, so old usage cannot permanently consume a new period's
+  budget.
 
 ## Payments
 

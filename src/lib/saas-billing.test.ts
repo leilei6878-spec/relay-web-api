@@ -206,3 +206,25 @@ test("provider success checkpoint makes idempotent settlement recoverable withou
   assert.equal(charges.rows[0]?.count, 1);
   await pg.close();
 });
+
+test("expired billing periods roll forward and plan monthly budget is tenant-wide", async () => {
+  const { pg, db } = await database();
+  const created = await createTenantOwner(
+    { tenantName: "Period Co", ownerName: "Owner", email: "owner@period.test", password: "commercial-password-period" }, db,
+  );
+  await postBalanceAdjustment({ tenantId: created.tenantId, deltaMinor: 100, kind: "recharge", idempotencyKey: "period-fund" }, db);
+  await pg.query(`update relay_plans set limits=jsonb_set(limits,'{monthlySpendMinor}','20'::jsonb) where id='starter'`);
+  await pg.query(`update relay_tenants set current_period_start=now()-interval '2 months',current_period_end=now()-interval '1 month' where id=$1`, [created.tenantId]);
+  await pg.query(`insert into relay_tenant_api_keys(id,tenant_id,name,key_hash,key_prefix,key_hint,created_by) values ('key-period',$1,'default','hash-period','sk-period','sk-period…test',$2)`, [created.tenantId, created.userId]);
+  await pg.query(`insert into relay_price_book(id,version,provider,model,capability,currency,image_price_minor,effective_from,status) values ('price-period',1,'openai','gpt-image-period','image','USD',10,now()-interval '1 minute','active')`);
+  await pg.query(`insert into relay_usage_charges(id,tenant_id,api_key_id,request_id,provider,model,capability,reserved_minor,charged_minor,status,created_at) values ('old-period',$1,'key-period','old-period-request','openai','gpt-image-period','image',0,100,'settled',now()-interval '40 days')`, [created.tenantId]);
+  const first = await reserveUsage({ tenantId: created.tenantId, apiKeyId: "key-period", requestId: "period-1", provider: "openai", model: "gpt-image-period", capability: "image", images: 1 }, db);
+  assert.equal(first.reservedMinor, 10);
+  const period = await pg.query<{ current: boolean }>("select current_period_start=date_trunc('month',now()) as current from relay_tenants where id=$1", [created.tenantId]);
+  assert.equal(period.rows[0]?.current, true);
+  await assert.rejects(
+    () => reserveUsage({ tenantId: created.tenantId, apiKeyId: "key-period", requestId: "period-2", provider: "openai", model: "gpt-image-period", capability: "image", images: 2 }, db),
+    /INSUFFICIENT_BALANCE_OR_BUDGET/,
+  );
+  await pg.close();
+});

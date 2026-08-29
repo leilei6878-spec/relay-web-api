@@ -28,6 +28,7 @@ export type CommercialApiKey = {
   enabled: boolean;
   scopes: CommercialCapability[];
   modelAllowlist: string[];
+  modelAccessDenied: boolean;
   requestsPerMinute: number;
   concurrencyLimit: number;
   dailyRequestLimit: number;

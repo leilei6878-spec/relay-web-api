@@ -12,6 +12,16 @@ async function database(db?: DbLike) {
 }
 
 function mapKey(row: Record<string, unknown>): CommercialApiKey {
+  const features = row.plan_features && typeof row.plan_features === "object"
+    ? row.plan_features as Record<string, unknown>
+    : {};
+  const requestedScopes = (row.scopes || []) as CommercialCapability[];
+  const effectiveScopes = requestedScopes.filter((scope) => features[scope] !== false);
+  const keyModels = (row.model_allowlist || []) as string[];
+  const planModels = Array.isArray(features.models) ? features.models.map(String) : [];
+  const effectiveModels = planModels.length
+    ? keyModels.length ? keyModels.filter((model) => planModels.includes(model)) : planModels
+    : keyModels;
   return {
     commercial: true,
     id: String(row.id),
@@ -20,13 +30,14 @@ function mapKey(row: Record<string, unknown>): CommercialApiKey {
     tenantPlanId: String(row.plan_id),
     name: String(row.name),
     enabled: Boolean(row.enabled),
-    scopes: (row.scopes || []) as CommercialCapability[],
-    modelAllowlist: (row.model_allowlist || []) as string[],
+    scopes: effectiveScopes,
+    modelAllowlist: effectiveModels,
+    modelAccessDenied: planModels.length > 0 && keyModels.length > 0 && effectiveModels.length === 0,
     requestsPerMinute: Number(row.requests_per_minute || row.plan_rpm || 0),
     concurrencyLimit: Number(row.concurrency_limit || row.plan_concurrency || 0),
-    dailyRequestLimit: Number(row.daily_request_limit || 0),
-    dailyLimit: Number(row.daily_request_limit || 0),
-    monthlySpendLimitMinor: Number(row.monthly_spend_limit_minor || 0),
+    dailyRequestLimit: Number(row.daily_request_limit || row.plan_daily_limit || 0),
+    dailyLimit: Number(row.daily_request_limit || row.plan_daily_limit || 0),
+    monthlySpendLimitMinor: Number(row.monthly_spend_limit_minor || row.plan_monthly_spend || 0),
     expiresAt: row.expires_at instanceof Date ? row.expires_at.toISOString() : typeof row.expires_at === "string" ? row.expires_at : null,
   };
 }
@@ -97,7 +108,10 @@ export async function findTenantApiKey(token: string, db?: DbLike) {
   const rows = await sql.query<Record<string, unknown>>(
     `select k.*,t.status as tenant_status,t.plan_id,
             coalesce((p.limits->>'requestsPerMinute')::int,0) as plan_rpm,
-            coalesce((p.limits->>'concurrency')::int,0) as plan_concurrency
+            coalesce((p.limits->>'concurrency')::int,0) as plan_concurrency,
+            coalesce((p.limits->>'dailyRequestLimit')::int,0) as plan_daily_limit,
+            coalesce((p.limits->>'monthlySpendMinor')::bigint,0) as plan_monthly_spend,
+            p.features as plan_features
        from relay_tenant_api_keys k
        join relay_tenants t on t.id=k.tenant_id
        join relay_plans p on p.id=t.plan_id
@@ -137,6 +151,7 @@ export async function enforceCommercialKeyLimits(
 ) {
   if (key.tenantStatus !== "trial" && key.tenantStatus !== "active") return { ok: false as const, status: 403, error: "TENANT_SUSPENDED" };
   if (!key.scopes.includes(capability)) return { ok: false as const, status: 403, error: `API_KEY_SCOPE_REQUIRED: ${capability}` };
+  if (key.modelAccessDenied) return { ok: false as const, status: 403, error: `PLAN_MODEL_NOT_ALLOWED: ${model}` };
   if (key.modelAllowlist.length && !key.modelAllowlist.includes(model)) return { ok: false as const, status: 403, error: `MODEL_NOT_ALLOWED: ${model}` };
   const minute = now.toISOString().slice(0, 16);
   const day = now.toISOString().slice(0, 10);
