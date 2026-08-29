@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc7`
-- schema: `11`
-- runtime commit: `cebf0dc361a6b6d9d287d59fd159626f61cbd49b`
+- production version: `0.10.0-rc8`
+- schema: `12`
+- runtime commit: `c742685d2114e987e205f520c037dfb330861a80`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -30,7 +30,8 @@ complete when only design intent or a narrow test exists.
 | Customer self-service and commercial admin UI | Login/register/reset/verification, keys, balance, usage, members, Checkout; tenant/price/order/refund/dispute/admin controls; browser QA | Complete |
 | Official provider adapters and sandbox | OpenAI, Gemini API, Vertex AI and Leonardo request/usage adapters; cost-capped administrator sandbox; append-only, content-minimising evidence; exact recent Canary readiness gate | Code and dark-launch acceptance complete; live Canary acceptance still requires contracts, credentials and reviewed prices |
 | Tenant data isolation | Tenant-bound sessions/keys, tenant-filtered history/usage and no commercial exposure of account/Worker/proxy topology | Complete |
-| CSRF/Origin and session security | HttpOnly/Secure cookies, CSRF double submit, trusted Origin checks, cookie-admin mutation Origin gate | Complete |
+| CSRF/Origin and session security | Customer HttpOnly/Secure cookies and CSRF double submit; trusted Origin checks; administrator SHA-256-only short sessions, Strict cookies, revoke/logout, distributed login throttle and loopback-only root recovery | Complete |
+| Administrator MFA | Versioned encrypted TOTP, password+TOTP login, MFA-aware commercial administration guards and readiness blockers | Code/dark-launch complete; real authenticator enrollment intentionally pending |
 | Audit, privacy and retention | Commercial audit rows, request/result redaction, session/check retention and non-deleting billing policy | Complete |
 | Monitoring and alerting | Worker/failure/balance/reservation/payment/refund/dispute/evidence signals, durable deduplication and optional Webhook delivery | Complete in code; production alert receiver not configured |
 | Payment/tax/refund/dispute | Raw Stripe signature verification, exact identity/amount/currency checks, idempotent settlement, full taxed refunds and dispute fund events | Complete in code; live Stripe/Tax drill not possible without merchant configuration |
@@ -39,17 +40,17 @@ complete when only design intent or a narrow test exists.
 | CI/CD release gates | GitHub Actions workflow runs all tests, type/lint/build, audit and SBOM | Workflow complete; cannot run remotely while GitHub push is denied |
 | HA production topology | Versioned contract requires 2 Gateways, 2 Workers, managed multi-AZ PostgreSQL/Redis and replicated object storage | Not deployed; current host is one Gateway, one Worker and one VPS data plane |
 | Offsite backup and recovery | Offsite mirroring script plus fail-closed full-Git check; same-host isolated full restore drill below | Same-host recovery proven; distinct-account/region offsite target missing |
-| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 11, security probes, hard Canary/evidence gates and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
+| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 12, remote-root denial, short-session probes, hard MFA/Canary/evidence gates and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
 
 ## Final recovery drill
 
-Latest backup: `/opt/backups/relay-commercial-evidence-final-20260829114202`
+Latest backup: `/opt/backups/relay-admin-security-final-20260829123632`
 
 The initial drill discovered that a bundle created from the server's historical
 shallow clone was checksum-valid but not independently clonable. This is why a
 checksum alone is insufficient recovery evidence. The bundle was replaced with
 a complete local-history bundle, the server repository was safely converted to
-a complete 127-commit history, and `offsite-backup.mjs` was hardened to:
+a complete Git history, and `offsite-backup.mjs` was hardened to:
 
 - reject shallow repositories;
 - run `git fsck --full`;
@@ -62,9 +63,10 @@ The corrected backup then passed the complete drill:
 - all SHA-256 checks: pass;
 - PostgreSQL custom dump restored into an isolated database: pass;
 - live/restored database signature comparison: pass;
-- restored schema: 11;
-- restored public tables: 41;
+- restored schema: 12;
+- restored public tables: 42;
 - restored accounts: 5;
+- restored administrator sessions: 0;
 - distinct immutable billing/payment/config/sandbox/evidence triggers: 6;
 - restored evidence/sandbox/configuration/tenant/order/ledger rows: 0;
 - filesystem storage extraction: 272 files;
@@ -91,6 +93,8 @@ this task environment:
 10. 200-request concurrency acceptance and 24-hour production soak;
 11. GitHub repository write permission so the release workflow can execute on
     the authoritative remote.
+12. administrator authenticator enrollment, MFA hard-gate activation and
+    independently reviewed acceptance evidence.
 
 Commercial readiness must remain false until these conditions are supplied and
 verified. Enabling a flag alone is not acceptance.
