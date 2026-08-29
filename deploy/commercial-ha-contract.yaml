@@ -1,0 +1,59 @@
+version: 1
+name: relay-commercial-ha
+status: required-before-commercial-enable
+
+edge:
+  tls: required
+  minimum_replicas: 2
+  health_path: /healthz
+  readiness_path: /readyz
+  request_timeout_seconds: 360
+
+gateway:
+  minimum_replicas: 2
+  stateless: true
+  rolling_update:
+    max_unavailable: 0
+    max_surge: 1
+  environment_contract:
+    RELAY_COMMERCIAL_ENABLED: "1"
+    RELAY_GATEWAY_REPLICA_COUNT: ">=2"
+    DATABASE_URL: managed-postgresql
+    REDIS_URL: managed-redis
+    MEDIA_DRIVER: s3
+
+worker:
+  minimum_replicas: 2
+  concurrency_per_replica: 2
+  graceful_drain: true
+  health_source: relay_workers.last_beat
+
+postgresql:
+  topology: managed-multi-az
+  point_in_time_recovery: required
+  encryption_at_rest: required
+  backup_retention_days: 30
+
+redis:
+  topology: managed-ha
+  persistence: required
+  encryption_in_transit: required
+
+object_storage:
+  topology: managed-versioned
+  versioning: required
+  lifecycle_days: 30
+  cross_region_replication: required
+
+backup:
+  control_plane_schedule: "0 3 * * *"
+  offsite_account: distinct
+  restore_test_schedule: monthly
+  target_rpo_hours: 24
+  target_rto_hours: 2
+
+observability:
+  external_uptime_probe: required
+  alert_webhook: required
+  log_retention_days: 30
+  incident_runbook: required

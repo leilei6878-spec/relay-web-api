@@ -3,6 +3,7 @@ import { getSql, type Sql } from "./db";
 import { secureToken, sha256 } from "./saas-crypto";
 import type { CommercialApiKey, CommercialCapability } from "./commercial-types";
 import { uid } from "./utils";
+import { cachedCommercialReadiness } from "./commercial-readiness";
 
 type DbLike = Pick<Sql, "query">;
 
@@ -45,6 +46,12 @@ export async function createTenantApiKey(
   },
   db?: DbLike,
 ) {
+  if (process.env.NODE_ENV === "production" && process.env.RELAY_COMMERCIAL_ENABLED !== "1") {
+    throw new Error("COMMERCIAL_API_DISABLED");
+  }
+  if (process.env.NODE_ENV === "production" && !(await cachedCommercialReadiness()).ready) {
+    throw new Error("COMMERCIAL_NOT_READY");
+  }
   const sql = await database(db);
   const token = `sk-saas-${secureToken(32)}`;
   const id = uid();
@@ -84,6 +91,8 @@ export async function createTenantApiKey(
 
 export async function findTenantApiKey(token: string, db?: DbLike) {
   if (!token.startsWith("sk-saas-") || token.length < 32) return null;
+  if (process.env.NODE_ENV === "production" && process.env.RELAY_COMMERCIAL_ENABLED !== "1") return null;
+  if (process.env.NODE_ENV === "production" && !(await cachedCommercialReadiness()).ready) return null;
   const sql = await database(db);
   const rows = await sql.query<Record<string, unknown>>(
     `select k.*,t.status as tenant_status,t.plan_id,
@@ -124,6 +133,7 @@ export async function enforceCommercialKeyLimits(
   capability: CommercialCapability,
   model: string,
   now = new Date(),
+  db?: DbLike,
 ) {
   if (key.tenantStatus !== "trial" && key.tenantStatus !== "active") return { ok: false as const, status: 403, error: "TENANT_SUSPENDED" };
   if (!key.scopes.includes(capability)) return { ok: false as const, status: 403, error: `API_KEY_SCOPE_REQUIRED: ${capability}` };
@@ -137,6 +147,19 @@ export async function enforceCommercialKeyLimits(
   if (key.dailyRequestLimit > 0) {
     const count = await coordIncr(`saas:rl:day:${key.id}:${day}`, 2 * 86_400_000);
     if (count > key.dailyRequestLimit) return { ok: false as const, status: 429, error: "RATE_LIMITED: daily_request_limit", retryAfter: 3600 };
+  }
+  if (key.monthlySpendLimitMinor > 0) {
+    const sql = await database(db);
+    const rows = await sql.query<{ spend: number; reserved: number }>(
+      `select coalesce(sum(charged_minor) filter(where status='settled'),0)::bigint as spend,
+              coalesce(sum(reserved_minor) filter(where status='reserved'),0)::bigint as reserved
+         from relay_usage_charges
+        where api_key_id=$1 and created_at >= date_trunc('month',$2::timestamptz)`,
+      [key.id, now.toISOString()],
+    );
+    if (Number(rows[0]?.spend || 0) + Number(rows[0]?.reserved || 0) >= key.monthlySpendLimitMinor) {
+      return { ok: false as const, status: 402, error: "MONTHLY_SPEND_LIMIT_REACHED" };
+    }
   }
   return { ok: true as const };
 }

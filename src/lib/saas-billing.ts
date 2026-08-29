@@ -2,6 +2,7 @@ import { getSql, type Sql } from "./db";
 import { hashSaasPassword, normalizeEmail } from "./saas-crypto";
 import type { CommercialCapability, PriceBookRow, Tenant, UsageReservation } from "./commercial-types";
 import { uid } from "./utils";
+import { decryptSecretValue, encryptSecretValue } from "./secrets";
 
 type DbLike = Pick<Sql, "query">;
 
@@ -61,7 +62,7 @@ function slugify(value: string) {
 }
 
 export async function createTenantOwner(
-  input: { tenantName: string; ownerName: string; email: string; password: string; currency?: string },
+  input: { tenantName: string; ownerName: string; email: string; password: string; currency?: string; userStatus?: "active" | "pending_verification"; emailVerified?: boolean },
   db?: DbLike,
 ) {
   const sql = await database(db);
@@ -78,8 +79,8 @@ export async function createTenantOwner(
   const rows = await sql.query<Record<string, unknown>>(
     `with inserted_user as (
        insert into relay_saas_users
-         (id,email,email_normalized,name,password_hash,status,created_at,updated_at)
-       values ($1,$2,$3,$4,$5,'active',now(),now())
+         (id,email,email_normalized,name,password_hash,status,email_verified_at,created_at,updated_at)
+       values ($1,$2,$3,$4,$5,$10,case when $11 then now() else null end,now(),now())
        returning id
      ), inserted_tenant as (
        insert into relay_tenants
@@ -93,7 +94,7 @@ export async function createTenantOwner(
        returning tenant_id,user_id
      )
      select tenant_id,user_id from inserted_membership`,
-    [userId, input.email.trim(), email, ownerName, passwordHash, tenantId, slug, tenantName, currency],
+    [userId, input.email.trim(), email, ownerName, passwordHash, tenantId, slug, tenantName, currency, input.userStatus || "active", input.emailVerified !== false],
   );
   if (!rows[0]) throw new Error("租户创建失败");
   return { tenantId, userId, slug, email };
@@ -276,13 +277,49 @@ export async function reserveUsage(
   );
   if (!rows[0]) {
     const replay = await sql.query<Record<string, unknown>>(
-      "select id,reserved_minor from relay_usage_charges where tenant_id=$1 and request_id=$2",
+      "select id,reserved_minor,charged_minor,status,extra from relay_usage_charges where tenant_id=$1 and request_id=$2",
       [input.tenantId, input.requestId],
     );
-    if (replay[0]) return { chargeId: String(replay[0].id), tenantId: input.tenantId, requestId: input.requestId, reservedMinor: Number(replay[0].reserved_minor), price };
+    if (replay[0]) {
+      const extra = replay[0].extra && typeof replay[0].extra === "object" ? replay[0].extra as Record<string, unknown> : {};
+      return {
+        chargeId: String(replay[0].id), tenantId: input.tenantId, requestId: input.requestId,
+        reservedMinor: Number(replay[0].reserved_minor), price, replay: true,
+        status: String(replay[0].status) as UsageReservation["status"],
+        chargedMinor: Number(replay[0].charged_minor || 0),
+        providerResultCiphertext: typeof extra.providerResultCiphertext === "string" ? extra.providerResultCiphertext : null,
+      };
+    }
     throw new Error("INSUFFICIENT_BALANCE_OR_BUDGET");
   }
-  return { chargeId, tenantId: input.tenantId, requestId: input.requestId, reservedMinor, price };
+  return { chargeId, tenantId: input.tenantId, requestId: input.requestId, reservedMinor, price, replay: false, status: "reserved", chargedMinor: 0, providerResultCiphertext: null };
+}
+
+export async function checkpointUsageProviderResult(
+  chargeId: string,
+  result: Record<string, unknown>,
+  db?: DbLike,
+) {
+  const sql = await database(db);
+  const ciphertext = encryptSecretValue(JSON.stringify(result));
+  const rows = await sql.query<{ id: string }>(
+    `update relay_usage_charges
+        set extra=jsonb_set(jsonb_set(coalesce(extra,'{}'::jsonb),'{providerResultCiphertext}',to_jsonb($2::text),true),'{providerCompletedAt}',to_jsonb(now()::text),true)
+      where id=$1 and status in ('reserved','settled') returning id`,
+    [chargeId, ciphertext],
+  );
+  if (!rows[0]) throw new Error("CHARGE_CHECKPOINT_FAILED");
+  return true;
+}
+
+export function decodeUsageProviderResult(ciphertext?: string | null) {
+  if (!ciphertext) return null;
+  try {
+    const parsed = JSON.parse(decryptSecretValue(ciphertext));
+    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function releaseUsageReservation(chargeId: string, reason: string, db?: DbLike) {
@@ -501,12 +538,13 @@ export async function publishPrice(
 
 export async function commercialAdminSnapshot(db?: DbLike) {
   const sql = await database(db);
-  const [tenants, plans, prices, orders, transactions] = await Promise.all([
+  const [tenants, plans, prices, orders, transactions, alerts] = await Promise.all([
     sql.query<Record<string, unknown>>("select * from relay_tenants order by created_at desc limit 500"),
     sql.query<Record<string, unknown>>("select * from relay_plans order by created_at asc"),
     sql.query<Record<string, unknown>>("select * from relay_price_book order by created_at desc limit 500"),
     sql.query<Record<string, unknown>>("select * from relay_orders order by created_at desc limit 500"),
     sql.query<Record<string, unknown>>("select * from relay_billing_transactions order by created_at desc limit 500"),
+    sql.query<Record<string, unknown>>("select * from relay_alert_events order by last_seen_at desc limit 200"),
   ]);
-  return { tenants, plans, prices, orders, transactions };
+  return { tenants, plans, prices, orders, transactions, alerts };
 }

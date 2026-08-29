@@ -30,7 +30,7 @@ test("commercial API keys are hash-only, tenant-scoped and revocable", async () 
     db,
   );
   const created = await createTenantApiKey(
-    { tenantId: owner.tenantId, createdBy: owner.userId, name: "Production", scopes: ["chat"], modelAllowlist: ["gpt-5-mini"], requestsPerMinute: 2 },
+    { tenantId: owner.tenantId, createdBy: owner.userId, name: "Production", scopes: ["chat"], modelAllowlist: ["gpt-5-mini"], requestsPerMinute: 2, monthlySpendLimitMinor: 10 },
     db,
   );
   assert.match(created.token, /^sk-saas-/);
@@ -41,9 +41,18 @@ test("commercial API keys are hash-only, tenant-scoped and revocable", async () 
   assert.equal(found?.tenantId, owner.tenantId);
   assert.deepEqual(found?.scopes, ["chat"]);
   assert.deepEqual(found?.modelAllowlist, ["gpt-5-mini"]);
-  assert.equal((await enforceCommercialKeyLimits(found!, "chat", "gpt-5-mini")).ok, true);
-  const denied = await enforceCommercialKeyLimits(found!, "image", "gpt-image-1");
+  assert.equal((await enforceCommercialKeyLimits(found!, "chat", "gpt-5-mini", new Date(), db)).ok, true);
+  const denied = await enforceCommercialKeyLimits(found!, "image", "gpt-image-1", new Date(), db);
   assert.equal(denied.ok, false);
+  await pg.query(
+    `insert into relay_usage_charges
+      (id,tenant_id,api_key_id,request_id,provider,model,capability,reserved_minor,charged_minor,status,created_at)
+     values ('charge-limit',$1,$2,'request-limit','openai','gpt-5-mini','chat',0,10,'settled',now())`,
+    [owner.tenantId, created.id],
+  );
+  const spent = await enforceCommercialKeyLimits(found!, "chat", "gpt-5-mini", new Date(), db);
+  assert.equal(spent.ok, false);
+  if (!spent.ok) assert.equal(spent.error, "MONTHLY_SPEND_LIMIT_REACHED");
   assert.equal(await revokeTenantApiKey(owner.tenantId, created.id, db), true);
   assert.equal(await findTenantApiKey(created.token, db), null);
   await pg.close();

@@ -8,6 +8,7 @@ import {
   sha256,
   verifySaasPassword,
   verifyTotp,
+  hashSaasPassword,
 } from "./saas-crypto";
 import { decryptSecretValue, encryptSecretValue } from "./secrets";
 import type { TenantRole } from "./commercial-types";
@@ -101,14 +102,151 @@ export async function registerSaasOwner(
   input: { tenantName: string; ownerName: string; email: string; password: string; currency?: string },
   request: Request,
   db?: DbLike,
+  opts: { fetcher?: typeof fetch; env?: NodeJS.ProcessEnv } = {},
 ) {
   if (!trustedSaasOrigin(request)) throw new Error("INVALID_ORIGIN");
   const ip = clientIp(request);
   const attempts = await coordIncr(`saas:register:${ip}:${new Date().toISOString().slice(0, 13)}`, 2 * 60 * 60_000);
   if (attempts > 10) throw new Error("REGISTRATION_RATE_LIMITED");
-  const created = await createTenantOwner(input, db);
+  const env = opts.env || process.env;
+  const verificationRequired = env.NODE_ENV === "production"
+    ? env.RELAY_SAAS_EMAIL_VERIFICATION_REQUIRED !== "0"
+    : env.RELAY_SAAS_EMAIL_VERIFICATION_REQUIRED === "1";
+  const created = await createTenantOwner({
+    ...input,
+    userStatus: verificationRequired ? "pending_verification" : "active",
+    emailVerified: !verificationRequired,
+  }, db);
+  if (verificationRequired) {
+    await sendSaasVerification(created.email, request, db, opts);
+    return {
+      ...created,
+      verificationRequired: true as const,
+      sessionId: null,
+      csrf: null,
+      expiresAt: null,
+      cookies: [] as string[],
+    };
+  }
   const session = await createSaasSession(created.userId, created.tenantId, request, db);
-  return { ...created, ...session };
+  return { ...created, verificationRequired: false as const, ...session };
+}
+
+export async function sendSaasVerification(
+  emailInput: string,
+  request: Request,
+  db?: DbLike,
+  opts: { fetcher?: typeof fetch; env?: NodeJS.ProcessEnv } = {},
+) {
+  if (!trustedSaasOrigin(request)) throw new Error("INVALID_ORIGIN");
+  const email = normalizeEmail(emailInput);
+  const count = await coordIncr(`saas:verify-resend:${clientIp(request)}:${sha256(email).slice(0, 16)}`, 60 * 60_000);
+  if (count > 5) throw new Error("VERIFICATION_RATE_LIMITED");
+  const sql = await database(db);
+  const users = await sql.query<{ id: string; email: string; tenant_name: string }>(
+    `select u.id,u.email,t.name as tenant_name
+       from relay_saas_users u
+       join relay_tenant_memberships m on m.user_id=u.id
+       join relay_tenants t on t.id=m.tenant_id
+      where u.email_normalized=$1 and u.status='pending_verification' limit 1`,
+    [email],
+  );
+  if (!users[0]) return { ok: true as const };
+  const token = secureToken(32);
+  await sql.query(
+    `with expired as (
+       update relay_saas_verifications set consumed_at=now()
+        where user_id=$1 and kind='email' and consumed_at is null
+     ) insert into relay_saas_verifications(id,user_id,kind,token_hash,expires_at,created_at)
+       values ($2,$1,'email',$3,now()+interval '24 hours',now())`,
+    [users[0].id, uid(), sha256(token)],
+  );
+  const env = opts.env || process.env;
+  const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || new URL(request.url).origin;
+  const delivery = env.RELAY_EMAIL_WEBHOOK_URL?.trim();
+  if (!delivery) throw new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
+  const response = await (opts.fetcher || fetch)(delivery, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(10_000),
+    body: JSON.stringify({ template: "verify-email", to: users[0].email, tenant: users[0].tenant_name, link: `${publicUrl}/saas/verify?token=${encodeURIComponent(token)}` }),
+  });
+  if (!response.ok) throw new Error("EMAIL_DELIVERY_FAILED");
+  return { ok: true as const };
+}
+
+export async function verifySaasEmail(token: string, request: Request, db?: DbLike) {
+  if (!trustedSaasOrigin(request)) throw new Error("INVALID_ORIGIN");
+  const sql = await database(db);
+  const rows = await sql.query<{ user_id: string }>(
+    `with consumed as (
+       update relay_saas_verifications set consumed_at=now()
+        where token_hash=$1 and kind='email' and consumed_at is null and expires_at > now()
+       returning user_id
+     ), activated as (
+       update relay_saas_users u set status='active',email_verified_at=now(),updated_at=now()
+        from consumed c where u.id=c.user_id returning u.id
+     ) select id as user_id from activated`,
+    [sha256(token)],
+  );
+  if (!rows[0]) throw new Error("VERIFICATION_INVALID_OR_EXPIRED");
+  return { ok: true as const, userId: rows[0].user_id };
+}
+
+export async function requestSaasPasswordReset(
+  emailInput: string,
+  request: Request,
+  db?: DbLike,
+  opts: { fetcher?: typeof fetch; env?: NodeJS.ProcessEnv } = {},
+) {
+  if (!trustedSaasOrigin(request)) throw new Error("INVALID_ORIGIN");
+  const email = normalizeEmail(emailInput);
+  const count = await coordIncr(`saas:reset:${clientIp(request)}:${sha256(email).slice(0, 16)}`, 60 * 60_000);
+  if (count > 5) throw new Error("RESET_RATE_LIMITED");
+  const sql = await database(db);
+  const users = await sql.query<{ id: string; email: string }>(
+    "select id,email from relay_saas_users where email_normalized=$1 and status in ('active','pending_verification') limit 1",
+    [email],
+  );
+  // Do not reveal whether the address exists.
+  if (!users[0]) return { ok: true as const };
+  const token = secureToken(32);
+  await sql.query(
+    "insert into relay_saas_verifications(id,user_id,kind,token_hash,expires_at,created_at) values ($1,$2,'password_reset',$3,now()+interval '1 hour',now())",
+    [uid(), users[0].id, sha256(token)],
+  );
+  const env = opts.env || process.env;
+  const delivery = env.RELAY_EMAIL_WEBHOOK_URL?.trim();
+  if (!delivery) throw new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
+  const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || new URL(request.url).origin;
+  const response = await (opts.fetcher || fetch)(delivery, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(10_000),
+    body: JSON.stringify({ template: "password-reset", to: users[0].email, link: `${publicUrl}/saas/reset?token=${encodeURIComponent(token)}` }),
+  });
+  if (!response.ok) throw new Error("EMAIL_DELIVERY_FAILED");
+  return { ok: true as const };
+}
+
+export async function resetSaasPassword(token: string, password: string, request: Request, db?: DbLike) {
+  if (!trustedSaasOrigin(request)) throw new Error("INVALID_ORIGIN");
+  const sql = await database(db);
+  const rows = await sql.query<{ user_id: string }>(
+    `with consumed as (
+       update relay_saas_verifications set consumed_at=now()
+        where token_hash=$1 and kind='password_reset' and consumed_at is null and expires_at > now()
+       returning user_id
+     ), updated as (
+       update relay_saas_users u set password_hash=$2,status='active',email_verified_at=coalesce(email_verified_at,now()),updated_at=now()
+        from consumed c where u.id=c.user_id returning u.id
+     ), revoked as (
+       update relay_saas_sessions s set revoked_at=now() from updated u where s.user_id=u.id and s.revoked_at is null
+     ) select id as user_id from updated`,
+    [sha256(token), hashSaasPassword(password)],
+  );
+  if (!rows[0]) throw new Error("RESET_INVALID_OR_EXPIRED");
+  return { ok: true as const };
 }
 
 export async function loginSaas(

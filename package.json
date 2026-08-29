@@ -1,6 +1,6 @@
 {
   "name": "app-builder-workspace",
-  "version": "0.9.0-rc2",
+  "version": "0.10.0-rc1",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -26,6 +26,8 @@
     "test:chaos": "node scripts/chaos-harness.mjs",
     "test:reliability": "node scripts/reliability-run.mjs",
     "test:leak": "node scripts/worker-leak-harness.mjs",
+    "test:commercial": "node scripts/run-commercial-tests.mjs",
+    "backup:offsite": "node scripts/offsite-backup.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

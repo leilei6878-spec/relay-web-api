@@ -28,7 +28,12 @@ import { Route as ApiReadyRouteImport } from './routes/api/ready'
 import { Route as ApiRuntimeRouteImport } from './routes/api/runtime'
 import { Route as ApiUsageRouteImport } from './routes/api/usage'
 import { Route as InternalReadinessRouteImport } from './routes/internal/readiness'
+import { Route as LegalPrivacyRouteImport } from './routes/legal/privacy'
+import { Route as LegalTermsRouteImport } from './routes/legal/terms'
+import { Route as SaasInviteRouteImport } from './routes/saas/invite'
 import { Route as SaasLoginRouteImport } from './routes/saas/login'
+import { Route as SaasResetRouteImport } from './routes/saas/reset'
+import { Route as SaasVerifyRouteImport } from './routes/saas/verify'
 import { Route as V1ModelsRouteImport } from './routes/v1/models'
 import { Route as V1ResponsesRouteImport } from './routes/v1/responses'
 import { Route as ApiAccountsProbeRouteImport } from './routes/api/accounts/probe'
@@ -45,7 +50,10 @@ import { Route as ApiAdminSessionRouteImport } from './routes/api/admin/session'
 import { Route as ApiAdminWorkerKitRouteImport } from './routes/api/admin/worker-kit'
 import { Route as ApiMediaIdRouteImport } from './routes/api/media/$id'
 import { Route as ApiSaasBillingRouteImport } from './routes/api/saas/billing'
+import { Route as ApiSaasInviteRouteImport } from './routes/api/saas/invite'
 import { Route as ApiSaasKeysRouteImport } from './routes/api/saas/keys'
+import { Route as ApiSaasMembersRouteImport } from './routes/api/saas/members'
+import { Route as ApiSaasReadinessRouteImport } from './routes/api/saas/readiness'
 import { Route as ApiSaasSessionRouteImport } from './routes/api/saas/session'
 import { Route as ApiWorkerAccountInspectionsRouteImport } from './routes/api/worker/account-inspections'
 import { Route as ApiWorkerChunkRouteImport } from './routes/api/worker/chunk'
@@ -153,9 +161,34 @@ const InternalReadinessRoute = InternalReadinessRouteImport.update({
   path: '/internal/readiness',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LegalPrivacyRoute = LegalPrivacyRouteImport.update({
+  id: '/legal/privacy',
+  path: '/legal/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LegalTermsRoute = LegalTermsRouteImport.update({
+  id: '/legal/terms',
+  path: '/legal/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SaasInviteRoute = SaasInviteRouteImport.update({
+  id: '/saas/invite',
+  path: '/saas/invite',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SaasLoginRoute = SaasLoginRouteImport.update({
   id: '/saas/login',
   path: '/saas/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SaasResetRoute = SaasResetRouteImport.update({
+  id: '/saas/reset',
+  path: '/saas/reset',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SaasVerifyRoute = SaasVerifyRouteImport.update({
+  id: '/saas/verify',
+  path: '/saas/verify',
   getParentRoute: () => rootRouteImport,
 } as any)
 const V1ModelsRoute = V1ModelsRouteImport.update({
@@ -241,9 +274,24 @@ const ApiSaasBillingRoute = ApiSaasBillingRouteImport.update({
   path: '/api/saas/billing',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSaasInviteRoute = ApiSaasInviteRouteImport.update({
+  id: '/api/saas/invite',
+  path: '/api/saas/invite',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSaasKeysRoute = ApiSaasKeysRouteImport.update({
   id: '/api/saas/keys',
   path: '/api/saas/keys',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSaasMembersRoute = ApiSaasMembersRouteImport.update({
+  id: '/api/saas/members',
+  path: '/api/saas/members',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSaasReadinessRoute = ApiSaasReadinessRouteImport.update({
+  id: '/api/saas/readiness',
+  path: '/api/saas/readiness',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSaasSessionRoute = ApiSaasSessionRouteImport.update({
@@ -323,7 +371,12 @@ export interface FileRoutesByFullPath {
   '/api/runtime': typeof ApiRuntimeRoute
   '/api/usage': typeof ApiUsageRoute
   '/internal/readiness': typeof InternalReadinessRoute
+  '/legal/privacy': typeof LegalPrivacyRoute
+  '/legal/terms': typeof LegalTermsRoute
+  '/saas/invite': typeof SaasInviteRoute
   '/saas/login': typeof SaasLoginRoute
+  '/saas/reset': typeof SaasResetRoute
+  '/saas/verify': typeof SaasVerifyRoute
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
@@ -340,7 +393,10 @@ export interface FileRoutesByFullPath {
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
   '/api/saas/billing': typeof ApiSaasBillingRoute
+  '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
+  '/api/saas/members': typeof ApiSaasMembersRoute
+  '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
@@ -373,7 +429,12 @@ export interface FileRoutesByTo {
   '/api/runtime': typeof ApiRuntimeRoute
   '/api/usage': typeof ApiUsageRoute
   '/internal/readiness': typeof InternalReadinessRoute
+  '/legal/privacy': typeof LegalPrivacyRoute
+  '/legal/terms': typeof LegalTermsRoute
+  '/saas/invite': typeof SaasInviteRoute
   '/saas/login': typeof SaasLoginRoute
+  '/saas/reset': typeof SaasResetRoute
+  '/saas/verify': typeof SaasVerifyRoute
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
@@ -390,7 +451,10 @@ export interface FileRoutesByTo {
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
   '/api/saas/billing': typeof ApiSaasBillingRoute
+  '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
+  '/api/saas/members': typeof ApiSaasMembersRoute
+  '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
@@ -424,7 +488,12 @@ export interface FileRoutesById {
   '/api/runtime': typeof ApiRuntimeRoute
   '/api/usage': typeof ApiUsageRoute
   '/internal/readiness': typeof InternalReadinessRoute
+  '/legal/privacy': typeof LegalPrivacyRoute
+  '/legal/terms': typeof LegalTermsRoute
+  '/saas/invite': typeof SaasInviteRoute
   '/saas/login': typeof SaasLoginRoute
+  '/saas/reset': typeof SaasResetRoute
+  '/saas/verify': typeof SaasVerifyRoute
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
   '/api/accounts/probe': typeof ApiAccountsProbeRoute
@@ -441,7 +510,10 @@ export interface FileRoutesById {
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
   '/api/saas/billing': typeof ApiSaasBillingRoute
+  '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
+  '/api/saas/members': typeof ApiSaasMembersRoute
+  '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
@@ -476,7 +548,12 @@ export interface FileRouteTypes {
     | '/api/runtime'
     | '/api/usage'
     | '/internal/readiness'
+    | '/legal/privacy'
+    | '/legal/terms'
+    | '/saas/invite'
     | '/saas/login'
+    | '/saas/reset'
+    | '/saas/verify'
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
@@ -493,7 +570,10 @@ export interface FileRouteTypes {
     | '/api/admin/worker-kit'
     | '/api/media/$id'
     | '/api/saas/billing'
+    | '/api/saas/invite'
     | '/api/saas/keys'
+    | '/api/saas/members'
+    | '/api/saas/readiness'
     | '/api/saas/session'
     | '/api/worker/account-inspections'
     | '/api/worker/chunk'
@@ -526,7 +606,12 @@ export interface FileRouteTypes {
     | '/api/runtime'
     | '/api/usage'
     | '/internal/readiness'
+    | '/legal/privacy'
+    | '/legal/terms'
+    | '/saas/invite'
     | '/saas/login'
+    | '/saas/reset'
+    | '/saas/verify'
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
@@ -543,7 +628,10 @@ export interface FileRouteTypes {
     | '/api/admin/worker-kit'
     | '/api/media/$id'
     | '/api/saas/billing'
+    | '/api/saas/invite'
     | '/api/saas/keys'
+    | '/api/saas/members'
+    | '/api/saas/readiness'
     | '/api/saas/session'
     | '/api/worker/account-inspections'
     | '/api/worker/chunk'
@@ -576,7 +664,12 @@ export interface FileRouteTypes {
     | '/api/runtime'
     | '/api/usage'
     | '/internal/readiness'
+    | '/legal/privacy'
+    | '/legal/terms'
+    | '/saas/invite'
     | '/saas/login'
+    | '/saas/reset'
+    | '/saas/verify'
     | '/v1/models'
     | '/v1/responses'
     | '/api/accounts/probe'
@@ -593,7 +686,10 @@ export interface FileRouteTypes {
     | '/api/admin/worker-kit'
     | '/api/media/$id'
     | '/api/saas/billing'
+    | '/api/saas/invite'
     | '/api/saas/keys'
+    | '/api/saas/members'
+    | '/api/saas/readiness'
     | '/api/saas/session'
     | '/api/worker/account-inspections'
     | '/api/worker/chunk'
@@ -627,7 +723,12 @@ export interface RootRouteChildren {
   ApiRuntimeRoute: typeof ApiRuntimeRoute
   ApiUsageRoute: typeof ApiUsageRoute
   InternalReadinessRoute: typeof InternalReadinessRoute
+  LegalPrivacyRoute: typeof LegalPrivacyRoute
+  LegalTermsRoute: typeof LegalTermsRoute
+  SaasInviteRoute: typeof SaasInviteRoute
   SaasLoginRoute: typeof SaasLoginRoute
+  SaasResetRoute: typeof SaasResetRoute
+  SaasVerifyRoute: typeof SaasVerifyRoute
   V1ModelsRoute: typeof V1ModelsRoute
   V1ResponsesRoute: typeof V1ResponsesRoute
   ApiAccountsProbeRoute: typeof ApiAccountsProbeRoute
@@ -644,7 +745,10 @@ export interface RootRouteChildren {
   ApiAdminWorkerKitRoute: typeof ApiAdminWorkerKitRoute
   ApiMediaIdRoute: typeof ApiMediaIdRoute
   ApiSaasBillingRoute: typeof ApiSaasBillingRoute
+  ApiSaasInviteRoute: typeof ApiSaasInviteRoute
   ApiSaasKeysRoute: typeof ApiSaasKeysRoute
+  ApiSaasMembersRoute: typeof ApiSaasMembersRoute
+  ApiSaasReadinessRoute: typeof ApiSaasReadinessRoute
   ApiSaasSessionRoute: typeof ApiSaasSessionRoute
   ApiWorkerAccountInspectionsRoute: typeof ApiWorkerAccountInspectionsRoute
   ApiWorkerChunkRoute: typeof ApiWorkerChunkRoute
@@ -793,11 +897,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InternalReadinessRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/legal/privacy': {
+      id: '/legal/privacy'
+      path: '/legal/privacy'
+      fullPath: '/legal/privacy'
+      preLoaderRoute: typeof LegalPrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/legal/terms': {
+      id: '/legal/terms'
+      path: '/legal/terms'
+      fullPath: '/legal/terms'
+      preLoaderRoute: typeof LegalTermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/saas/invite': {
+      id: '/saas/invite'
+      path: '/saas/invite'
+      fullPath: '/saas/invite'
+      preLoaderRoute: typeof SaasInviteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/saas/login': {
       id: '/saas/login'
       path: '/saas/login'
       fullPath: '/saas/login'
       preLoaderRoute: typeof SaasLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/saas/reset': {
+      id: '/saas/reset'
+      path: '/saas/reset'
+      fullPath: '/saas/reset'
+      preLoaderRoute: typeof SaasResetRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/saas/verify': {
+      id: '/saas/verify'
+      path: '/saas/verify'
+      fullPath: '/saas/verify'
+      preLoaderRoute: typeof SaasVerifyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/v1/models': {
@@ -912,11 +1051,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSaasBillingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/saas/invite': {
+      id: '/api/saas/invite'
+      path: '/api/saas/invite'
+      fullPath: '/api/saas/invite'
+      preLoaderRoute: typeof ApiSaasInviteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/saas/keys': {
       id: '/api/saas/keys'
       path: '/api/saas/keys'
       fullPath: '/api/saas/keys'
       preLoaderRoute: typeof ApiSaasKeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/saas/members': {
+      id: '/api/saas/members'
+      path: '/api/saas/members'
+      fullPath: '/api/saas/members'
+      preLoaderRoute: typeof ApiSaasMembersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/saas/readiness': {
+      id: '/api/saas/readiness'
+      path: '/api/saas/readiness'
+      fullPath: '/api/saas/readiness'
+      preLoaderRoute: typeof ApiSaasReadinessRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/saas/session': {
@@ -1019,7 +1179,12 @@ const rootRouteChildren: RootRouteChildren = {
   ApiRuntimeRoute: ApiRuntimeRoute,
   ApiUsageRoute: ApiUsageRoute,
   InternalReadinessRoute: InternalReadinessRoute,
+  LegalPrivacyRoute: LegalPrivacyRoute,
+  LegalTermsRoute: LegalTermsRoute,
+  SaasInviteRoute: SaasInviteRoute,
   SaasLoginRoute: SaasLoginRoute,
+  SaasResetRoute: SaasResetRoute,
+  SaasVerifyRoute: SaasVerifyRoute,
   V1ModelsRoute: V1ModelsRoute,
   V1ResponsesRoute: V1ResponsesRoute,
   ApiAccountsProbeRoute: ApiAccountsProbeRoute,
@@ -1036,7 +1201,10 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAdminWorkerKitRoute: ApiAdminWorkerKitRoute,
   ApiMediaIdRoute: ApiMediaIdRoute,
   ApiSaasBillingRoute: ApiSaasBillingRoute,
+  ApiSaasInviteRoute: ApiSaasInviteRoute,
   ApiSaasKeysRoute: ApiSaasKeysRoute,
+  ApiSaasMembersRoute: ApiSaasMembersRoute,
+  ApiSaasReadinessRoute: ApiSaasReadinessRoute,
   ApiSaasSessionRoute: ApiSaasSessionRoute,
   ApiWorkerAccountInspectionsRoute: ApiWorkerAccountInspectionsRoute,
   ApiWorkerChunkRoute: ApiWorkerChunkRoute,

@@ -35,6 +35,7 @@ function Portal() {
   const [session, setSession] = useState<SessionBody | null>(null);
   const [billing, setBilling] = useState<BillingBody | null>(null);
   const [keys, setKeys] = useState<Record<string, unknown>[]>([]);
+  const [members, setMembers] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -44,13 +45,15 @@ function Portal() {
       return;
     }
     const sessionBody = await sessionResponse.json() as SessionBody;
-    const [billingBody, keyBody] = await Promise.all([
+    const [billingBody, keyBody, memberBody] = await Promise.all([
       fetch("/api/saas/billing", { credentials: "include" }).then((response) => response.json() as Promise<BillingBody>),
       fetch("/api/saas/keys", { credentials: "include" }).then((response) => response.json() as Promise<{ keys?: Record<string, unknown>[] }>),
+      fetch("/api/saas/members", { credentials: "include" }).then((response) => response.json() as Promise<{ members?: Record<string, unknown>[] }>),
     ]);
     setSession(sessionBody);
     setBilling(billingBody);
     setKeys(keyBody.keys || []);
+    setMembers(memberBody.members || []);
     setLoading(false);
   }, []);
 
@@ -95,6 +98,7 @@ function Portal() {
         </section>
 
         <section id="security" className="rounded-xl border border-border bg-surface p-5"><div className="flex items-center gap-2"><ShieldCheck className="size-4" /><h2 className="font-medium">账户安全</h2></div><p className="mt-2 text-sm text-muted">建议所有 Owner 和 Admin 启用 TOTP 多因素认证。</p><MfaDialog /></section>
+        <section className="rounded-xl border border-border bg-surface"><div className="flex items-center justify-between border-b border-border px-5 py-4"><div><h2 className="font-medium">企业成员</h2><p className="mt-1 text-xs text-subtle">Owner、Admin、Billing、Developer、Viewer 权限分离。</p></div>{["owner", "admin"].includes(session.tenant.role) ? <InviteMemberDialog onSaved={load} /> : null}</div><div className="divide-y divide-border">{members.map((member) => <div key={String(member.id)} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"><div><p className="text-sm font-medium">{String(member.name)}</p><p className="text-xs text-subtle">{String(member.email)} · MFA {member.mfa_enabled ? "on" : "off"}</p></div><div className="flex items-center gap-2"><Badge tone={member.membership_status === "active" ? "ok" : "default"}>{String(member.role)}</Badge>{session.tenant.role === "owner" && member.id !== session.user.id ? <Button variant="ghost" size="sm" onClick={() => void toggleMember(member, load)}>{member.membership_status === "active" ? "停用" : "启用"}</Button> : null}</div></div>)}</div></section>
       </div>
     </SaasShell>
   );
@@ -157,6 +161,20 @@ function MfaDialog() {
     setRecovery(body.recoveryCodes || []); toast.success("MFA 已启用");
   }
   return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button className="mt-4" variant="secondary">配置 MFA</Button></DialogTrigger><DialogContent title="TOTP 多因素认证">{recovery.length ? <div><p className="text-sm text-warn">请离线保存以下恢复码，每个恢复码只能使用一次。</p><pre className="mt-3 rounded-md bg-elevated p-3 text-xs">{recovery.join("\n")}</pre></div> : secret ? <div className="space-y-3"><p className="text-sm text-muted">在身份验证器中手动添加密钥：</p><p className="break-all rounded-md bg-elevated p-3 font-mono text-xs">{secret}</p><Field label="当前 6 位验证码"><Input inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} /></Field><Button className="w-full" onClick={() => void confirm()}>验证并启用</Button></div> : <div><p className="text-sm text-muted">启用后登录必须同时输入密码和身份验证器验证码。</p><Button className="mt-4 w-full" onClick={() => void start()}>生成 TOTP 密钥</Button></div>}</DialogContent></Dialog>;
+}
+
+function InviteMemberDialog({ onSaved }: { onSaved: () => Promise<void> }) {
+  const [open, setOpen] = useState(false); const [email, setEmail] = useState(""); const [role, setRole] = useState("developer");
+  async function invite() { const response = await fetch("/api/saas/members", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ email, role }) }); const body = await response.json() as { error?: string }; if (!response.ok) { toast.error(body.error || "邀请失败"); return; } toast.success("邀请邮件已发送"); setOpen(false); await onSaved(); }
+  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button size="sm" variant="secondary">邀请成员</Button></DialogTrigger><DialogContent title="邀请企业成员"><div className="space-y-3"><Field label="邮箱"><Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></Field><Field label="角色"><select className="h-11 w-full rounded-sm border border-border bg-elevated px-3 text-sm" value={role} onChange={(event) => setRole(event.target.value)}><option value="admin">Admin</option><option value="billing">Billing</option><option value="developer">Developer</option><option value="viewer">Viewer</option></select></Field><Button className="w-full" onClick={() => void invite()}>发送邀请</Button></div></DialogContent></Dialog>;
+}
+
+async function toggleMember(member: Record<string, unknown>, reload: () => Promise<void>) {
+  const status = member.membership_status === "active" ? "disabled" : "active";
+  const response = await fetch("/api/saas/members", { method: "PATCH", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ userId: member.id, role: member.role, status }) });
+  const body = await response.json() as { error?: string };
+  if (!response.ok) { toast.error(body.error || "成员更新失败"); return; }
+  toast.success("成员状态已更新"); await reload();
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <div className="space-y-2"><Label>{label}</Label>{children}</div>; }

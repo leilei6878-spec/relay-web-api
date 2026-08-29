@@ -210,6 +210,8 @@ export function bootProductionGuard() {
     void import("./account-check-scheduler").then((m) => m.startAccountCheckScheduler()).catch(() => undefined);
     void import("./account-analytics").then((m) => m.startAvailabilitySnapshotScheduler()).catch(() => undefined);
     void import("./account-inspections").then((m) => m.startInspectionCleanupScheduler()).catch(() => undefined);
+    void import("./commercial-monitor").then((m) => m.startCommercialMonitor()).catch(() => undefined);
+    void import("./data-retention").then((m) => m.startDataRetentionScheduler()).catch(() => undefined);
   }
 }
 

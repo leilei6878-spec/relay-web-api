@@ -1,0 +1,27 @@
+import { createFileRoute } from "@tanstack/react-router";
+import { commercialReadiness } from "@/lib/commercial-readiness";
+
+export const Route = createFileRoute("/api/saas/readiness")({
+  server: {
+    handlers: {
+      GET: async () => {
+        const readiness = await commercialReadiness();
+        return Response.json(
+          {
+            enabled: readiness.enabled,
+            ready: readiness.ready,
+            registrationEnabled: readiness.registrationEnabled,
+            providers: Object.entries(readiness.officialProviders).filter(([, configured]) => configured).map(([provider]) => provider),
+            activePrices: readiness.activePrices,
+            onlineWorkers: readiness.onlineWorkers,
+            gatewayReplicas: readiness.gatewayReplicas,
+            offsiteBackupConfigured: readiness.offsiteBackupConfigured,
+            legalApproved: readiness.legalApproved,
+            blockers: readiness.blockers,
+          },
+          { status: readiness.ready || !readiness.enabled ? 200 : 503, headers: { "Cache-Control": "no-store" } },
+        );
+      },
+    },
+  },
+});

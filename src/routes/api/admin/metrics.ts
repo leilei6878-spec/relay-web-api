@@ -10,6 +10,8 @@ import { persistenceMode } from "@/lib/persist-mode";
 import { runProductionReadinessCheck } from "@/lib/production-guard";
 import { readControlPlane } from "@/lib/control-plane";
 import { dbSource } from "@/lib/db";
+import { getSql } from "@/lib/db";
+import { commercialReadiness } from "@/lib/commercial-readiness";
 
 export const Route = createFileRoute("/api/admin/metrics")({
   server: {
@@ -20,6 +22,12 @@ export const Route = createFileRoute("/api/admin/metrics")({
         const { jobs, workers } = await listJobs();
         const plane = await readControlPlane();
         const now = Date.now();
+        const sql = await getSql();
+        const [tenantRows, chargeRows, alertRows] = await Promise.all([
+          sql.query<{ total: number; active: number }>("select count(*)::int as total,count(*) filter(where status in ('trial','active'))::int as active from relay_tenants"),
+          sql.query<{ reserved: number; settled: number; charged: number }>("select count(*) filter(where status='reserved')::int as reserved,count(*) filter(where status='settled')::int as settled,coalesce(sum(charged_minor) filter(where status='settled'),0)::bigint as charged from relay_usage_charges"),
+          sql.query<{ open: number; critical: number }>("select count(*) filter(where status='open')::int as open,count(*) filter(where status='open' and severity='critical')::int as critical from relay_alert_events"),
+        ]);
         return Response.json({
           slo: metricsSnapshot(),
           queueDepth: jobs.filter((j) => j.status === "queued" || j.status === "running").length,
@@ -54,6 +62,12 @@ export const Route = createFileRoute("/api/admin/metrics")({
           },
           browser: browserBaseline(),
           production: runProductionReadinessCheck(),
+          commercial: {
+            readiness: await commercialReadiness(),
+            tenants: tenantRows[0] || { total: 0, active: 0 },
+            charges: chargeRows[0] || { reserved: 0, settled: 0, charged: 0 },
+            alerts: alertRows[0] || { open: 0, critical: 0 },
+          },
         });
       },
     },

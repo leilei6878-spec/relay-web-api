@@ -106,7 +106,7 @@ export async function handleChat(request: Request): Promise<Response> {
           if (!limits.ok) {
             return Response.json({ error: { message: limits.error, type: "rate_limit_error" } }, { status: limits.status, headers: { ...cors(), ...(limits.retryAfter ? { "Retry-After": String(limits.retryAfter) } : {}) } });
           }
-          const requestId = request.headers.get("x-request-id") || uid();
+          const requestId = request.headers.get("x-request-id") || request.headers.get("idempotency-key") || uid();
           const result = await commercialChatCompletion({
             key: commercialKey,
             requestId,

@@ -9,6 +9,8 @@ import {
   postBalanceAdjustment,
   reserveUsage,
   settleUsage,
+  checkpointUsageProviderResult,
+  decodeUsageProviderResult,
 } from "./saas-billing.ts";
 import { hashSaasPassword, totpCode, verifySaasPassword, verifyTotp } from "./saas-crypto.ts";
 
@@ -180,6 +182,27 @@ test("concurrent reservation replay does not double-hold tenant balance", async 
   const tenant = await getTenant(created.tenantId, db);
   assert.equal(tenant?.reservedMinor, first.reservedMinor);
   const charges = await pg.query<{ count: number }>("select count(*)::int as count from relay_usage_charges where tenant_id=$1", [created.tenantId]);
+  assert.equal(charges.rows[0]?.count, 1);
+  await pg.close();
+});
+
+test("provider success checkpoint makes idempotent settlement recoverable without resubmission", async () => {
+  const { pg, db } = await database();
+  const created = await createTenantOwner(
+    { tenantName: "Recovery Co", ownerName: "Owner", email: "owner@recovery.test", password: "commercial-password-recovery" }, db,
+  );
+  await postBalanceAdjustment({ tenantId: created.tenantId, deltaMinor: 500, kind: "recharge", idempotencyKey: "fund" }, db);
+  await pg.query(`insert into relay_tenant_api_keys(id,tenant_id,name,key_hash,key_prefix,key_hint,created_by) values ('key-r',$1,'default','hash-r','sk-saas-r','sk-saas-r…test',$2)`, [created.tenantId, created.userId]);
+  await pg.query(`insert into relay_price_book(id,version,provider,model,capability,currency,input_micros_per_million,output_micros_per_million,effective_from,status) values ('price-r',1,'openai','gpt-5-mini','chat','USD',1000000,2000000,now()-interval '1 minute','active')`);
+  const input = { tenantId: created.tenantId, apiKeyId: "key-r", requestId: "recover-request", provider: "openai", model: "gpt-5-mini", capability: "chat" as const, estimatedPromptTokens: 1000, estimatedCompletionTokens: 1000 };
+  const reserved = await reserveUsage(input, db);
+  await checkpointUsageProviderResult(reserved.chargeId, { kind: "chat", id: "provider-1", text: "completed", promptTokens: 1000, completionTokens: 500 }, db);
+  await settleUsage(reserved.chargeId, { promptTokens: 1000, completionTokens: 500 }, db);
+  const replay = await reserveUsage(input, db);
+  assert.equal(replay.replay, true);
+  assert.equal(replay.status, "settled");
+  assert.equal(decodeUsageProviderResult(replay.providerResultCiphertext)?.text, "completed");
+  const charges = await pg.query<{ count: number }>("select count(*)::int as count from relay_usage_charges where request_id='recover-request'");
   assert.equal(charges.rows[0]?.count, 1);
   await pg.close();
 });

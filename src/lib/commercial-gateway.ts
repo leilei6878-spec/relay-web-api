@@ -1,14 +1,46 @@
 import type { CommercialApiKey } from "./commercial-types";
 import { officialChat, officialImage, resolveOfficialModel } from "./official-providers";
 import { acquireCommercialConcurrency, recordTenantApiKeyUse, releaseCommercialConcurrency } from "./saas-api-keys";
-import { releaseUsageReservation, reserveUsage, settleUsage } from "./saas-billing";
+import { checkpointUsageProviderResult, decodeUsageProviderResult, releaseUsageReservation, reserveUsage, settleUsage } from "./saas-billing";
 import { estimateTokens } from "./tokens";
+import { detectMagicMime } from "./provider/image-result-validator";
+import { persistImageBytes } from "./media-store";
 
 function errorResponse(error: string) {
   if (/PRICE_NOT_CONFIGURED|MODEL_MAPPING_REQUIRED|MUST_BE_OFFICIAL/.test(error)) return { status: 400, code: "commercial_configuration_error" };
   if (/INSUFFICIENT_BALANCE|BUDGET/.test(error)) return { status: 402, code: "insufficient_balance" };
   if (/TENANT_SUSPENDED/.test(error)) return { status: 403, code: "tenant_suspended" };
   return { status: 503, code: "commercial_gateway_error" };
+}
+
+function replayFailure(provider: "openai" | "google" | "leonardo", status: string) {
+  return {
+    ok: false as const,
+    provider,
+    status: status === "released" ? 409 : 425,
+    error: status === "released" ? "IDEMPOTENT_REQUEST_PREVIOUSLY_FAILED" : "IDEMPOTENT_REQUEST_IN_PROGRESS",
+    code: status === "released" ? "IDEMPOTENT_REQUEST_PREVIOUSLY_FAILED" : "IDEMPOTENT_REQUEST_IN_PROGRESS",
+  };
+}
+
+async function stableOfficialImages(images: { url?: string; b64_json?: string; revised_prompt?: string }[]) {
+  const stable: { url: string; revised_prompt?: string }[] = [];
+  for (const image of images) {
+    let buf: Buffer;
+    if (image.b64_json) {
+      buf = Buffer.from(image.b64_json, "base64");
+    } else if (image.url?.startsWith("https://")) {
+      const response = await fetch(image.url, { signal: AbortSignal.timeout(30_000) });
+      if (!response.ok) throw new Error(`OFFICIAL_IMAGE_DOWNLOAD_FAILED: ${response.status}`);
+      buf = Buffer.from(await response.arrayBuffer());
+    } else throw new Error("OFFICIAL_IMAGE_RESULT_INVALID");
+    if (buf.length < 100 || buf.length > 30 * 1024 * 1024) throw new Error("OFFICIAL_IMAGE_SIZE_INVALID");
+    const mime = detectMagicMime(buf);
+    if (!mime) throw new Error("OFFICIAL_IMAGE_MAGIC_INVALID");
+    const stored = await persistImageBytes(buf, mime);
+    stable.push({ url: stored.url, revised_prompt: image.revised_prompt });
+  }
+  return stable;
 }
 
 export async function commercialChatCompletion(input: {
@@ -49,6 +81,24 @@ async function commercialChatCompletionRun(input: {
       estimatedPromptTokens: estimatedPrompt,
       estimatedCompletionTokens: input.maxCompletionTokens || 4096,
     });
+    if (reservation.replay) {
+      const saved = decodeUsageProviderResult(reservation.providerResultCiphertext);
+      if (!saved || saved.kind !== "chat") return replayFailure(resolved.provider, reservation.status);
+      const recovered = saved as {
+        provider: "openai" | "google";
+        model: string;
+        id: string;
+        text: string;
+        promptTokens: number;
+        completionTokens: number;
+        finishReason: string;
+        raw?: Record<string, unknown>;
+      };
+      const settlement = reservation.status === "settled"
+        ? { chargedMinor: reservation.chargedMinor }
+        : await settleUsage(reservation.chargeId, { promptTokens: recovered.promptTokens, completionTokens: recovered.completionTokens });
+      return { ok: true as const, ...recovered, raw: recovered.raw || {}, chargeId: reservation.chargeId, chargedMinor: settlement.chargedMinor };
+    }
     const result = await officialChat({
       resolved,
       messages: input.messages,
@@ -61,6 +111,16 @@ async function commercialChatCompletionRun(input: {
       return result;
     }
     try {
+      await checkpointUsageProviderResult(reservation.chargeId, {
+        kind: "chat",
+        provider: result.provider,
+        model: result.model,
+        id: result.id,
+        text: result.text,
+        promptTokens: result.promptTokens,
+        completionTokens: result.completionTokens,
+        finishReason: result.finishReason,
+      });
       const settlement = await settleUsage(reservation.chargeId, {
         promptTokens: result.promptTokens,
         completionTokens: result.completionTokens,
@@ -123,6 +183,23 @@ async function commercialImageGenerationRun(input: {
       estimatedPromptTokens: estimatedPrompt,
       images: input.n,
     });
+    if (reservation.replay) {
+      const saved = decodeUsageProviderResult(reservation.providerResultCiphertext);
+      if (!saved || saved.kind !== "image") return replayFailure(resolved.provider, reservation.status);
+      const recovered = saved as {
+        provider: "openai" | "google" | "leonardo";
+        model: string;
+        id: string;
+        images: { url: string; revised_prompt?: string }[];
+        promptTokens: number;
+        completionTokens: number;
+        raw?: Record<string, unknown>;
+      };
+      const settlement = reservation.status === "settled"
+        ? { chargedMinor: reservation.chargedMinor }
+        : await settleUsage(reservation.chargeId, { promptTokens: recovered.promptTokens, completionTokens: recovered.completionTokens, images: recovered.images.length });
+      return { ok: true as const, ...recovered, raw: recovered.raw || {}, chargeId: reservation.chargeId, chargedMinor: settlement.chargedMinor };
+    }
     const result = await officialImage({
       resolved,
       prompt: input.prompt,
@@ -136,13 +213,23 @@ async function commercialImageGenerationRun(input: {
       return result;
     }
     try {
+      const images = await stableOfficialImages(result.images);
+      await checkpointUsageProviderResult(reservation.chargeId, {
+        kind: "image",
+        provider: result.provider,
+        model: result.model,
+        id: result.id,
+        images,
+        promptTokens: result.promptTokens || estimatedPrompt,
+        completionTokens: result.completionTokens,
+      });
       const settlement = await settleUsage(reservation.chargeId, {
         promptTokens: result.promptTokens || estimatedPrompt,
         completionTokens: result.completionTokens,
-        images: result.images.length,
+        images: images.length,
       });
       await recordTenantApiKeyUse(input.key.id);
-      return { ...result, chargeId: reservation.chargeId, chargedMinor: settlement.chargedMinor } as const;
+      return { ...result, images, chargeId: reservation.chargeId, chargedMinor: settlement.chargedMinor } as const;
     } catch (error) {
       return {
         ok: false as const,

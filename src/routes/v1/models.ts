@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { chatgptAdapter, geminiAdapter, leonardoAdapter } from "@/lib/provider/index";
 import { OFFICIAL_GPT_IMAGE_IDS, OFFICIAL_NANO_IDS } from "@/lib/provider/leonardo-models";
+import { classify } from "@/lib/authz";
+import { getSql } from "@/lib/db";
 
 function asModel(id: string, owned: string, caps: ReturnType<typeof chatgptAdapter.capabilities>, description: string) {
   return {
@@ -60,15 +62,49 @@ export const Route = createFileRoute("/v1/models")({
             "Access-Control-Allow-Methods": "GET, OPTIONS",
           },
         }),
-      GET: async () =>
-        Response.json(
-          { object: "list", data: MODELS },
+      GET: async ({ request }) => {
+        const principal = await classify(request);
+        let data = MODELS;
+        if (principal?.kind === "commercial") {
+          const sql = await getSql();
+          const prices = await sql.query<Record<string, unknown>>(
+            `select distinct on (provider,model,capability) provider,model,capability,currency,
+                    input_micros_per_million,output_micros_per_million,image_price_minor,markup_basis_points
+               from relay_price_book where status='active' and effective_from <= now()
+                 and (effective_to is null or effective_to > now())
+              order by provider,model,capability,version desc`,
+          );
+          data = prices.map((price) => ({
+            id: `${price.provider}:${price.model}`,
+            object: "model",
+            owned_by: price.provider,
+            description: "Official commercial API model",
+            capabilities: {
+              chat: price.capability === "chat",
+              vision: false,
+              image_generation: price.capability === "image",
+              image_edit: false,
+              streaming: false,
+              multi_turn: price.capability === "chat",
+            },
+            pricing: {
+              currency: price.currency,
+              input_micros_per_million: price.input_micros_per_million,
+              output_micros_per_million: price.output_micros_per_million,
+              image_price_minor: price.image_price_minor,
+              markup_basis_points: price.markup_basis_points,
+            },
+          })) as typeof MODELS;
+        }
+        return Response.json(
+          { object: "list", data },
           {
             headers: {
               "Access-Control-Allow-Origin": "*",
             },
           },
-        ),
+        );
+      },
     },
   },
 });

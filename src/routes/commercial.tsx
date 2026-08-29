@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 export const Route = createFileRoute("/commercial")({ component: CommercialPage });
 
-type Snapshot = { tenants: Record<string, unknown>[]; plans: Record<string, unknown>[]; prices: Record<string, unknown>[]; orders: Record<string, unknown>[]; transactions: Record<string, unknown>[] };
+type Snapshot = { tenants: Record<string, unknown>[]; plans: Record<string, unknown>[]; prices: Record<string, unknown>[]; orders: Record<string, unknown>[]; transactions: Record<string, unknown>[]; alerts: Record<string, unknown>[] };
 
 function money(value: unknown, currency: unknown) {
   return new Intl.NumberFormat("zh-CN", { style: "currency", currency: String(currency || "USD") }).format(Number(value || 0) / 100);
@@ -22,14 +22,14 @@ function CommercialPage() {
 }
 
 function CommercialView() {
-  const [data, setData] = useState<Snapshot>({ tenants: [], plans: [], prices: [], orders: [], transactions: [] });
+  const [data, setData] = useState<Snapshot>({ tenants: [], plans: [], prices: [], orders: [], transactions: [], alerts: [] });
   const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
     setLoading(true);
     const response = await fetch("/api/admin/commercial", { credentials: "include" });
     const body = await response.json() as Partial<Snapshot> & { error?: string };
     if (!response.ok) { toast.error(body.error || "商业数据读取失败"); setLoading(false); return; }
-    setData({ tenants: body.tenants || [], plans: body.plans || [], prices: body.prices || [], orders: body.orders || [], transactions: body.transactions || [] });
+    setData({ tenants: body.tenants || [], plans: body.plans || [], prices: body.prices || [], orders: body.orders || [], transactions: body.transactions || [], alerts: body.alerts || [] });
     setLoading(false);
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -39,14 +39,15 @@ function CommercialView() {
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-3"><div><h1 className="text-2xl font-medium">商业运营</h1><p className="mt-1 text-sm text-muted">租户、套餐、官方模型价格、订单和不可变账本。</p></div><div className="flex gap-2"><PriceDialog onSaved={load} /><Button variant="secondary" onClick={() => void load()} disabled={loading}><RefreshCw className="size-4" />刷新</Button></div></header>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Stat icon={<Building2 className="size-4" />} label="租户" value={String(data.tenants.length)} /><Stat icon={<CreditCard className="size-4" />} label="待审订单" value={String(pending.length)} /><Stat icon={<Tags className="size-4" />} label="有效价格" value={String(data.prices.filter((price) => price.status === "active").length)} /><Stat icon={<Scale className="size-4" />} label="租户余额合计" value={money(balance, "USD")} /></div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><Stat icon={<Building2 className="size-4" />} label="租户" value={String(data.tenants.length)} /><Stat icon={<CreditCard className="size-4" />} label="待审订单" value={String(pending.length)} /><Stat icon={<Tags className="size-4" />} label="有效价格" value={String(data.prices.filter((price) => price.status === "active").length)} /><Stat icon={<Scale className="size-4" />} label="租户余额合计" value={money(balance, "USD")} /><Stat icon={<RefreshCw className="size-4" />} label="未解决告警" value={String(data.alerts.filter((alert) => alert.status === "open").length)} /></div>
 
-      <section className="overflow-x-auto rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">租户</h2></div><table className="w-full min-w-[900px] text-left text-sm"><thead className="text-xs text-subtle"><tr><th className="px-4 py-3">企业</th><th>状态</th><th>套餐</th><th>余额 / 预留</th><th>计费邮箱</th><th>创建时间</th><th>操作</th></tr></thead><tbody>{data.tenants.map((tenant) => <tr key={String(tenant.id)} className="border-t border-border"><td className="px-4 py-3"><p className="font-medium">{String(tenant.name)}</p><p className="font-mono text-[11px] text-subtle">{String(tenant.slug)}</p></td><td><Badge tone={tenant.status === "active" ? "ok" : tenant.status === "trial" ? "info" : "danger"}>{String(tenant.status)}</Badge></td><td>{String(tenant.plan_id)}</td><td>{money(tenant.balance_minor, tenant.currency)} / {money(tenant.reserved_minor, tenant.currency)}</td><td>{String(tenant.billing_email)}</td><td className="text-xs text-muted">{new Date(String(tenant.created_at)).toLocaleString("zh-CN")}</td><td><div className="flex gap-1"><AdjustmentDialog tenant={tenant} onSaved={load} /><Button variant="ghost" size="sm" onClick={() => void tenantStatus(String(tenant.id), tenant.status === "suspended" ? "active" : "suspended", load)}>{tenant.status === "suspended" ? "恢复" : "暂停"}</Button></div></td></tr>)}</tbody></table></section>
+        <section className="overflow-x-auto rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">租户</h2></div><table className="w-full min-w-[900px] text-left text-sm"><thead className="text-xs text-subtle"><tr><th className="px-4 py-3">企业</th><th>状态</th><th>套餐</th><th>余额 / 预留</th><th>计费邮箱</th><th>创建时间</th><th>操作</th></tr></thead><tbody>{data.tenants.map((tenant) => <tr key={String(tenant.id)} className="border-t border-border"><td className="px-4 py-3"><p className="font-medium">{String(tenant.name)}</p><p className="font-mono text-[11px] text-subtle">{String(tenant.slug)}</p></td><td><Badge tone={tenant.status === "active" ? "ok" : tenant.status === "trial" ? "info" : "danger"}>{String(tenant.status)}</Badge></td><td><select className="h-9 rounded-sm border border-border bg-elevated px-2 text-xs" value={String(tenant.plan_id)} onChange={(event) => void changePlan(String(tenant.id), event.target.value, load)}>{data.plans.filter((plan) => plan.status === "active").map((plan) => <option key={String(plan.id)} value={String(plan.id)}>{String(plan.name)}</option>)}</select></td><td>{money(tenant.balance_minor, tenant.currency)} / {money(tenant.reserved_minor, tenant.currency)}</td><td>{String(tenant.billing_email)}</td><td className="text-xs text-muted">{new Date(String(tenant.created_at)).toLocaleString("zh-CN")}</td><td><div className="flex gap-1"><AdjustmentDialog tenant={tenant} onSaved={load} /><Button variant="ghost" size="sm" onClick={() => void tenantStatus(String(tenant.id), tenant.status === "suspended" ? "active" : "suspended", load)}>{tenant.status === "suspended" ? "恢复" : "暂停"}</Button></div></td></tr>)}</tbody></table></section>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">待审核充值订单</h2></div><div className="divide-y divide-border">{pending.map((order) => <div key={String(order.id)} className="flex items-center justify-between gap-3 px-5 py-4"><div><p className="font-medium">{money(order.amount_minor, order.currency)}</p><p className="text-xs text-subtle">租户 {String(order.tenant_id)} · {new Date(String(order.created_at)).toLocaleString("zh-CN")}</p></div><Button size="sm" onClick={() => void settleOrder(String(order.id), load)}>确认到账</Button></div>)}{!pending.length ? <p className="px-5 py-8 text-center text-sm text-subtle">没有待处理订单</p> : null}</div></section>
         <section className="rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">价格版本</h2></div><div className="max-h-96 divide-y divide-border overflow-y-auto">{data.prices.map((price) => <div key={String(price.id)} className="flex items-center justify-between gap-3 px-5 py-3 text-sm"><div><p className="font-medium">{String(price.provider)} · {String(price.model)}</p><p className="text-xs text-subtle">{String(price.capability)} · v{String(price.version)} · markup {Number(price.markup_basis_points || 0) / 100}%</p></div><Badge tone={price.status === "active" ? "ok" : "default"}>{String(price.status)}</Badge></div>)}</div></section>
       </div>
+      <section className="rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">商业告警</h2></div><div className="max-h-80 divide-y divide-border overflow-y-auto">{data.alerts.map((alert) => <div key={String(alert.id)} className="flex items-center justify-between gap-3 px-5 py-3"><div><p className="text-sm font-medium">{String(alert.code)}</p><p className="text-xs text-subtle">{String(alert.message)} · {new Date(String(alert.last_seen_at)).toLocaleString("zh-CN")}</p></div><Badge tone={alert.status === "open" ? alert.severity === "critical" ? "danger" : "warn" : "ok"}>{String(alert.status)}</Badge></div>)}{!data.alerts.length ? <p className="px-5 py-8 text-center text-sm text-subtle">暂无告警</p> : null}</div></section>
     </div>
   );
 }
@@ -60,6 +61,7 @@ async function action(body: Record<string, unknown>) {
 }
 
 async function tenantStatus(tenantId: string, status: string, reload: () => Promise<void>) { try { await action({ action: "tenant-status", tenantId, status }); toast.success("租户状态已更新"); await reload(); } catch (error) { toast.error(error instanceof Error ? error.message : "更新失败"); } }
+async function changePlan(tenantId: string, planId: string, reload: () => Promise<void>) { try { await action({ action: "tenant-plan", tenantId, planId }); toast.success("套餐已更新"); await reload(); } catch (error) { toast.error(error instanceof Error ? error.message : "套餐更新失败"); } }
 async function settleOrder(orderId: string, reload: () => Promise<void>) { try { await action({ action: "settle-order", orderId }); toast.success("订单已确认到账"); await reload(); } catch (error) { toast.error(error instanceof Error ? error.message : "结算失败"); } }
 
 function AdjustmentDialog({ tenant, onSaved }: { tenant: Record<string, unknown>; onSaved: () => Promise<void> }) {

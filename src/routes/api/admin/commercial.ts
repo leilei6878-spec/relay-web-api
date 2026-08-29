@@ -42,6 +42,31 @@ export const Route = createFileRoute("/api/admin/commercial")({
             );
             if (!rows[0]) throw new Error("TENANT_UPDATE_FAILED");
             result = rows[0];
+          } else if (action === "tenant-plan") {
+            const sql = await getSql();
+            const rows = await sql.query(
+              "update relay_tenants t set plan_id=p.id,updated_at=now() from relay_plans p where t.id=$1 and p.id=$2 and p.status='active' returning t.id,t.plan_id",
+              [String(body.tenantId || ""), String(body.planId || "")],
+            );
+            if (!rows[0]) throw new Error("TENANT_PLAN_UPDATE_FAILED");
+            result = rows[0];
+          } else if (action === "upsert-plan") {
+            const sql = await getSql();
+            const rows = await sql.query(
+              `insert into relay_plans(id,name,status,currency,monthly_fee_minor,included_credit_minor,limits,features,created_at,updated_at)
+               values ($1,$2,'active',$3,$4,$5,$6::jsonb,$7::jsonb,now(),now())
+               on conflict(id) do update set name=excluded.name,status='active',currency=excluded.currency,
+                 monthly_fee_minor=excluded.monthly_fee_minor,included_credit_minor=excluded.included_credit_minor,
+                 limits=excluded.limits,features=excluded.features,updated_at=now()
+               returning *`,
+              [
+                String(body.id || "").trim(), String(body.name || "").trim(), String(body.currency || "USD"),
+                Math.max(0, Number(body.monthlyFeeMinor || 0)), Math.max(0, Number(body.includedCreditMinor || 0)),
+                JSON.stringify(body.limits || {}), JSON.stringify(body.features || {}),
+              ],
+            );
+            if (!rows[0]) throw new Error("PLAN_UPDATE_FAILED");
+            result = rows[0];
           } else throw new Error("UNKNOWN_ACTION");
           const sql = await getSql();
           await sql.query(

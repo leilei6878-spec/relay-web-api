@@ -58,4 +58,8 @@ export type UsageReservation = {
   requestId: string;
   reservedMinor: number;
   price: PriceBookRow;
+  replay: boolean;
+  status: "reserved" | "settled" | "released";
+  chargedMinor: number;
+  providerResultCiphertext?: string | null;
 };

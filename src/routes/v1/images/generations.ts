@@ -200,7 +200,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
       return Response.json({ error: { message: limits.error, type: "rate_limit_error" } }, { status: limits.status, headers: { ...cors(), ...(limits.retryAfter ? { "Retry-After": String(limits.retryAfter) } : {}) } });
     }
     const n = Math.max(1, Math.min(resolved.provider === "leonardo" ? 8 : 4, Math.floor(parsed.n || 1)));
-    const requestId = request.headers.get("x-request-id") || uid();
+    const requestId = request.headers.get("x-request-id") || request.headers.get("idempotency-key") || uid();
     const result = await commercialImageGeneration({
       key: commercialKey,
       requestId,

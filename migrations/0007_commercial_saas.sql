@@ -67,6 +67,22 @@ CREATE TABLE IF NOT EXISTS relay_tenant_memberships (
 
 CREATE INDEX IF NOT EXISTS relay_tenant_memberships_user_idx ON relay_tenant_memberships(user_id,status);
 
+CREATE TABLE IF NOT EXISTS relay_tenant_invites (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL REFERENCES relay_tenants(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  email_normalized TEXT NOT NULL,
+  role TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  invited_by TEXT NOT NULL REFERENCES relay_saas_users(id),
+  expires_at TIMESTAMPTZ NOT NULL,
+  accepted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS relay_tenant_invites_pending_email
+  ON relay_tenant_invites(tenant_id,email_normalized) WHERE accepted_at is null;
+
 CREATE TABLE IF NOT EXISTS relay_saas_sessions (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES relay_saas_users(id) ON DELETE CASCADE,
@@ -83,6 +99,18 @@ CREATE TABLE IF NOT EXISTS relay_saas_sessions (
 
 CREATE INDEX IF NOT EXISTS relay_saas_sessions_user_idx ON relay_saas_sessions(user_id,expires_at DESC);
 CREATE INDEX IF NOT EXISTS relay_saas_sessions_tenant_idx ON relay_saas_sessions(tenant_id,expires_at DESC);
+
+CREATE TABLE IF NOT EXISTS relay_saas_verifications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES relay_saas_users(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  consumed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS relay_saas_verifications_user_idx ON relay_saas_verifications(user_id,created_at DESC);
 
 CREATE TABLE IF NOT EXISTS relay_tenant_api_keys (
   id TEXT PRIMARY KEY,
@@ -237,6 +265,24 @@ CREATE TABLE IF NOT EXISTS relay_commercial_audit (
 );
 
 CREATE INDEX IF NOT EXISTS relay_commercial_audit_tenant_idx ON relay_commercial_audit(tenant_id,created_at DESC);
+
+CREATE TABLE IF NOT EXISTS relay_alert_events (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  message TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ,
+  occurrences INTEGER NOT NULL DEFAULT 1,
+  extra JSONB NOT NULL DEFAULT '{}'::JSONB
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS relay_alert_events_open_fingerprint
+  ON relay_alert_events(fingerprint) WHERE status='open';
+CREATE INDEX IF NOT EXISTS relay_alert_events_seen_idx ON relay_alert_events(last_seen_at DESC);
 
 ALTER TABLE relay_usage ADD COLUMN IF NOT EXISTS tenant_id TEXT;
 ALTER TABLE relay_usage ADD COLUMN IF NOT EXISTS charge_id TEXT;

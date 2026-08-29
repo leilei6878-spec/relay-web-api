@@ -15,7 +15,7 @@ export const Route = createRootRoute({
       { name: "theme-color", content: "#0b0c0e" },
       {
         name: "description",
-        content: "网页转 API 多账号池控制台：调度、代理绑定、健康检测与网关试运行。",
+        content: "Relay 官方 AI API 商业网关与内部账号运营控制台。",
       },
     ],
     links: [

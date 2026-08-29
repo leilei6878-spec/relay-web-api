@@ -8,6 +8,9 @@ test("commercial gateway routes only to official providers and wraps every call 
   assert.match(source, /reserveUsage/);
   assert.match(source, /settleUsage/);
   assert.match(source, /releaseUsageReservation/);
+  assert.match(source, /checkpointUsageProviderResult/);
+  assert.match(source, /decodeUsageProviderResult/);
+  assert.match(source, /IDEMPOTENT_REQUEST_IN_PROGRESS/);
   assert.match(source, /officialChat/);
   assert.match(source, /officialImage/);
   assert.doesNotMatch(source, /enqueueChat|enqueueImage|pickAccount|web_account/);
@@ -24,6 +27,8 @@ test("public commercial API branches before web-account selection", async () => 
   assert.match(images, /commercialImageGeneration/);
   assert.match(chat, /Commercial streaming is temporarily disabled/);
   assert.match(images, /Commercial image editing is disabled/);
+  assert.match(chat, /headers\.get\("idempotency-key"\)/);
+  assert.match(images, /headers\.get\("idempotency-key"\)/);
   assert.match(responses, /if \(auth\.commercial\)/);
   assert.match(responses, /commercialChatCompletion/);
   assert.match(jobs, /where tenant_id=\$1/);

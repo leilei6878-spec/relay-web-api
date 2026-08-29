@@ -8,7 +8,12 @@ import {
   logoutSaas,
   registerSaasOwner,
   startSaasMfa,
+  verifySaasEmail,
+  requestSaasPasswordReset,
+  resetSaasPassword,
+  sendSaasVerification,
 } from "@/lib/saas-auth";
+import { cachedCommercialReadiness } from "@/lib/commercial-readiness";
 
 function responseWithCookies(body: unknown, cookies: string[], status = 200) {
   const headers = new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -41,6 +46,9 @@ export const Route = createFileRoute("/api/saas/session")({
             if (process.env.NODE_ENV === "production" && process.env.RELAY_SAAS_REGISTRATION_ENABLED !== "1") {
               return Response.json({ ok: false, error: "REGISTRATION_DISABLED" }, { status: 503 });
             }
+            if (process.env.NODE_ENV === "production" && !(await cachedCommercialReadiness()).ready) {
+              return Response.json({ ok: false, error: "COMMERCIAL_NOT_READY" }, { status: 503 });
+            }
             const result = await registerSaasOwner(
               {
                 tenantName: String(body.tenantName || ""), ownerName: String(body.ownerName || ""),
@@ -48,7 +56,7 @@ export const Route = createFileRoute("/api/saas/session")({
               },
               request,
             );
-            return responseWithCookies({ ok: true, tenantId: result.tenantId, userId: result.userId, csrf: result.csrf }, result.cookies, 201);
+            return responseWithCookies({ ok: true, tenantId: result.tenantId, userId: result.userId, csrf: result.csrf, verificationRequired: result.verificationRequired }, result.cookies, 201);
           }
           if (action === "login") {
             const result = await loginSaas(
@@ -56,6 +64,18 @@ export const Route = createFileRoute("/api/saas/session")({
               request,
             );
             return responseWithCookies({ ok: true, user: result.user, tenant: result.tenant, csrf: result.csrf }, result.cookies);
+          }
+          if (action === "verify-email") {
+            return Response.json(await verifySaasEmail(String(body.token || ""), request));
+          }
+          if (action === "password-reset-request") {
+            return Response.json(await requestSaasPasswordReset(String(body.email || ""), request));
+          }
+          if (action === "password-reset") {
+            return Response.json(await resetSaasPassword(String(body.token || ""), String(body.password || ""), request));
+          }
+          if (action === "resend-verification") {
+            return Response.json(await sendSaasVerification(String(body.email || ""), request));
           }
           const auth = await assertSaasSession(request, ["owner", "admin"], { requireCsrf: true });
           if (!auth.ok) return Response.json({ ok: false, error: auth.error }, { status: auth.status });

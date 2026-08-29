@@ -15,6 +15,7 @@ function SaasLogin() {
   const [totp, setTotp] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     void fetch("/api/saas/session", { credentials: "include" }).then((response) => {
@@ -26,6 +27,7 @@ function SaasLogin() {
     event.preventDefault();
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       const response = await fetch("/api/saas/session", {
         method: "POST",
@@ -33,11 +35,17 @@ function SaasLogin() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: mode, tenantName, ownerName, email, password, totp: totp || undefined }),
       });
-      const body = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      const body = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; verificationRequired?: boolean };
       if (!response.ok || !body.ok) {
         if (body.error === "MFA_REQUIRED") setError("请输入身份验证器中的 6 位验证码");
         else if (body.error === "REGISTRATION_DISABLED") setError("公开注册尚未开放，请联系销售开通租户");
         else setError(body.error || "操作失败");
+        return;
+      }
+      if (body.verificationRequired) {
+        setNotice("注册成功。验证链接已发送到你的邮箱，验证后即可登录。");
+        setMode("login");
+        setPassword("");
         return;
       }
       window.location.replace("/portal");
@@ -46,6 +54,14 @@ function SaasLogin() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function resend() {
+    if (!email) { setError("请先填写注册邮箱"); return; }
+    const response = await fetch("/api/saas/session", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resend-verification", email }) });
+    const body = await response.json() as { ok?: boolean; error?: string };
+    if (!response.ok || !body.ok) { setError(body.error || "发送失败"); return; }
+    setNotice("如果该邮箱有待验证账户，验证邮件已重新发送。");
   }
 
   return (
@@ -63,9 +79,12 @@ function SaasLogin() {
           <Field label="密码"><Input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={10} /></Field>
           {mode === "login" ? <Field label="MFA 验证码（启用后必填）"><Input inputMode="numeric" maxLength={6} value={totp} onChange={(event) => setTotp(event.target.value.replace(/\D/g, ""))} /></Field> : null}
           {error ? <p role="alert" className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2.5 text-sm text-danger">{error}</p> : null}
+          {notice ? <p className="rounded-lg border border-ok/30 bg-ok/5 px-3 py-2.5 text-sm text-ok">{notice}</p> : null}
           <Button type="submit" className="w-full" disabled={busy}>{busy ? "请稍候…" : mode === "login" ? "登录" : "创建租户"}</Button>
+          {mode === "login" ? <a href="/saas/reset" className="block text-center text-xs text-muted underline">忘记密码</a> : null}
+          {mode === "login" ? <button type="button" className="block w-full text-center text-xs text-muted underline" onClick={() => void resend()}>重新发送验证邮件</button> : null}
         </form>
-        <p className="mt-6 text-center text-[11px] leading-5 text-subtle">注册即表示同意服务条款与隐私政策；正式收费前页面将补充对应法律文本。</p>
+        <p className="mt-6 text-center text-[11px] leading-5 text-subtle">注册即表示同意 <a className="underline" href="/legal/terms">服务条款</a> 与 <a className="underline" href="/legal/privacy">隐私政策</a>。</p>
       </section>
     </main>
   );

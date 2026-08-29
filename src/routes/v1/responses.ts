@@ -105,7 +105,7 @@ export const Route = createFileRoute("/v1/responses")({
           }
           const result = await commercialChatCompletion({
             key,
-            requestId: request.headers.get("x-request-id") || uid(),
+            requestId: request.headers.get("x-request-id") || request.headers.get("idempotency-key") || uid(),
             messages,
             model,
           });

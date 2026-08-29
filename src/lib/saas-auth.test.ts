@@ -10,6 +10,9 @@ import {
   registerSaasOwner,
   startSaasMfa,
   trustedSaasOrigin,
+  verifySaasEmail,
+  requestSaasPasswordReset,
+  resetSaasPassword,
 } from "./saas-auth.ts";
 import { totpCode } from "./saas-crypto.ts";
 
@@ -114,5 +117,66 @@ test("MFA enrollment requires a current code and returns one-time recovery codes
   assert.equal(logged.user.email, "mfa@example.test");
   if (previous === undefined) delete process.env.RELAY_PUBLIC_URL;
   else process.env.RELAY_PUBLIC_URL = previous;
+  await pg.close();
+});
+
+test("production registration requires delivered email verification before login", async () => {
+  const { pg, db } = await database();
+  let verificationLink = "";
+  const registered = await registerSaasOwner(
+    { tenantName: "Verify Co", ownerName: "Owner", email: "verify@example.test", password: "verify-password-123" },
+    request("/api/saas/session", { method: "POST" }),
+    db,
+    {
+      env: {
+        NODE_ENV: "production",
+        RELAY_PUBLIC_URL: "https://relay.example.test",
+        RELAY_EMAIL_WEBHOOK_URL: "https://mail.example.test/send",
+      } as NodeJS.ProcessEnv,
+      fetcher: async (_url, init) => {
+        verificationLink = String(JSON.parse(String(init?.body)).link || "");
+        return Response.json({ ok: true });
+      },
+    },
+  );
+  assert.equal(registered.verificationRequired, true);
+  assert.equal(registered.cookies.length, 0);
+  await assert.rejects(
+    () => loginSaas({ email: "verify@example.test", password: "verify-password-123" }, request("/api/saas/session", { method: "POST" }), db),
+    /INVALID_CREDENTIALS/,
+  );
+  const token = new URL(verificationLink).searchParams.get("token") || "";
+  assert.ok(token);
+  assert.equal((await verifySaasEmail(token, request("/api/saas/session", { method: "POST" }), db)).ok, true);
+  const logged = await loginSaas(
+    { email: "verify@example.test", password: "verify-password-123" },
+    request("/api/saas/session", { method: "POST" }),
+    db,
+  );
+  assert.equal(logged.user.email, "verify@example.test");
+  await pg.close();
+});
+
+test("password reset is non-enumerating, one-time and revokes existing sessions", async () => {
+  const { pg, db } = await database();
+  const previous = process.env.RELAY_PUBLIC_URL; process.env.RELAY_PUBLIC_URL = "https://relay.example.test";
+  const registered = await registerSaasOwner(
+    { tenantName: "Reset Co", ownerName: "Owner", email: "reset@example.test", password: "old-password-12345" },
+    request("/api/saas/session", { method: "POST" }), db,
+  );
+  let link = "";
+  const response = await requestSaasPasswordReset("reset@example.test", request("/api/saas/session", { method: "POST" }), db, {
+    env: { RELAY_PUBLIC_URL: "https://relay.example.test", RELAY_EMAIL_WEBHOOK_URL: "https://mail.test" } as NodeJS.ProcessEnv,
+    fetcher: async (_url, init) => { link = JSON.parse(String(init?.body)).link; return Response.json({ ok: true }); },
+  });
+  assert.equal(response.ok, true);
+  assert.equal((await requestSaasPasswordReset("unknown@example.test", request("/api/saas/session", { method: "POST" }), db, { env: {} as NodeJS.ProcessEnv })).ok, true);
+  const token = new URL(link).searchParams.get("token") || "";
+  assert.equal((await resetSaasPassword(token, "new-password-12345", request("/api/saas/session", { method: "POST" }), db)).ok, true);
+  await assert.rejects(() => resetSaasPassword(token, "another-password-123", request("/api/saas/session", { method: "POST" }), db), /RESET_INVALID/);
+  assert.equal(await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(registered.cookies) } }), db), null);
+  const logged = await loginSaas({ email: "reset@example.test", password: "new-password-12345" }, request("/api/saas/session", { method: "POST" }), db);
+  assert.equal(logged.user.email, "reset@example.test");
+  if (previous === undefined) delete process.env.RELAY_PUBLIC_URL; else process.env.RELAY_PUBLIC_URL = previous;
   await pg.close();
 });
