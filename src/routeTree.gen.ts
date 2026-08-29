@@ -55,6 +55,7 @@ import { Route as ApiAdminProviderSandboxRouteImport } from './routes/api/admin/
 import { Route as ApiAdminSessionRouteImport } from './routes/api/admin/session'
 import { Route as ApiAdminWorkerKitRouteImport } from './routes/api/admin/worker-kit'
 import { Route as ApiMediaIdRouteImport } from './routes/api/media/$id'
+import { Route as ApiSaasAuditRouteImport } from './routes/api/saas/audit'
 import { Route as ApiSaasBillingRouteImport } from './routes/api/saas/billing'
 import { Route as ApiSaasInviteRouteImport } from './routes/api/saas/invite'
 import { Route as ApiSaasKeysRouteImport } from './routes/api/saas/keys'
@@ -308,6 +309,11 @@ const ApiMediaIdRoute = ApiMediaIdRouteImport.update({
   path: '/api/media/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSaasAuditRoute = ApiSaasAuditRouteImport.update({
+  id: '/api/saas/audit',
+  path: '/api/saas/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSaasBillingRoute = ApiSaasBillingRouteImport.update({
   id: '/api/saas/billing',
   path: '/api/saas/billing',
@@ -442,6 +448,7 @@ export interface FileRoutesByFullPath {
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/saas/audit': typeof ApiSaasAuditRoute
   '/api/saas/billing': typeof ApiSaasBillingRoute
   '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
@@ -507,6 +514,7 @@ export interface FileRoutesByTo {
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/saas/audit': typeof ApiSaasAuditRoute
   '/api/saas/billing': typeof ApiSaasBillingRoute
   '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
@@ -573,6 +581,7 @@ export interface FileRoutesById {
   '/api/admin/session': typeof ApiAdminSessionRoute
   '/api/admin/worker-kit': typeof ApiAdminWorkerKitRoute
   '/api/media/$id': typeof ApiMediaIdRoute
+  '/api/saas/audit': typeof ApiSaasAuditRoute
   '/api/saas/billing': typeof ApiSaasBillingRoute
   '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
@@ -640,6 +649,7 @@ export interface FileRouteTypes {
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
+    | '/api/saas/audit'
     | '/api/saas/billing'
     | '/api/saas/invite'
     | '/api/saas/keys'
@@ -705,6 +715,7 @@ export interface FileRouteTypes {
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
+    | '/api/saas/audit'
     | '/api/saas/billing'
     | '/api/saas/invite'
     | '/api/saas/keys'
@@ -770,6 +781,7 @@ export interface FileRouteTypes {
     | '/api/admin/session'
     | '/api/admin/worker-kit'
     | '/api/media/$id'
+    | '/api/saas/audit'
     | '/api/saas/billing'
     | '/api/saas/invite'
     | '/api/saas/keys'
@@ -836,6 +848,7 @@ export interface RootRouteChildren {
   ApiAdminSessionRoute: typeof ApiAdminSessionRoute
   ApiAdminWorkerKitRoute: typeof ApiAdminWorkerKitRoute
   ApiMediaIdRoute: typeof ApiMediaIdRoute
+  ApiSaasAuditRoute: typeof ApiSaasAuditRoute
   ApiSaasBillingRoute: typeof ApiSaasBillingRoute
   ApiSaasInviteRoute: typeof ApiSaasInviteRoute
   ApiSaasKeysRoute: typeof ApiSaasKeysRoute
@@ -1179,6 +1192,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMediaIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/saas/audit': {
+      id: '/api/saas/audit'
+      path: '/api/saas/audit'
+      fullPath: '/api/saas/audit'
+      preLoaderRoute: typeof ApiSaasAuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/saas/billing': {
       id: '/api/saas/billing'
       path: '/api/saas/billing'
@@ -1348,6 +1368,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAdminSessionRoute: ApiAdminSessionRoute,
   ApiAdminWorkerKitRoute: ApiAdminWorkerKitRoute,
   ApiMediaIdRoute: ApiMediaIdRoute,
+  ApiSaasAuditRoute: ApiSaasAuditRoute,
   ApiSaasBillingRoute: ApiSaasBillingRoute,
   ApiSaasInviteRoute: ApiSaasInviteRoute,
   ApiSaasKeysRoute: ApiSaasKeysRoute,

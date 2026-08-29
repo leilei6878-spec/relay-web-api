@@ -23,7 +23,7 @@ export async function collectCommercialSignals(db?: DbLike) {
   const sql = db || await getSql();
   const env = await effectiveCommercialEnv(process.env, sql);
   const canaryHours = Math.max(1, Math.min(168, Number(env.RELAY_PROVIDER_CANARY_MAX_AGE_HOURS || 24)));
-  const [workers, reservations, failures, lowBalances, paymentEvents, refundSettlements, checkoutCreates, openDisputes, missingCanaries, duePlanPeriods] = await Promise.all([
+  const [workers, reservations, failures, lowBalances, paymentEvents, refundSettlements, checkoutCreates, openDisputes, missingCanaries, duePlanPeriods, incompleteTenantAudits] = await Promise.all([
     sql.query<{ count: number }>("select count(*)::int as count from relay_workers where draining=false and last_beat > now()-interval '45 seconds'"),
     sql.query<{ count: number }>("select count(*)::int as count from relay_usage_charges where status='reserved' and created_at < now()-interval '20 minutes'"),
     sql.query<{ total: number; failed: number }>(
@@ -58,6 +58,14 @@ export async function collectCommercialSignals(db?: DbLike) {
           select 1 from relay_plan_periods p where p.tenant_id=t.id and p.period_start=t.current_period_start
         ))`,
     ),
+    sql.query<{ count: number }>(
+      `select count(*)::int as count from relay_tenant_audit_events s
+        where s.outcome='started' and s.created_at < now()-interval '5 minutes'
+          and not exists (
+            select 1 from relay_tenant_audit_events terminal
+             where terminal.operation_id=s.operation_id and terminal.outcome in ('succeeded','failed')
+          )`,
+    ),
   ]);
   const signals: CommercialSignal[] = [];
   if (Number(workers[0]?.count || 0) === 0) signals.push({ code: "WORKER_ZERO", severity: "critical", message: "No online worker is available" });
@@ -74,6 +82,11 @@ export async function collectCommercialSignals(db?: DbLike) {
   const readiness = await commercialReadiness(env, sql);
   if (readiness.missingProviderCredentials.length > 0) signals.push({ code: "PROVIDER_CREDENTIAL_MISSING", severity: "critical", message: `Official credential missing for active provider(s): ${readiness.missingProviderCredentials.join(",")}` });
   if (Number(duePlanPeriods[0]?.count || 0) > 0) signals.push({ code: "PLAN_PERIOD_DUE", severity: env.RELAY_COMMERCIAL_ENABLED === "1" ? "critical" : "warning", message: `${duePlanPeriods[0]?.count} tenant plan period(s) require settlement` });
+  if (Number(incompleteTenantAudits[0]?.count || 0) > 0) signals.push({
+    code: "TENANT_AUDIT_INCOMPLETE",
+    severity: "critical",
+    message: `${incompleteTenantAudits[0]?.count} tenant mutation audit operation(s) have no terminal outcome`,
+  });
   const missingEvidence = (await commercialEvidenceStatus(env, sql)).filter((item) => !item.valid);
   if (missingEvidence.length > 0) signals.push({
     code: "COMMERCIAL_LAUNCH_EVIDENCE_MISSING",

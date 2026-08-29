@@ -35,6 +35,7 @@ export const COMMERCIAL_CONFIG_CATALOG: readonly CommercialConfigDefinition[] = 
   { key: "security.adminSessionHours", label: "管理员会话小时", group: "security", kind: "integer", envName: "RELAY_ADMIN_SESSION_HOURS", min: 1, max: 24, description: "管理员浏览器会话固定有效期，不滑动续期。" },
   { key: "security.customerPrivilegedMfaRequired", label: "客户高风险操作 MFA", group: "security", kind: "boolean", envName: "RELAY_REQUIRE_PRIVILEGED_SAAS_MFA", hardGate: true, description: "商业上线必须开启；Owner/Admin/Billing/Developer 的密钥、资金、套餐和成员变更要求当前会话已验证 MFA。" },
   { key: "security.customerMfaMaxAgeHours", label: "客户 MFA 有效小时", group: "security", kind: "integer", envName: "RELAY_SAAS_MFA_MAX_AGE_HOURS", min: 1, max: 168, description: "高风险租户操作接受的最近 MFA 验证窗口；过期后必须重新登录。" },
+  { key: "security.auditHashKey", label: "租户审计 HMAC Key", group: "security", kind: "secret", envName: "RELAY_AUDIT_HASH_KEY", secret: true, description: "对审计中的 IP 与 User-Agent 做不可逆 HMAC；可版本化替换，商业环境至少 32 个字符。" },
   { key: "providers.openai.apiKey", label: "OpenAI API Key", group: "providers", kind: "secret", envName: "OPENAI_API_KEY", secret: true, test: "openai", description: "服务端官方 OpenAI API 凭证。" },
   { key: "providers.google.apiKey", label: "Google Gemini API Key", group: "providers", kind: "secret", envName: "GEMINI_API_KEY", secret: true, test: "google", description: "服务端官方 Gemini API 凭证。" },
   { key: "providers.vertex.serviceAccountJson", label: "Vertex Service Account", group: "providers", kind: "secret", envName: "GOOGLE_SERVICE_ACCOUNT_JSON", secret: true, test: "vertex", description: "Vertex AI 专用服务账号 JSON；只用于短期 OAuth Token。" },
@@ -52,7 +53,7 @@ export const COMMERCIAL_CONFIG_CATALOG: readonly CommercialConfigDefinition[] = 
   { key: "retention.requestContentDays", label: "请求内容保留天数", group: "retention", kind: "integer", envName: "RELAY_REQUEST_CONTENT_RETENTION_DAYS", min: 1, max: 365, description: "到期后清除请求与供应商结果内容。" },
   { key: "retention.sessionDays", label: "会话保留天数", group: "retention", kind: "integer", envName: "RELAY_SESSION_RETENTION_DAYS", min: 1, max: 365, description: "已撤销或过期 SaaS 会话的保留期。" },
   { key: "retention.operationalDays", label: "运营数据保留天数", group: "retention", kind: "integer", envName: "RELAY_OPERATIONAL_RETENTION_DAYS", min: 7, max: 730, description: "账号检查等运营数据保留期。" },
-  { key: "retention.auditDays", label: "审计保留天数", group: "retention", kind: "integer", envName: "RELAY_AUDIT_RETENTION_DAYS", min: 90, max: 2555, description: "商业审计保留期；资金账本不受此项删除。" },
+  { key: "retention.auditDays", label: "运营审计保留天数", group: "retention", kind: "integer", envName: "RELAY_AUDIT_RETENTION_DAYS", min: 90, max: 2555, description: "短期平台运营审计保留期；租户高风险审计与资金账本不受此项删除。" },
 ] as const;
 
 const definitions = new Map(COMMERCIAL_CONFIG_CATALOG.map((definition) => [definition.key, definition]));
@@ -109,6 +110,7 @@ function normalizeValue(definition: CommercialConfigDefinition, value: unknown) 
     if (definition.key === "security.adminTotpSecret") {
       if (!/^[A-Z2-7]{16,128}$/.test(secret) || base32Decode(secret).length < 10) throw new Error("CONFIG_ADMIN_TOTP_SECRET_INVALID");
     }
+    if (definition.key === "security.auditHashKey" && secret.length < 32) throw new Error("CONFIG_AUDIT_HASH_KEY_INVALID");
     return secret;
   }
   if (definition.kind === "boolean") {

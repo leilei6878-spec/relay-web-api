@@ -39,6 +39,7 @@ function Portal() {
   const [billing, setBilling] = useState<BillingBody | null>(null);
   const [keys, setKeys] = useState<Record<string, unknown>[]>([]);
   const [members, setMembers] = useState<Record<string, unknown>[]>([]);
+  const [audits, setAudits] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -48,21 +49,27 @@ function Portal() {
       return;
     }
     const sessionBody = await sessionResponse.json() as SessionBody;
-    const [billingBody, keyBody, memberBody] = await Promise.all([
+    const [billingBody, keyBody, memberBody, auditBody] = await Promise.all([
       fetch("/api/saas/billing", { credentials: "include" }).then((response) => response.json() as Promise<BillingBody>),
       fetch("/api/saas/keys", { credentials: "include" }).then((response) => response.json() as Promise<{ keys?: Record<string, unknown>[] }>),
       fetch("/api/saas/members", { credentials: "include" }).then((response) => response.json() as Promise<{ members?: Record<string, unknown>[] }>),
+      ["owner", "admin"].includes(sessionBody.tenant.role)
+        ? fetch("/api/saas/audit?limit=100", { credentials: "include" }).then((response) => response.json() as Promise<{ events?: Record<string, unknown>[] }>)
+        : Promise.resolve({ events: [] as Record<string, unknown>[] }),
     ]);
     setSession(sessionBody);
     setBilling(billingBody);
     setKeys(keyBody.keys || []);
     setMembers(memberBody.members || []);
+    setAudits(auditBody.events || []);
     setLoading(false);
   }, []);
 
   useEffect(() => { void load().catch(() => setLoading(false)); }, [load]);
 
   if (loading || !session || !billing) return <main className="grid min-h-dvh place-items-center bg-bg text-sm text-muted">正在加载客户控制台…</main>;
+  const terminalOperations = new Set(audits.filter((row) => row.outcome !== "started").map((row) => row.operation_id));
+  const visibleAudits = audits.filter((row) => row.outcome !== "started" || !terminalOperations.has(row.operation_id));
 
   return (
     <SaasShell tenant={session.tenant}>
@@ -110,6 +117,7 @@ function Portal() {
           <Rows rows={billing.charges} empty="暂无官方 API 调用" render={(row) => <><div><p className="text-sm font-medium">{String(row.provider)} · {String(row.model)}</p><p className="text-xs text-subtle">{String(row.capability)} · {date(row.created_at)}</p></div><div className="text-right"><Badge tone={row.status === "settled" ? "ok" : row.status === "reserved" ? "warn" : "default"}>{String(row.status)}</Badge><p className="mt-1 text-xs text-muted">{money(row.charged_minor, billing.tenant.currency)}</p></div></>} />
         </section>
 
+        {["owner", "admin"].includes(session.tenant.role) ? <section className="rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">租户安全审计</h2><p className="mt-1 text-xs text-subtle">密钥、成员、资金、套餐、MFA 与会话操作均写入不可修改审计链；IP 和浏览器仅保留不可逆 HMAC。</p></div><Rows rows={visibleAudits} empty="暂无高风险操作" render={(row) => <><div><p className="text-sm font-medium">{String(row.action)} · {String(row.target_type)}</p><p className="font-mono text-[11px] text-subtle">{date(row.created_at)} · actor {String(row.actor_user_id).slice(0, 12)} · request {String(row.request_id).slice(0, 12)}</p></div><Badge tone={row.outcome === "succeeded" ? "ok" : row.outcome === "failed" ? "danger" : "warn"}>{String(row.outcome)}</Badge></>} /></section> : null}
         <section id="security" className="rounded-xl border border-border bg-surface p-5"><div className="flex items-center gap-2"><ShieldCheck className="size-4" /><h2 className="font-medium">账户安全</h2></div><p className="mt-2 text-sm text-muted">建议所有 Owner 和 Admin 启用 TOTP 多因素认证。</p><MfaDialog /></section>
         <section className="rounded-xl border border-border bg-surface"><div className="flex items-center justify-between border-b border-border px-5 py-4"><div><h2 className="font-medium">企业成员</h2><p className="mt-1 text-xs text-subtle">Owner、Admin、Billing、Developer、Viewer 权限分离。</p></div>{["owner", "admin"].includes(session.tenant.role) ? <InviteMemberDialog onSaved={load} /> : null}</div><div className="divide-y divide-border">{members.map((member) => <div key={String(member.id)} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"><div><p className="text-sm font-medium">{String(member.name)}</p><p className="text-xs text-subtle">{String(member.email)} · MFA {member.mfa_enabled ? "on" : "off"}</p></div><div className="flex items-center gap-2"><Badge tone={member.membership_status === "active" ? "ok" : "default"}>{String(member.role)}</Badge>{session.tenant.role === "owner" && member.id !== session.user.id ? <Button variant="ghost" size="sm" onClick={() => void toggleMember(member, load)}>{member.membership_status === "active" ? "停用" : "启用"}</Button> : null}</div></div>)}</div></section>
       </div>

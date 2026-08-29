@@ -8,7 +8,7 @@ import { commercialReadiness } from "./commercial-readiness.ts";
 
 async function database() {
   const pg = new PGlite(); await pg.waitReady;
-  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
+  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
 
@@ -35,6 +35,24 @@ test("retention policy is bounded and never offers billing-ledger deletion", asy
   const source = await readFile("src/lib/data-retention.ts", "utf8");
   assert.doesNotMatch(source, /delete from relay_billing_(transactions|entries)/i);
   assert.match(source, /Billing transactions\/entries are intentionally never deleted/);
+  assert.doesNotMatch(source, /delete from relay_tenant_audit_events/i);
+});
+
+test("monitor raises a critical signal for tenant audit operations missing a terminal outcome", async () => {
+  const { pg, db } = await database();
+  await pg.query("insert into relay_tenants(id,slug,name,billing_email) values ('audit-tenant','audit-tenant','Audit Tenant','audit@example.test')");
+  await pg.query("insert into relay_saas_users(id,email,email_normalized,name,password_hash) values ('audit-user','audit@example.test','audit@example.test','Audit User','hash')");
+  await pg.query(
+    `insert into relay_tenant_audit_events
+      (id,tenant_id,actor_user_id,actor_role,session_id,operation_id,action,target_type,outcome,request_id,ip_hmac,user_agent_hmac,created_at)
+     values ('audit-event','audit-tenant','audit-user','owner','audit-session','audit-operation','api_key.create','api_key','started','audit-request-1234',$1,$1,now()-interval '10 minutes')`,
+    ["a".repeat(64)],
+  );
+  const signals = await collectCommercialSignals(db);
+  const signal = signals.find((item) => item.code === "TENANT_AUDIT_INCOMPLETE");
+  assert.equal(signal?.severity, "critical");
+  assert.match(signal?.message || "", /1 tenant mutation audit operation/);
+  await pg.close();
 });
 
 test("commercial readiness fails closed on credentials, prices, replicas, backup and legal review", async () => {
@@ -54,6 +72,7 @@ test("commercial readiness fails closed on credentials, prices, replicas, backup
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("legal")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("Stripe")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("tax mode")));
+  assert.ok(enabled.blockers.some((blocker) => blocker.includes("audit HMAC")));
   await pg.close();
 });
 

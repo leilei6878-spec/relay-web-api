@@ -25,6 +25,7 @@ export const Route = createFileRoute("/api/saas/readiness")({
             adminMfaRequired: readiness.adminMfaRequired,
             adminMfaConfigured: readiness.adminMfaConfigured,
             customerPrivilegedMfaRequired: readiness.customerPrivilegedMfaRequired,
+            tenantAuditConfigured: readiness.tenantAuditConfigured,
             paymentProvider: readiness.paymentProvider,
             paymentReady: readiness.paymentReady,
             taxMode: readiness.taxMode,

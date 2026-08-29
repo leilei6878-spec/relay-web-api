@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Relay Public API
-  version: 0.10.0-rc12
+  version: 0.10.0-rc13
   description: |
     OpenAI-compatible API. Commercial `sk-saas-*` credentials are routed only
     to official provider APIs. Legacy `sk-relay-*` credentials are internal.

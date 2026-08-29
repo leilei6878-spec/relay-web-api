@@ -21,7 +21,7 @@ async function database() {
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
     "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql",
-    "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql",
+    "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
@@ -88,10 +88,12 @@ test("hard gates require deployment authorization while safe values hot-reload",
   const mfaRequired = await createCommercialConfigVersion({ key: "security.adminMfaRequired", value: true, reason: "administrator MFA gate", actor: "admin" }, db);
   const customerMfaRequired = await createCommercialConfigVersion({ key: "security.customerPrivilegedMfaRequired", value: true, reason: "customer privileged MFA gate", actor: "admin" }, db);
   const customerMfaAge = await createCommercialConfigVersion({ key: "security.customerMfaMaxAgeHours", value: 12, reason: "customer MFA freshness", actor: "admin" }, db);
+  const auditHashKey = await createCommercialConfigVersion({ key: "security.auditHashKey", value: "versioned-audit-hmac-key-0123456789abcdef", reason: "tenant audit correlation", actor: "admin" }, db);
   await activateCommercialConfigVersion(mfaSecret.id, "admin", db);
   await activateCommercialConfigVersion(mfaRequired.id, "admin", db);
   await activateCommercialConfigVersion(customerMfaRequired.id, "admin", db);
   await activateCommercialConfigVersion(customerMfaAge.id, "admin", db);
+  await activateCommercialConfigVersion(auditHashKey.id, "admin", db);
   const closed = await effectiveCommercialEnv({ RELAY_COMMERCIAL_ENABLED: "0", RELAY_PAYMENT_PROVIDER: "disabled" } as NodeJS.ProcessEnv, db);
   assert.equal(closed.RELAY_COMMERCIAL_ENABLED, "0");
   assert.equal(closed.RELAY_PAYMENT_PROVIDER, "stripe");
@@ -103,9 +105,19 @@ test("hard gates require deployment authorization while safe values hot-reload",
   assert.equal(opened.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA, "1");
   assert.equal(opened.RELAY_SAAS_MFA_MAX_AGE_HOURS, "12");
   assert.equal(opened.RELAY_ADMIN_TOTP_SECRET, "JBSWY3DPEHPK3PXP");
+  assert.equal(opened.RELAY_AUDIT_HASH_KEY, "versioned-audit-hmac-key-0123456789abcdef");
+  const publicConfig = await listCommercialConfig(db);
+  const auditConfig = publicConfig.find((entry) => entry.key === "security.auditHashKey")!;
+  assert.equal(auditConfig.active?.value, null);
+  assert.equal(auditConfig.active?.secret, true);
+  assert.ok(!JSON.stringify(auditConfig).includes("versioned-audit-hmac-key"));
   await assert.rejects(
     () => createCommercialConfigVersion({ key: "security.adminTotpSecret", value: "not-base32", reason: "bad", actor: "admin" }, db),
     /ADMIN_TOTP_SECRET_INVALID/,
+  );
+  await assert.rejects(
+    () => createCommercialConfigVersion({ key: "security.auditHashKey", value: "too-short", reason: "bad", actor: "admin" }, db),
+    /AUDIT_HASH_KEY_INVALID/,
   );
   await assert.rejects(
     () => createCommercialConfigVersion({ key: "email.webhookUrl", value: "http://insecure.test", reason: "bad", actor: "admin" }, db),

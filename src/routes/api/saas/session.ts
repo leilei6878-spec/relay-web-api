@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
   assertSaasSession,
-  clearSaasCookies,
   confirmSaasMfa,
   getSaasSession,
   loginSaas,
@@ -14,6 +13,7 @@ import {
   sendSaasVerification,
 } from "@/lib/saas-auth";
 import { cachedCommercialReadiness } from "@/lib/commercial-readiness";
+import { auditedTenantMutation } from "@/lib/tenant-audit";
 
 function responseWithCookies(body: unknown, cookies: string[], status = 200) {
   const headers = new Headers({ "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -23,6 +23,7 @@ function responseWithCookies(body: unknown, cookies: string[], status = 200) {
 
 function statusFor(error: string) {
   if (/RATE_LIMITED/.test(error)) return 429;
+  if (error === "TENANT_AUDIT_UNAVAILABLE") return 503;
   if (/INVALID_ORIGIN|CSRF/.test(error)) return 403;
   if (/INVALID_CREDENTIALS|MFA_REQUIRED/.test(error)) return 401;
   if (/unique|duplicate/i.test(error)) return 409;
@@ -82,10 +83,21 @@ export const Route = createFileRoute("/api/saas/session")({
           }
           const auth = await assertSaasSession(request, ["owner", "admin"], { requireCsrf: true });
           if (!auth.ok) return Response.json({ ok: false, error: auth.error }, { status: auth.status });
-          if (action === "mfa-start") return Response.json({ ok: true, ...(await startSaasMfa(auth.session)) });
+          if (action === "mfa-start") {
+            const result = await auditedTenantMutation(request, auth.session, {
+              action: "mfa.enroll.start", targetType: "saas_user", targetId: auth.session.userId,
+            }, () => startSaasMfa(auth.session));
+            return Response.json({ ok: true, ...result });
+          }
           if (action === "mfa-confirm") {
-            const result = await confirmSaasMfa(auth.session, String(body.code || ""));
-            return Response.json(result, { status: result.ok ? 200 : 400 });
+            const result = await auditedTenantMutation(request, auth.session, {
+              action: "mfa.enroll.confirm", targetType: "saas_user", targetId: auth.session.userId,
+            }, async () => {
+              const confirmed = await confirmSaasMfa(auth.session, String(body.code || ""));
+              if (!confirmed.ok) throw new Error(confirmed.error);
+              return confirmed;
+            });
+            return Response.json(result);
           }
           return Response.json({ ok: false, error: "UNKNOWN_ACTION" }, { status: 400 });
         } catch (error) {
@@ -96,8 +108,15 @@ export const Route = createFileRoute("/api/saas/session")({
       DELETE: async ({ request }) => {
         const auth = await assertSaasSession(request, undefined, { requireCsrf: true });
         if (!auth.ok) return Response.json({ ok: false, error: auth.error }, { status: auth.status });
-        const cookies = await logoutSaas(request);
-        return responseWithCookies({ ok: true }, cookies);
+        try {
+          const cookies = await auditedTenantMutation(request, auth.session, {
+            action: "session.logout", targetType: "saas_session", targetId: auth.session.sessionId,
+          }, () => logoutSaas(request));
+          return responseWithCookies({ ok: true }, cookies);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "SAAS_LOGOUT_FAILED";
+          return Response.json({ ok: false, error: message }, { status: statusFor(message) });
+        }
       },
     },
   },
