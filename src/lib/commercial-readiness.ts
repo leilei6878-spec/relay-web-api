@@ -29,6 +29,22 @@ export type CommercialReadiness = {
   taxMode: string;
 };
 
+function validOffsiteTarget(env: NodeJS.ProcessEnv) {
+  const endpoint = env.RELAY_BACKUP_S3_ENDPOINT?.trim() || "";
+  const bucket = env.RELAY_BACKUP_S3_BUCKET?.trim() || "";
+  if (!endpoint || !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket) || bucket.includes("..")) return false;
+  try {
+    const parsed = new URL(endpoint);
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash || !parsed.hostname || !["", "/"].includes(parsed.pathname)) return false;
+    const normalized = parsed.toString().replace(/\/$/, "");
+    const sourceEndpoint = (env.RELAY_S3_ENDPOINT || "").trim().replace(/\/$/, "");
+    const sourceBucket = (env.RELAY_S3_BUCKET || "").trim();
+    return normalized !== sourceEndpoint || bucket !== sourceBucket;
+  } catch {
+    return false;
+  }
+}
+
 export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, db?: Pick<Sql, "query">): Promise<CommercialReadiness> {
   if (env === process.env) env = await effectiveCommercialEnv(env, db);
   const enabled = env.RELAY_COMMERCIAL_ENABLED === "1";
@@ -96,7 +112,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   const gatewayReplicas = Math.max(1, Number(env.RELAY_GATEWAY_REPLICA_COUNT || 1));
   const missingProviderCredentials = activeProviders.filter((provider) => !officialProviders[provider as keyof typeof officialProviders]);
   const minWorkers = Math.max(1, Number(env.RELAY_COMMERCIAL_MIN_WORKERS || 2));
-  const offsiteBackupConfigured = Boolean(env.RELAY_BACKUP_S3_ENDPOINT?.trim() && env.RELAY_BACKUP_S3_BUCKET?.trim());
+  const offsiteBackupConfigured = validOffsiteTarget(env);
   const legalApproved = env.RELAY_LEGAL_APPROVED === "1";
   const adminMfaRequired = env.RELAY_REQUIRE_ADMIN_MFA === "1";
   const adminMfaConfigured = validAdminMfaConfig(env);

@@ -56,6 +56,7 @@ const env = {
   RELAY_REQUIRE_ADMIN_MFA: "1",
   RELAY_ADMIN_TOTP_SECRET: "JBSWY3DPEHPK3PXP",
   RELAY_REQUIRE_PRIVILEGED_SAAS_MFA: "1",
+  RELAY_SECRETS_KEY: "payment-test-secret-key-0123456789abcdef",
 } as NodeJS.ProcessEnv;
 
 function checkoutResponse(orderId: string, amount = 2500) {

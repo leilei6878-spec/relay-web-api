@@ -5,8 +5,10 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   statSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
@@ -46,6 +48,17 @@ const from = resolve(fromValue);
 const storageRoot = resolve(flagValue("--storage") || process.env.RELAY_STORAGE_DIR || "storage");
 const manifestPath = join(from, "manifest.json");
 if (!existsSync(manifestPath)) throw new Error("manifest.json missing — not a Relay backup");
+const fromStats = lstatSync(from);
+const manifestStats = lstatSync(manifestPath);
+if (!fromStats.isDirectory() || fromStats.isSymbolicLink() || !manifestStats.isFile() || manifestStats.isSymbolicLink()) {
+  throw new Error("backup root/manifest must be regular non-symlink paths");
+}
+const fromReal = realpathSync(from);
+
+function inside(path, root) {
+  const actual = realpathSync(path);
+  return actual === root || actual.startsWith(`${root}${sep}`);
+}
 
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
 if (manifest.kind !== "relay-web-api-backup" || manifest.version !== 2) {
@@ -55,10 +68,12 @@ if (manifest.complete !== true || (manifest.errors || []).length) throw new Erro
 if (!Array.isArray(manifest.files)) throw new Error("backup manifest files must be an array");
 
 const verifiedFiles = [];
+const backupStorageRoot = join(from, "storage");
 for (const entry of manifest.files) {
   const rel = safeRelativePath(entry.path);
   const source = join(from, "storage", rel);
-  if (!existsSync(source) || !statSync(source).isFile()) throw new Error(`backup file missing: ${entry.path}`);
+  if (!existsSync(source) || !lstatSync(source).isFile() || lstatSync(source).isSymbolicLink()) throw new Error(`backup file missing: ${entry.path}`);
+  if (!inside(source, fromReal) || !inside(source, realpathSync(backupStorageRoot))) throw new Error(`backup file escapes storage root: ${entry.path}`);
   const bytes = statSync(source).size;
   const digest = sha256(source);
   if (bytes !== entry.bytes) throw new Error(`backup size mismatch: ${entry.path}`);
@@ -71,11 +86,12 @@ let dumpPath = null;
 if (database.status === "dumped") {
   const dumpName = safeRelativePath(database.dump);
   dumpPath = join(from, dumpName);
-  if (!existsSync(dumpPath) || !statSync(dumpPath).isFile()) throw new Error("database dump is missing");
+  if (!existsSync(dumpPath) || !lstatSync(dumpPath).isFile() || lstatSync(dumpPath).isSymbolicLink()) throw new Error("database dump is missing");
+  if (!inside(dumpPath, fromReal)) throw new Error("database dump escapes backup root");
   if (statSync(dumpPath).size !== database.bytes || sha256(dumpPath) !== database.sha256) {
     throw new Error("database dump checksum mismatch");
   }
-  if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required to restore this database backup");
+  if (!dryRun && !process.env.DATABASE_URL) throw new Error("DATABASE_URL is required to restore this database backup");
 } else if (database.required) {
   throw new Error(`required database dump is unavailable (status=${database.status || "missing"})`);
 }

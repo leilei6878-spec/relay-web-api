@@ -1,0 +1,15 @@
+FROM minio/mc:latest AS mc
+
+FROM postgres:16-bookworm
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends nodejs git ca-certificates \
+  && git config --global --add safe.directory /workspace \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=mc /usr/bin/mc /usr/local/bin/mc
+
+WORKDIR /workspace
+
+ENTRYPOINT ["node", "scripts/offsite-backup.mjs"]
+CMD ["/opt/backups"]

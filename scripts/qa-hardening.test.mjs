@@ -30,3 +30,17 @@ test("production Compose requires secrets and publishes the documented host port
   assert.doesNotMatch(compose, /POSTGRES_PASSWORD:-relay|S3_SECRET_KEY:-relayrelay1/);
   assert.match(compose, /RELAY_BIND:-127\.0\.0\.1:8088/);
 });
+
+test("offsite backup runner is opt-in, version-matched and cannot write source or live storage", () => {
+  const compose = readFileSync("docker-compose.production.yml", "utf8");
+  const dockerfile = readFileSync("Dockerfile.backup", "utf8");
+  assert.match(compose, /backup:\s*[\s\S]*profiles: \["ops"\]/);
+  assert.match(compose, /\.:\/workspace:ro/);
+  assert.match(compose, /\$\{RELAY_STORAGE_HOST:-relay_storage\}:\/relay-storage:ro/);
+  assert.match(compose, /\$\{RELAY_BACKUP_HOST:-\/opt\/backups\}:\/opt\/backups/);
+  assert.doesNotMatch(compose, /\/var\/run\/docker\.sock/);
+  assert.match(dockerfile, /FROM postgres:16-bookworm/);
+  assert.match(dockerfile, /FROM minio\/mc:latest AS mc/);
+  assert.match(dockerfile, /COPY --from=mc \/usr\/bin\/mc \/usr\/local\/bin\/mc/);
+  assert.match(dockerfile, /safe\.directory \/workspace/);
+});

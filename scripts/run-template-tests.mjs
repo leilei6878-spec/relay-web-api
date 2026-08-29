@@ -10,11 +10,13 @@ const tests = [
   join("scripts", "migrate-json.test.mjs"),
   join("scripts", "migration-plan.test.mjs"),
   join("scripts", "openapi-contract.test.mjs"),
+  join("scripts", "object-media-manifest.test.mjs"),
   join("scripts", "pg-cutover.test.mjs"),
   join("scripts", "pg-reclaim.test.mjs"),
   join("scripts", "qa-hardening.test.mjs"),
   join("scripts", "secret-scan.test.mjs"),
   join("scripts", "sign-out-plan.test.mjs"),
+  join("scripts", "verify-offsite-snapshot.test.mjs"),
   join("src", "lib", "app-data", "app-data.test.ts"),
   join("src", "lib", "auth", "gate-identity.test.ts"),
 ].sort();

@@ -73,6 +73,17 @@ test("commercial readiness fails closed on credentials, prices, replicas, backup
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("Stripe")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("tax mode")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("audit HMAC")));
+  const unsafeBackup = await commercialReadiness({
+    RELAY_COMMERCIAL_ENABLED: "1", RELAY_BACKUP_S3_ENDPOINT: "http://backup.example.test",
+    RELAY_BACKUP_S3_BUCKET: "relay-offsite",
+  } as NodeJS.ProcessEnv, db);
+  assert.equal(unsafeBackup.offsiteBackupConfigured, false);
+  const sameBucket = await commercialReadiness({
+    RELAY_COMMERCIAL_ENABLED: "1", RELAY_BACKUP_S3_ENDPOINT: "https://media.example.test",
+    RELAY_BACKUP_S3_BUCKET: "relay-media", RELAY_S3_ENDPOINT: "https://media.example.test",
+    RELAY_S3_BUCKET: "relay-media",
+  } as NodeJS.ProcessEnv, db);
+  assert.equal(sameBucket.offsiteBackupConfigured, false);
   await pg.close();
 });
 
@@ -84,7 +95,10 @@ test("offsite backup includes database/storage/git and mirrors object media", as
   assert.match(source, /refuses a shallow Git repository/);
   assert.match(source, /git", \["clone"/);
   assert.match(source, /restored Git bundle HEAD mismatch/);
-  assert.match(source, /mc", \["mirror"/);
+  assert.match(source, /run\(mcBin, \["mirror"/);
+  assert.match(source, /verifyObjectMediaManifest/);
+  assert.match(source, /offsiteManifest\.complete = true/);
+  assert.match(source, /offsiteManifestSha256/);
   assert.match(source, /MC_CONFIG_DIR/);
   assert.match(source, /rmSync\(configDir/);
 });

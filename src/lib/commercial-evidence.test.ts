@@ -128,6 +128,7 @@ test("commercial readiness cannot be enabled by environment flags until every re
     RELAY_BACKUP_S3_ENDPOINT: "https://backup.example.test", RELAY_BACKUP_S3_BUCKET: "offsite", RELAY_LEGAL_APPROVED: "1",
     RELAY_PAYMENT_PROVIDER: "stripe", STRIPE_SECRET_KEY: "unit", STRIPE_WEBHOOK_SECRET: "unit", RELAY_TAX_MODE: "approved_exempt",
     RELAY_REQUIRE_ADMIN_MFA: "1", RELAY_ADMIN_TOTP_SECRET: "JBSWY3DPEHPK3PXP", RELAY_REQUIRE_PRIVILEGED_SAAS_MFA: "1",
+    RELAY_SECRETS_KEY: "evidence-test-secret-key-0123456789abcdef",
     RELAY_SAAS_REGISTRATION_ENABLED: "0",
   } as NodeJS.ProcessEnv;
   const blocked = await commercialReadiness(env, db);

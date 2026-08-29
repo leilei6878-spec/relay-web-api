@@ -97,12 +97,27 @@ Nightly host job:
 
 ```bash
 cd /opt/relay
-node scripts/offsite-backup.mjs /opt/backups
+docker compose --profile ops run --rm backup
 ```
 
-The command fails unless PostgreSQL, control-plane storage, Git and production
-object media are copied to the configured offsite target and the remote
-manifest can be read. Run a monthly restore in a separate project/account.
+The command fails unless PostgreSQL, control-plane storage, complete Git and
+production object media are copied to the configured offsite target. Object
+media are staged, SHA-256 inventoried, uploaded, downloaded again and compared
+before the final offsite manifest is marked complete. Raw live MinIO-volume
+archives are forbidden.
+
+For the monthly restore, download the offsite prefix and first run:
+
+```bash
+docker compose --profile ops run --rm --no-deps --entrypoint node backup \
+  scripts/verify-offsite-snapshot.mjs \
+  --from /opt/backups/relay-offsite-TIMESTAMP
+```
+
+Then restore PostgreSQL and the object bucket in a separate project/account,
+compare database and object manifests, boot the recovered commit, run smoke
+checks and record the printed offsite-manifest SHA-256 in independently
+controlled, reviewed `offsite_restore` evidence.
 
 ## Alerts
 
