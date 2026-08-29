@@ -1,5 +1,6 @@
 import { mockModeEnabled, readEnv } from "./env-mode";
 import { releaseIdentity } from "./release";
+import { adminMfaConfigured } from "./admin-password";
 
 export type CheckId =
   | "database"
@@ -65,6 +66,10 @@ export function runProductionReadinessCheck(env: NodeJS.ProcessEnv = process.env
   const db = readEnv("DATABASE_URL", env);
   const redis = readEnv("REDIS_URL", env);
   const admin = readEnv("RELAY_ADMIN_TOKEN", env);
+  const adminUsername = readEnv("RELAY_ADMIN_USERNAME", env);
+  const adminPasswordHash = readEnv("RELAY_ADMIN_PASSWORD_HASH", env);
+  const adminMfaRequired = readEnv("RELAY_REQUIRE_ADMIN_MFA", env) === "1";
+  const adminAuthOk = Boolean(admin && adminUsername && adminPasswordHash && (!adminMfaRequired || adminMfaConfigured(env)));
   const worker = readEnv("RELAY_WORKER_TOKEN", env);
   const s3Bucket = readEnv("RELAY_S3_BUCKET", env);
   const s3Key = readEnv("RELAY_S3_ACCESS_KEY", env) || readEnv("AWS_ACCESS_KEY_ID", env);
@@ -134,9 +139,9 @@ export function runProductionReadinessCheck(env: NodeJS.ProcessEnv = process.env
     item(
       "admin_auth",
       production,
-      admin ? "ok" : production ? "missing" : "degraded",
-      "RELAY_ADMIN_TOKEN set",
-      production ? "Admin secret missing" : "dev may mint admin token",
+      adminAuthOk ? "ok" : production ? "missing" : "degraded",
+      adminMfaRequired ? "Admin password + root recovery token + TOTP configured" : "Admin password + root recovery token configured",
+      production ? "RELAY_ADMIN_USERNAME, RELAY_ADMIN_PASSWORD_HASH and RELAY_ADMIN_TOKEN are required; TOTP is also required when its hard gate is enabled" : "dev may use automatic admin sessions",
     ),
     item(
       "provider_config",

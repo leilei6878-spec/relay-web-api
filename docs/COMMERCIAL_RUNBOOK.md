@@ -3,11 +3,14 @@
 ## Enablement checklist
 
 1. Obtain written commercial/API rights for every enabled upstream.
-2. Configure only official provider credentials.
+2. Configure administrator TOTP following `ADMIN_SECURITY.md`; verify a fresh
+   MFA login, logout/revocation and host-local root-token recovery. Keep remote
+   root-token login and Bearer overrides disabled.
+3. Configure only official provider credentials.
    Vertex AI requires a dedicated service-account JSON with only the required
    `aiplatform.endpoints.predict` permission, its project ID and location.
-3. Publish active price versions using the Commercial Operations page.
-4. Configure `RELAY_PAYMENT_PROVIDER=stripe`, a live `STRIPE_SECRET_KEY` (or
+4. Publish active price versions using the Commercial Operations page.
+5. Configure `RELAY_PAYMENT_PROVIDER=stripe`, a live `STRIPE_SECRET_KEY` (or
    restricted live key) and `STRIPE_WEBHOOK_SECRET`. Register the exact HTTPS
    endpoint `/api/webhooks/stripe` for `checkout.session.completed`,
    `checkout.session.async_payment_succeeded`,
@@ -17,30 +20,31 @@
    `charge.dispute.funds_withdrawn` and
    `charge.dispute.funds_reinstated`. The two funds events are selection-required
    Stripe events and must be explicitly enabled.
-5. Set `RELAY_TAX_MODE=stripe_automatic` after configuring Stripe Tax, or use
+6. Set `RELAY_TAX_MODE=stripe_automatic` after configuring Stripe Tax, or use
    `approved_exempt` only with written tax/legal approval for the actual sales
    scope. The readiness gate rejects an unconfigured tax mode.
-6. Deploy the HA contract: two Gateways, two Workers, managed multi-AZ
+7. Deploy the HA contract: two Gateways, two Workers, managed multi-AZ
    PostgreSQL/Redis and versioned replicated object storage.
-7. Configure and execute `scripts/offsite-backup.mjs`; restore the result in a
+8. Configure and execute `scripts/offsite-backup.mjs`; restore the result in a
    separate environment.
-8. Configure `RELAY_ALERT_WEBHOOK_URL` and an external HTTPS uptime probe.
-9. Complete counsel review of terms/privacy/DPA; set `RELAY_LEGAL_APPROVED=1`.
-10. Inspect `/api/saas/readiness` and resolve every infrastructure/configuration
-    blocker. `ready` must remain false until the evidence in step 14 is valid.
-11. Complete a test-mode Checkout/payment/refund/reconciliation drill, then a
+9. Configure `RELAY_ALERT_WEBHOOK_URL` and an external HTTPS uptime probe.
+10. Complete counsel review of terms/privacy/DPA; set `RELAY_LEGAL_APPROVED=1`.
+11. Inspect `/api/saas/readiness` and resolve every infrastructure/configuration
+    blocker. `ready` must remain false until the evidence in step 15 is valid.
+12. Complete a test-mode Checkout/payment/refund/reconciliation drill, then a
     separately approved live-mode minimum-value transaction and refund.
-12. Temporarily set `RELAY_ALLOW_LIVE_PROVIDER_CANARY=1`, run every exact active
+13. Temporarily set `RELAY_ALLOW_LIVE_PROVIDER_CANARY=1`, run every exact active
     provider/model/capability route in `/commercial-sandbox`, then close the
     canary hard gate. Readiness must report `missingCanaries: 0`.
-13. Run the 200-request, 5×20 concurrency and 24-hour soak gates.
-14. In `/commercial-readiness`, record the SHA-256 and external reference for
+14. Run the 200-request, 5×20 concurrency and 24-hour soak gates.
+15. In `/commercial-readiness`, record the SHA-256 and external reference for
     every requirement. Each passing item must name a reviewer other than the
     recording administrator. Record a later failure or withdrawal as a new
     `failed`/`revoked` version; never edit history.
-15. Verify `ready: true`, `paymentReady: true`, `missingEvidence: 0` and
+16. Verify `ready: true`, `paymentReady: true`, `adminMfaRequired: true`,
+    `adminMfaConfigured: true`, `missingEvidence: 0` and
     `missingCanaries: 0`.
-16. Only then set `RELAY_SAAS_REGISTRATION_ENABLED=1`.
+17. Only then set `RELAY_SAAS_REGISTRATION_ENABLED=1`.
 
 ## Configuration and secret rotation
 

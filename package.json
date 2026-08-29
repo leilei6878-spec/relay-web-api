@@ -1,6 +1,6 @@
 {
   "name": "app-builder-workspace",
-  "version": "0.10.0-rc7",
+  "version": "0.10.0-rc8",
   "private": true,
   "sideEffects": false,
   "type": "module",
@@ -28,6 +28,7 @@
     "test:leak": "node scripts/worker-leak-harness.mjs",
     "test:commercial": "node scripts/run-commercial-tests.mjs",
     "backup:offsite": "node scripts/offsite-backup.mjs",
+    "admin:mfa-secret": "node --experimental-strip-types --import ./scripts/register-ts-ext.mjs scripts/generate-admin-mfa.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

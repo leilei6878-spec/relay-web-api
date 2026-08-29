@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 const root = resolve(import.meta.dirname, "..");
 
 const tests = [
+  join("scripts", "admin-mfa-generator.test.mjs"),
   join("scripts", "backup-restore.test.mjs"),
   join("scripts", "browser-smoke-verdict.test.mjs"),
   join("scripts", "migrate-json.test.mjs"),

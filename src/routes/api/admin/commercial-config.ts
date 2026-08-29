@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { assertAdmin } from "@/lib/authz";
+import { assertAdminMfa } from "@/lib/authz";
 import {
   activateCommercialConfigVersion,
   createCommercialConfigVersion,
@@ -11,12 +11,12 @@ export const Route = createFileRoute("/api/admin/commercial-config")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const auth = await assertAdmin(request);
+        const auth = await assertAdminMfa(request);
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         return Response.json({ catalog: await listCommercialConfig() }, { headers: { "Cache-Control": "no-store" } });
       },
       POST: async ({ request }) => {
-        const auth = await assertAdmin(request);
+        const auth = await assertAdminMfa(request);
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         const body = await request.json().catch(() => ({})) as Record<string, unknown>;
         const action = String(body.action || "");

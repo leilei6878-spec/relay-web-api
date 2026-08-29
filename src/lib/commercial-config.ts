@@ -2,6 +2,7 @@ import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import { getSql, type Sql } from "./db";
 import { decryptSecretValue, encryptSecretValue } from "./secrets";
+import { base32Decode } from "./saas-crypto";
 import { uid } from "./utils";
 import { validateVertexProjectLocation, vertexAccessToken } from "./vertex-auth";
 
@@ -13,7 +14,7 @@ type Resolver = (hostname: string, options: { all: true; verbatim: true }) => Pr
 export type CommercialConfigDefinition = {
   key: string;
   label: string;
-  group: "launch" | "providers" | "payments" | "delivery" | "retention";
+  group: "launch" | "security" | "providers" | "payments" | "delivery" | "retention";
   kind: ConfigKind;
   envName: string;
   secret?: boolean;
@@ -29,6 +30,9 @@ export const COMMERCIAL_CONFIG_CATALOG: readonly CommercialConfigDefinition[] = 
   { key: "commercial.enabled", label: "商业流量", group: "launch", kind: "boolean", envName: "RELAY_COMMERCIAL_ENABLED", hardGate: true, description: "数据库配置只能在部署环境硬门禁允许时开启商业流量。" },
   { key: "registration.enabled", label: "客户注册", group: "launch", kind: "boolean", envName: "RELAY_SAAS_REGISTRATION_ENABLED", hardGate: true, description: "数据库配置和部署硬门禁必须同时开启。" },
   { key: "legal.approved", label: "法务批准", group: "launch", kind: "boolean", envName: "RELAY_LEGAL_APPROVED", hardGate: true, description: "仅记录经过外部法务批准的期望状态，不能替代真实批准。" },
+  { key: "security.adminMfaRequired", label: "管理员 MFA 强制", group: "security", kind: "boolean", envName: "RELAY_REQUIRE_ADMIN_MFA", hardGate: true, description: "商业上线必须由部署硬门禁和配置版本共同开启；开启后高风险管理操作要求 TOTP 会话。" },
+  { key: "security.adminTotpSecret", label: "管理员 TOTP Secret", group: "security", kind: "secret", envName: "RELAY_ADMIN_TOTP_SECRET", secret: true, description: "Base32 TOTP Secret；AES-256-GCM 加密且只显示提示。" },
+  { key: "security.adminSessionHours", label: "管理员会话小时", group: "security", kind: "integer", envName: "RELAY_ADMIN_SESSION_HOURS", min: 1, max: 24, description: "管理员浏览器会话固定有效期，不滑动续期。" },
   { key: "providers.openai.apiKey", label: "OpenAI API Key", group: "providers", kind: "secret", envName: "OPENAI_API_KEY", secret: true, test: "openai", description: "服务端官方 OpenAI API 凭证。" },
   { key: "providers.google.apiKey", label: "Google Gemini API Key", group: "providers", kind: "secret", envName: "GEMINI_API_KEY", secret: true, test: "google", description: "服务端官方 Gemini API 凭证。" },
   { key: "providers.vertex.serviceAccountJson", label: "Vertex Service Account", group: "providers", kind: "secret", envName: "GOOGLE_SERVICE_ACCOUNT_JSON", secret: true, test: "vertex", description: "Vertex AI 专用服务账号 JSON；只用于短期 OAuth Token。" },
@@ -96,8 +100,13 @@ export async function assertPublicCommercialWebhookUrl(value: string, resolver: 
 
 function normalizeValue(definition: CommercialConfigDefinition, value: unknown) {
   if (definition.kind === "secret") {
-    const secret = String(value || "").trim();
+    const secret = definition.key === "security.adminTotpSecret"
+      ? String(value || "").replace(/\s+/g, "").toUpperCase()
+      : String(value || "").trim();
     if (secret.length < 8 || secret.length > 20_000) throw new Error("CONFIG_SECRET_INVALID");
+    if (definition.key === "security.adminTotpSecret") {
+      if (!/^[A-Z2-7]{16,128}$/.test(secret) || base32Decode(secret).length < 10) throw new Error("CONFIG_ADMIN_TOTP_SECRET_INVALID");
+    }
     return secret;
   }
   if (definition.kind === "boolean") {

@@ -16,6 +16,7 @@ function nextDestination() {
 function LoginPage() {
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
+  const [totp, setTotp] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState("");
@@ -48,7 +49,7 @@ function LoginPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), password }),
+        body: JSON.stringify({ username: username.trim(), password, totp: totp || undefined }),
       });
       const body = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (!response.ok || !body.ok) {
@@ -110,6 +111,20 @@ function LoginPage() {
               autoFocus
             />
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="admin-totp">MFA 验证码（启用后必填）</Label>
+            <Input
+              id="admin-totp"
+              name="totp"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              value={totp}
+              onChange={(event) => setTotp(event.target.value.replace(/\D/g, ""))}
+              disabled={busy || checking}
+              placeholder="6 位动态验证码"
+            />
+          </div>
           {error && (
             <p role="alert" className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2.5 text-sm text-danger">
               {error}
@@ -120,7 +135,7 @@ function LoginPage() {
           </Button>
         </form>
 
-        <p className="mt-6 text-center text-[11px] leading-5 text-subtle">登录信息仅用于创建安全的管理会话。</p>
+        <p className="mt-6 text-center text-[11px] leading-5 text-subtle">登录成功后只创建短期随机会话；浏览器不会保存管理员根令牌。</p>
       </section>
     </main>
   );

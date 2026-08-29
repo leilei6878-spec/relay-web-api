@@ -23,7 +23,7 @@ type Entry = {
 };
 
 const groupNames: Record<string, string> = {
-  launch: "上线门禁", providers: "官方供应商", payments: "支付与税务", delivery: "邮件与告警", retention: "数据保留",
+  launch: "上线门禁", security: "管理员安全", providers: "官方供应商", payments: "支付与税务", delivery: "邮件与告警", retention: "数据保留",
 };
 
 function CommercialConfigPage() {

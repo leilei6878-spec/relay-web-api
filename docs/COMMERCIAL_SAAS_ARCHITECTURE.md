@@ -9,7 +9,8 @@ readiness endpoint returns `ready: true` and upstream contracts are approved.
 |---|---|---|
 | `sk-saas-*` | Paying tenants | Official OpenAI, Gemini API, Vertex AI or Leonardo API only |
 | `sk-relay-*` | Internal legacy operations | Web-account Worker pool |
-| `ad-relay-*` / admin cookie | Internal administrator | Control plane |
+| `as-relay-*` HttpOnly cookie | Internal administrator browser | Control plane |
+| `ad-relay-*` | Loopback recovery/machine administrator | Control plane |
 | `wk-relay-*` | Trusted Worker | Job execution only |
 
 Commercial routing resolves `openai:<model>`, `google:<model>`,
@@ -41,6 +42,11 @@ official-provider usage/asset settlement paths are authoritative.
 - TOTP secrets use the encrypted secret store; recovery codes are hash-only.
 - Tenant API keys are 256-bit `sk-saas-*` secrets, shown once and hash-only at
   rest. Listing returns hints only.
+- Administrator browsers receive short-lived random `as-relay-*` sessions;
+  PostgreSQL stores only their hashes. The `ad-relay-*` root token is
+  loopback-only recovery/machine authentication in production. Commercial
+  administrator surfaces require a TOTP-verified session when the MFA gate is
+  enabled. See [`ADMIN_SECURITY.md`](./ADMIN_SECURITY.md).
 - Effective key scopes and model allowlists are the intersection of the key and
   its plan features. A disjoint plan/key model set denies every model rather
   than falling back to unrestricted access.
@@ -115,6 +121,7 @@ not automatically reactivate access; an operator must review the account.
 - valid append-only launch evidence for provider rights, every exact price
   version, legal/tax approval, live payments, email delivery when registration
   is enabled, HA, offsite restore, alert delivery, load, soak and CI gates.
+- administrator MFA hard gate plus a valid encrypted TOTP secret.
 
 The required infrastructure contract is
 [`deploy/commercial-ha-contract.yaml`](../deploy/commercial-ha-contract.yaml).

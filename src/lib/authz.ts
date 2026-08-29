@@ -4,12 +4,16 @@ import { getRequest } from "@tanstack/react-start/server";
 import { findApiKey, type ApiKeyRecord } from "./api-keys";
 import { findTenantApiKey } from "./saas-api-keys";
 import type { CommercialApiKey } from "./commercial-types";
+import { findAdminSession } from "./admin-sessions";
+import { effectiveCommercialEnv } from "./commercial-config";
+import type { Sql } from "./db";
+import { allowAdminBearer } from "./admin-password";
 
 const DIR = resolve("storage");
 export const ADMIN_COOKIE = "relay_admin";
 
 export type Principal =
-  | { kind: "admin"; token: string }
+  | { kind: "admin"; token: string; mfaVerified: boolean; authMethod: "bearer" | "password" | "recovery_token" | "development" }
   | { kind: "customer"; token: string; record: ApiKeyRecord }
   | { kind: "commercial"; token: string; record: CommercialApiKey }
   | { kind: "worker"; token: string };
@@ -81,16 +85,20 @@ export function readCookie(request: Request, name: string) {
   return "";
 }
 
-export function adminCookieHeader(token: string, secure = false) {
+export function adminCookieHeader(token: string, secure = false, maxAge = 12 * 3600) {
   const parts = [
     `${ADMIN_COOKIE}=${encodeURIComponent(token)}`,
     "Path=/",
     "HttpOnly",
-    "Max-Age=86400",
-    "SameSite=Lax",
+    `Max-Age=${Math.max(0, Math.floor(maxAge))}`,
+    "SameSite=Strict",
   ];
   if (secure) parts.push("Secure");
   return parts.join("; ");
+}
+
+export function clearAdminCookieHeader(secure = false) {
+  return adminCookieHeader("", secure, 0);
 }
 
 /**
@@ -107,7 +115,9 @@ export function allowAutomaticAdminLogin(
   return env.NODE_ENV !== "production" && env.RELAY_REQUIRE_ADMIN_LOGIN !== "1";
 }
 
-export async function classify(request: Request): Promise<Principal | null> {
+type DbLike = Pick<Sql, "query">;
+
+export async function classify(request: Request, db?: DbLike): Promise<Principal | null> {
   const bearer = bearerToken(request);
   const cookie = readCookie(request, ADMIN_COOKIE);
   const admin = await ensureAdminToken();
@@ -115,7 +125,7 @@ export async function classify(request: Request): Promise<Principal | null> {
   // Authorization header always wins. Same-origin admin cookie must not
   // shadow a customer API key (the in-app API tester used to 401 this way).
   if (bearer) {
-    if (bearer === admin) return { kind: "admin", token: bearer };
+    if (bearer === admin && allowAdminBearer(request)) return { kind: "admin", token: bearer, mfaVerified: true, authMethod: "bearer" };
     if (bearer === worker) return { kind: "worker", token: bearer };
     if (bearer.startsWith("sk-saas-")) {
       const commercial = await findTenantApiKey(bearer);
@@ -128,12 +138,15 @@ export async function classify(request: Request): Promise<Principal | null> {
     }
     return null;
   }
-  if (cookie && cookie === admin) return { kind: "admin", token: cookie };
+  if (cookie) {
+    const session = await findAdminSession(cookie, db);
+    if (session) return { kind: "admin", token: cookie, mfaVerified: session.mfaVerified, authMethod: session.authMethod };
+  }
   return null;
 }
 
-export async function assertAdmin(request: Request) {
-  const p = await classify(request);
+export async function assertAdmin(request: Request, db?: DbLike) {
+  const p = await classify(request, db);
   if (!p || p.kind !== "admin") return { ok: false as const, status: 401, error: "需要管理员凭证" };
   const unsafe = !["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase());
   const browserCookieAuth = !bearerToken(request) && Boolean(readCookie(request, ADMIN_COOKIE));
@@ -141,6 +154,17 @@ export async function assertAdmin(request: Request) {
     return { ok: false as const, status: 403, error: "管理请求来源校验失败" };
   }
   return { ok: true as const, principal: p };
+}
+
+export async function assertAdminMfa(request: Request, db?: DbLike) {
+  const auth = await assertAdmin(request, db);
+  if (!auth.ok) return auth;
+  const env = await effectiveCommercialEnv(process.env, db);
+  const required = env.RELAY_REQUIRE_ADMIN_MFA === "1" || env.RELAY_COMMERCIAL_ENABLED === "1";
+  if (required && !auth.principal.mfaVerified) {
+    return { ok: false as const, status: 403, error: "高风险管理操作需要 MFA 会话" };
+  }
+  return auth;
 }
 
 export function trustedMutationOrigin(request: Request) {

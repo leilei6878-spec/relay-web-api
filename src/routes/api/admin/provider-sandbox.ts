@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { assertAdmin } from "@/lib/authz";
+import { assertAdminMfa } from "@/lib/authz";
 import { listProviderSandboxRuns, runProviderSandbox } from "@/lib/provider-sandbox";
 import type { CommercialCapability } from "@/lib/commercial-types";
 import type { OfficialProvider } from "@/lib/official-providers";
@@ -8,7 +8,7 @@ export const Route = createFileRoute("/api/admin/provider-sandbox")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const auth = await assertAdmin(request);
+        const auth = await assertAdminMfa(request);
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         return Response.json({
           hardGateOpen: process.env.RELAY_ALLOW_LIVE_PROVIDER_CANARY === "1",
@@ -17,7 +17,7 @@ export const Route = createFileRoute("/api/admin/provider-sandbox")({
         }, { headers: { "Cache-Control": "no-store" } });
       },
       POST: async ({ request }) => {
-        const auth = await assertAdmin(request);
+        const auth = await assertAdminMfa(request);
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         const body = await request.json().catch(() => ({})) as Record<string, unknown>;
         try {

@@ -1,4 +1,5 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { base32Decode, verifyTotp } from "./saas-crypto";
 
 const PREFIX = "scrypt";
 const KEY_BYTES = 32;
@@ -10,6 +11,11 @@ function safeTextEqual(left: string, right: string) {
   const a = createHash("sha256").update(left).digest();
   const b = createHash("sha256").update(right).digest();
   return timingSafeEqual(a, b);
+}
+
+export function verifyAdminRecoveryToken(candidate: string, expected: string) {
+  if (!candidate || !expected || candidate.length > 1024 || expected.length > 1024) return false;
+  return safeTextEqual(candidate, expected);
 }
 
 export function hashAdminPassword(password: string, salt = randomBytes(16)) {
@@ -38,6 +44,43 @@ export function verifyAdminCredentials(
   } catch {
     return false;
   }
+}
+
+export function adminMfaConfigured(env: NodeJS.ProcessEnv = process.env) {
+  const secret = (env.RELAY_ADMIN_TOTP_SECRET || "").replace(/\s+/g, "").toUpperCase();
+  if (!/^[A-Z2-7]{16,128}$/.test(secret)) return false;
+  try {
+    return base32Decode(secret).length >= 10;
+  } catch {
+    return false;
+  }
+}
+
+export function verifyAdminTotp(code: string, env: NodeJS.ProcessEnv = process.env, at = Date.now()) {
+  if (!adminMfaConfigured(env)) return false;
+  try {
+    return verifyTotp(String(env.RELAY_ADMIN_TOTP_SECRET || "").replace(/\s+/g, "").toUpperCase(), code, at);
+  } catch {
+    return false;
+  }
+}
+
+function directLoopbackRequest(request: Request) {
+  if (request.headers.get("forwarded") || request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || request.headers.get("cf-connecting-ip")) return false;
+  const host = new URL(request.url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
+export function allowAdminTokenSessionLogin(request: Request, env: NodeJS.ProcessEnv = process.env) {
+  if (env.NODE_ENV !== "production") return true;
+  if (env.RELAY_ALLOW_REMOTE_ADMIN_TOKEN_LOGIN === "1") return true;
+  return directLoopbackRequest(request);
+}
+
+export function allowAdminBearer(request: Request, env: NodeJS.ProcessEnv = process.env) {
+  if (env.NODE_ENV !== "production") return true;
+  if (env.RELAY_ALLOW_REMOTE_ADMIN_BEARER === "1") return true;
+  return directLoopbackRequest(request);
 }
 
 export function adminLoginAttemptKey(request: Request) {

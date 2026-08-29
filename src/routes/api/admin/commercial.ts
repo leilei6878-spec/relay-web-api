@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { assertAdmin } from "@/lib/authz";
+import { assertAdminMfa } from "@/lib/authz";
 import { commercialAdminSnapshot, postBalanceAdjustment, publishPrice, settleManualOrder } from "@/lib/saas-billing";
 import { getSql } from "@/lib/db";
 import { createStripeRefund, reconcileStripeOrder } from "@/lib/payments";
@@ -10,13 +10,13 @@ export const Route = createFileRoute("/api/admin/commercial")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const auth = await assertAdmin(request);
-        if (!auth.ok) return Response.json({ error: auth.error }, { status: 401 });
+        const auth = await assertAdminMfa(request);
+        if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         return Response.json(await commercialAdminSnapshot());
       },
       POST: async ({ request }) => {
-        const auth = await assertAdmin(request);
-        if (!auth.ok) return Response.json({ error: auth.error }, { status: 401 });
+        const auth = await assertAdminMfa(request);
+        if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
         const action = String(body.action || "");
         try {

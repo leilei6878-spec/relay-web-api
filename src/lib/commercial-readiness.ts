@@ -2,6 +2,7 @@ import { getSql, type Sql } from "./db";
 import { effectiveCommercialEnv } from "./commercial-config";
 import { commercialEvidenceStatus } from "./commercial-evidence";
 import { parseVertexServiceAccount, validateVertexProjectLocation } from "./vertex-auth";
+import { adminMfaConfigured as validAdminMfaConfig } from "./admin-password";
 
 export type CommercialReadiness = {
   enabled: boolean;
@@ -16,6 +17,8 @@ export type CommercialReadiness = {
   gatewayReplicas: number;
   offsiteBackupConfigured: boolean;
   legalApproved: boolean;
+  adminMfaRequired: boolean;
+  adminMfaConfigured: boolean;
   registrationEnabled: boolean;
   paymentProvider: string;
   paymentReady: boolean;
@@ -84,6 +87,8 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   const minWorkers = Math.max(1, Number(env.RELAY_COMMERCIAL_MIN_WORKERS || 2));
   const offsiteBackupConfigured = Boolean(env.RELAY_BACKUP_S3_ENDPOINT?.trim() && env.RELAY_BACKUP_S3_BUCKET?.trim());
   const legalApproved = env.RELAY_LEGAL_APPROVED === "1";
+  const adminMfaRequired = env.RELAY_REQUIRE_ADMIN_MFA === "1";
+  const adminMfaConfigured = validAdminMfaConfig(env);
   const paymentProvider = (env.RELAY_PAYMENT_PROVIDER || "disabled").trim();
   const stripeSecret = env.STRIPE_SECRET_KEY?.trim() || "";
   const stripeWebhookSecret = env.STRIPE_WEBHOOK_SECRET?.trim() || "";
@@ -104,6 +109,8 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   if (enabled && gatewayReplicas < 2) blockers.push("at least two gateway replicas required");
   if (enabled && !offsiteBackupConfigured) blockers.push("offsite backup target not configured");
   if (enabled && !legalApproved) blockers.push("commercial legal approval not recorded");
+  if (enabled && !adminMfaRequired) blockers.push("administrator MFA hard gate not enabled");
+  if (enabled && !adminMfaConfigured) blockers.push("administrator TOTP secret missing or invalid");
   if (enabled && paymentProvider !== "stripe") blockers.push("Stripe payment provider not configured");
   if (enabled && paymentProvider === "stripe" && (!stripeSecret || !stripeWebhookSecret)) blockers.push("Stripe API or webhook secret missing");
   if (enabled && env.NODE_ENV === "production" && paymentProvider === "stripe" && !stripeLiveKey) blockers.push("Stripe live restricted/secret key required");
@@ -122,6 +129,8 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     gatewayReplicas,
     offsiteBackupConfigured,
     legalApproved,
+    adminMfaRequired,
+    adminMfaConfigured,
     registrationEnabled: enabled && env.RELAY_SAAS_REGISTRATION_ENABLED === "1",
     paymentProvider,
     paymentReady,

@@ -3,11 +3,17 @@ import { test } from "node:test";
 import {
   adminLoginAttemptKey,
   adminLoginBlocked,
+  adminMfaConfigured,
+  allowAdminBearer,
+  allowAdminTokenSessionLogin,
   hashAdminPassword,
   recordAdminLoginResult,
   resetAdminLoginAttemptsForTests,
   verifyAdminCredentials,
+  verifyAdminRecoveryToken,
+  verifyAdminTotp,
 } from "./admin-password.ts";
+import { totpCode } from "./saas-crypto.ts";
 
 test("administrator password hashes verify without storing plaintext", () => {
   const encoded = hashAdminPassword("correct horse", Buffer.alloc(16, 7));
@@ -31,6 +37,28 @@ test("administrator credential verification fails closed on missing or malformed
     } as NodeJS.ProcessEnv),
     false,
   );
+});
+
+test("administrator TOTP configuration is bounded and verifies a rolling code", () => {
+  const secret = "JBSWY3DPEHPK3PXP";
+  const at = 2_000_000_000_000;
+  const env = { RELAY_ADMIN_TOTP_SECRET: secret } as NodeJS.ProcessEnv;
+  assert.equal(adminMfaConfigured(env), true);
+  assert.equal(verifyAdminTotp(totpCode(secret, at), env, at), true);
+  assert.equal(verifyAdminTotp("000000", env, at), totpCode(secret, at) === "000000");
+  assert.equal(adminMfaConfigured({ RELAY_ADMIN_TOTP_SECRET: "not-base32" } as NodeJS.ProcessEnv), false);
+});
+
+test("administrator root-token exchange is constant-time and production-local by default", () => {
+  assert.equal(verifyAdminRecoveryToken("ad-relay-secret", "ad-relay-secret"), true);
+  assert.equal(verifyAdminRecoveryToken("ad-relay-wrong", "ad-relay-secret"), false);
+  assert.equal(allowAdminTokenSessionLogin(new Request("https://relay.example/api/admin/session"), { NODE_ENV: "production" } as NodeJS.ProcessEnv), false);
+  assert.equal(allowAdminTokenSessionLogin(new Request("http://127.0.0.1/api/admin/session"), { NODE_ENV: "production" } as NodeJS.ProcessEnv), true);
+  assert.equal(allowAdminTokenSessionLogin(new Request("http://127.0.0.1/api/admin/session", { headers: { "x-forwarded-for": "127.0.0.1" } }), { NODE_ENV: "production" } as NodeJS.ProcessEnv), false);
+  assert.equal(allowAdminTokenSessionLogin(new Request("https://relay.example/api/admin/session"), { NODE_ENV: "development" } as NodeJS.ProcessEnv), true);
+  assert.equal(allowAdminBearer(new Request("https://relay.example/api/admin/metrics"), { NODE_ENV: "production" } as NodeJS.ProcessEnv), false);
+  assert.equal(allowAdminBearer(new Request("http://localhost/api/admin/metrics"), { NODE_ENV: "production" } as NodeJS.ProcessEnv), true);
+  assert.equal(allowAdminBearer(new Request("https://relay.example/api/admin/metrics"), { NODE_ENV: "production", RELAY_ALLOW_REMOTE_ADMIN_BEARER: "1" } as NodeJS.ProcessEnv), true);
 });
 
 test("administrator login failures are bounded per client window", () => {

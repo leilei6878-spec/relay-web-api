@@ -20,7 +20,7 @@ function runScript(name, args, env = {}) {
 test("backup/restore: PGlite dump JSON snapshot into a new database and verify rows", async () => {
   const pg = new PGlite();
   await pg.waitReady;
-  for (const name of ["0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql", "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql"]) {
+  for (const name of ["0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql", "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql"]) {
     await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   }
   await pg.query(
@@ -42,7 +42,7 @@ test("backup/restore: PGlite dump JSON snapshot into a new database and verify r
 
   const pg2 = new PGlite();
   await pg2.waitReady;
-  for (const name of ["0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql", "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql"]) {
+  for (const name of ["0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql", "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql"]) {
     await pg2.exec(await readFile(`migrations/${name}`, "utf8"));
   }
   const snap = JSON.parse(readFileSync(join(dir, "snapshot.json"), "utf8"));
@@ -61,7 +61,7 @@ test("backup/restore: PGlite dump JSON snapshot into a new database and verify r
   const req = await pg2.query("select status from relay_requests where id=$1", ["R-b"]);
   assert.equal(req.rows[0].status, "done");
   const ver = await pg2.query("select value from relay_meta where key='schema_version'");
-  assert.equal(ver.rows[0].value, "11");
+  assert.equal(ver.rows[0].value, "12");
   rmSync(dir, { recursive: true, force: true });
 });
 

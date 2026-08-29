@@ -4,6 +4,7 @@ import {
   Cable,
   ClipboardCheck,
   LayoutDashboard,
+  LogOut,
   Menu,
   Radio,
   ScrollText,
@@ -41,6 +42,14 @@ function redirectToLogin() {
   const next = `${window.location.pathname}${window.location.search}`;
   const safeNext = next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/login") ? next : "/";
   window.location.replace(`/login?next=${encodeURIComponent(safeNext)}`);
+}
+
+async function logoutAdmin() {
+  try {
+    await fetch("/api/admin/session", { method: "DELETE", credentials: "include" });
+  } finally {
+    window.location.replace("/login");
+  }
 }
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
@@ -197,7 +206,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="mt-8 flex-1">
           <NavLinks />
         </div>
-        <p className="px-1 text-[11px] leading-relaxed text-subtle">{nextStep({ accounts, proxies, settings }).title}</p>
+        <div className="space-y-2"><Button className="w-full justify-start" variant="ghost" size="sm" onClick={() => void logoutAdmin()}><LogOut className="size-4" />退出登录</Button><p className="px-1 text-[11px] leading-relaxed text-subtle">{nextStep({ accounts, proxies, settings }).title}</p></div>
       </aside>
 
       <div className="md:pl-60">
@@ -210,6 +219,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Brand />
               <div className="mt-6">
                 <NavLinks onNavigate={() => setOpen(false)} />
+                <Button className="mt-4 w-full justify-start" variant="ghost" onClick={() => void logoutAdmin()}><LogOut className="size-4" />退出登录</Button>
               </div>
             </SheetContent>
           </Sheet>

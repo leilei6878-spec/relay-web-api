@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { assertAdmin } from "@/lib/authz";
+import { assertAdminMfa } from "@/lib/authz";
 import { effectiveCommercialEnv } from "@/lib/commercial-config";
 import {
   COMMERCIAL_EVIDENCE_CATALOG,
@@ -24,12 +24,12 @@ export const Route = createFileRoute("/api/admin/commercial-evidence")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const auth = await assertAdmin(request);
+        const auth = await assertAdminMfa(request);
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         return Response.json(await snapshot(), { headers: { "Cache-Control": "no-store" } });
       },
       POST: async ({ request }) => {
-        const auth = await assertAdmin(request);
+        const auth = await assertAdminMfa(request);
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
         const body = await request.json().catch(() => ({})) as Record<string, unknown>;
         try {
