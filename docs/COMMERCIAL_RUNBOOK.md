@@ -4,6 +4,8 @@
 
 1. Obtain written commercial/API rights for every enabled upstream.
 2. Configure only official provider credentials.
+   Vertex AI requires a dedicated service-account JSON with only the required
+   `aiplatform.endpoints.predict` permission, its project ID and location.
 3. Publish active price versions using the Commercial Operations page.
 4. Configure `RELAY_PAYMENT_PROVIDER=stripe`, a live `STRIPE_SECRET_KEY` (or
    restricted live key) and `STRIPE_WEBHOOK_SECRET`. Register the exact HTTPS

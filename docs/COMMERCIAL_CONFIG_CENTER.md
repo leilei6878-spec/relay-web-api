@@ -40,6 +40,7 @@ Connection tests never accept an administrator-supplied upstream URL:
 |---|---|
 | OpenAI key | `GET https://api.openai.com/v1/models` |
 | Gemini key | `GET https://generativelanguage.googleapis.com/v1beta/models?pageSize=1` |
+| Vertex service account | signed RS256 JWT exchange at `https://oauth2.googleapis.com/token` |
 | Leonardo key | `GET https://cloud.leonardo.ai/api/rest/v2/models` |
 | Stripe key | `GET https://api.stripe.com/v1/balance` |
 | Stripe Webhook secret | local `whsec_` format validation |
@@ -62,10 +63,10 @@ be true. A compromised administrator session therefore cannot open commercial
 traffic, registration or legal approval when operations has closed the hard
 gate.
 
-Provider keys, Leonardo model mapping, payment provider, Stripe keys, tax mode,
-email/alert Webhooks, recharge maximum and retention windows can use validated
-active versions. If no version is active, the existing environment variable is
-used.
+Provider keys, Vertex service account/project/location, Leonardo model mapping,
+payment provider, Stripe keys, tax mode, email/alert Webhooks, recharge maximum
+and retention windows can use validated active versions. If no version is
+active, the existing environment variable is used.
 
 ## Rotation procedure
 

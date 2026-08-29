@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
@@ -142,6 +143,41 @@ test("connection tests use fixed official read-only endpoints and sanitize failu
     });
     assert.equal(tested.validationStatus, "passed");
   }
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const vertexService = JSON.stringify({
+    type: "service_account", project_id: "config-vertex-project", private_key_id: "c".repeat(40),
+    private_key: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+    client_email: "relay@config-vertex-project.iam.gserviceaccount.com", token_uri: "https://oauth2.googleapis.com/token",
+  });
+  const vertex = await createCommercialConfigVersion({ key: "providers.vertex.serviceAccountJson", value: vertexService, reason: "Vertex connection", actor: "admin" }, db);
+  const testedVertex = await testCommercialConfigVersion(vertex.id, "admin", {
+    db,
+    fetcher: (async (url: string | URL | Request) => {
+      assert.equal(String(url), "https://oauth2.googleapis.com/token");
+      return Response.json({ access_token: "vertex-config-token", token_type: "Bearer", expires_in: 3600 });
+    }) as typeof fetch,
+  });
+  assert.equal(testedVertex.validationStatus, "passed");
+  await activateCommercialConfigVersion(vertex.id, "admin", db);
+  const vertexProject = await createCommercialConfigVersion({ key: "providers.vertex.projectId", value: "config-vertex-project", reason: "Vertex project", actor: "admin" }, db);
+  const vertexLocation = await createCommercialConfigVersion({ key: "providers.vertex.location", value: "us-central1", reason: "Vertex location", actor: "admin" }, db);
+  await activateCommercialConfigVersion(vertexProject.id, "admin", db);
+  await activateCommercialConfigVersion(vertexLocation.id, "admin", db);
+  let vertexCalls = 0;
+  const dynamicVertex = await officialChat(
+    { resolved: resolveOfficialModel("vertex:gemini-config"), messages: [{ role: "user", content: "hello" }], tenantId: "tenant-config" },
+    {
+      db,
+      fetcher: (async (url: string | URL | Request) => {
+        vertexCalls += 1;
+        if (String(url) === "https://oauth2.googleapis.com/token") return Response.json({ access_token: "dynamic-vertex-token", token_type: "Bearer", expires_in: 3600 });
+        assert.equal(String(url), "https://us-central1-aiplatform.googleapis.com/v1/projects/config-vertex-project/locations/us-central1/publishers/google/models/gemini-config:generateContent");
+        return Response.json({ candidates: [{ content: { parts: [{ text: "dynamic vertex" }] }, finishReason: "STOP" }], usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 } });
+      }) as typeof fetch,
+    },
+  );
+  assert.equal(dynamicVertex.ok, true);
+  assert.equal(vertexCalls, 2);
   const failed = await createCommercialConfigVersion({ key: "providers.google.apiKey", value: "failing-google-key", reason: "failure", actor: "admin" }, db);
   const testedFailure = await testCommercialConfigVersion(failed.id, "admin", {
     db, fetcher: (async () => Response.json({ error: { message: "contains-sensitive-provider-detail" } }, { status: 401 })) as typeof fetch,

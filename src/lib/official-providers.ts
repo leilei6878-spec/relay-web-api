@@ -1,7 +1,8 @@
 import { effectiveCommercialEnv } from "./commercial-config";
 import type { Sql } from "./db";
+import { parseVertexServiceAccount, vertexAccessToken, vertexGenerateContentEndpoint } from "./vertex-auth";
 
-export type OfficialProvider = "openai" | "google" | "leonardo";
+export type OfficialProvider = "openai" | "google" | "vertex" | "leonardo";
 
 export type ResolvedOfficialModel = {
   provider: OfficialProvider;
@@ -54,12 +55,12 @@ export function resolveOfficialModel(input: string): ResolvedOfficialModel {
   const qualified = raw.match(/^(openai|google|gemini|vertex|leonardo)[:/](.+)$/i);
   if (qualified) {
     const prefix = qualified[1]!.toLowerCase();
-    const provider: OfficialProvider = prefix === "openai" ? "openai" : prefix === "leonardo" ? "leonardo" : "google";
+    const provider: OfficialProvider = prefix === "openai" ? "openai" : prefix === "leonardo" ? "leonardo" : prefix === "vertex" ? "vertex" : "google";
     return { provider, model: qualified[2]!, publicModel: raw };
   }
   if (/^(gpt-|o\d|chatgpt-)/i.test(raw)) return { provider: "openai", model: raw, publicModel: raw };
   if (/^(gemini-|imagen-)/i.test(raw)) return { provider: "google", model: raw, publicModel: raw };
-  throw new Error("COMMERCIAL_MODEL_MUST_BE_OFFICIAL: use openai:<model>, google:<model>, or leonardo:<model-id>");
+  throw new Error("COMMERCIAL_MODEL_MUST_BE_OFFICIAL: use openai:<model>, google:<model>, vertex:<model>, or leonardo:<model-id>");
 }
 
 function textFromOpenAi(body: Record<string, unknown>) {
@@ -92,6 +93,29 @@ function googleContents(messages: { role?: string; content?: unknown }[]) {
     }
     return { role, parts };
   }).filter((content) => content.parts.length > 0);
+}
+
+async function vertexGenerate(
+  env: NodeJS.ProcessEnv,
+  model: string,
+  payload: Record<string, unknown>,
+  fetcher: typeof fetch,
+  timeout: number,
+) {
+  const serviceAccountJson = env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim() || "";
+  if (!serviceAccountJson) throw new Error("VERTEX_SERVICE_ACCOUNT_MISSING");
+  const credentials = parseVertexServiceAccount(serviceAccountJson);
+  const project = env.GOOGLE_CLOUD_PROJECT?.trim() || credentials.project_id;
+  const location = env.GOOGLE_CLOUD_LOCATION?.trim() || "us-central1";
+  const token = await vertexAccessToken(serviceAccountJson, { fetcher });
+  const endpoint = vertexGenerateContentEndpoint(project, location, model);
+  const response = await fetcher(endpoint, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(timeout),
+  });
+  return { response, body: record(await response.json().catch(() => ({}))) };
 }
 
 export async function officialChat(
@@ -141,6 +165,39 @@ export async function officialChat(
       };
     } catch (error) {
       return { ok: false, provider: "openai", status: 504, error: error instanceof Error ? error.message : "OpenAI request failed", code: "OFFICIAL_TIMEOUT" };
+    }
+  }
+
+  if (input.resolved.provider === "vertex") {
+    try {
+      const { response, body } = await vertexGenerate(
+        env,
+        input.resolved.model,
+        {
+          contents: googleContents(input.messages),
+          generationConfig: {
+            maxOutputTokens: Math.max(1, Math.min(65_536, Math.floor(input.maxCompletionTokens || 4096))),
+            ...(Number.isFinite(input.temperature) ? { temperature: input.temperature } : {}),
+          },
+        },
+        fetcher,
+        timeout,
+      );
+      if (!response.ok) return { ok: false, provider: "vertex", status: response.status, error: errorMessage(body, `Vertex HTTP ${response.status}`), code: String(record(body.error).status || "OFFICIAL_UPSTREAM_ERROR") };
+      const candidates = Array.isArray(body.candidates) ? body.candidates : [];
+      const content = record(record(candidates[0]).content);
+      const parts = Array.isArray(content.parts) ? content.parts : [];
+      const text = parts.map((part) => String(record(part).text || "")).filter(Boolean).join("");
+      const usage = record(body.usageMetadata);
+      if (!text) return { ok: false, provider: "vertex", status: 502, error: "Vertex returned no text candidate", code: "OFFICIAL_EMPTY_RESULT" };
+      return {
+        ok: true, provider: "vertex", model: String(body.modelVersion || input.resolved.model), id: String(body.responseId || crypto.randomUUID()), text,
+        promptTokens: Number(usage.promptTokenCount || 0), completionTokens: Number(usage.candidatesTokenCount || 0),
+        finishReason: String(record(candidates[0]).finishReason || "STOP"), raw: body,
+      };
+    } catch (error) {
+      const missing = error instanceof Error && /MISSING|INVALID|FORBIDDEN/.test(error.message);
+      return { ok: false, provider: "vertex", status: missing ? 503 : 504, error: error instanceof Error ? error.message : "Vertex request failed", code: missing ? "OFFICIAL_CREDENTIAL_MISSING" : "OFFICIAL_TIMEOUT" };
     }
   }
 
@@ -234,6 +291,29 @@ export async function officialImage(
       return { ok: true, provider: "openai", model: input.resolved.model, id: String(body.id || crypto.randomUUID()), images, promptTokens: 0, completionTokens: 0, raw: body };
     } catch (error) {
       return { ok: false, provider: "openai", status: 504, error: error instanceof Error ? error.message : "OpenAI image failed", code: "OFFICIAL_TIMEOUT" };
+    }
+  }
+
+  if (input.resolved.provider === "vertex") {
+    try {
+      const { response, body } = await vertexGenerate(
+        env,
+        input.resolved.model,
+        {
+          contents: [{ role: "user", parts: [{ text: input.prompt }] }],
+          generationConfig: { responseModalities: ["TEXT", "IMAGE"], candidateCount: input.n },
+        },
+        fetcher,
+        timeout,
+      );
+      if (!response.ok) return { ok: false, provider: "vertex", status: response.status, error: errorMessage(body, `Vertex image HTTP ${response.status}`), code: String(record(body.error).status || "OFFICIAL_UPSTREAM_ERROR") };
+      const images = collectInlineImages(body);
+      const usage = record(body.usageMetadata);
+      if (images.length !== input.n) return { ok: false, provider: "vertex", status: 502, error: `Vertex returned ${images.length}/${input.n} images`, code: "RESULT_COUNT_MISMATCH" };
+      return { ok: true, provider: "vertex", model: String(body.modelVersion || input.resolved.model), id: String(body.responseId || crypto.randomUUID()), images, promptTokens: Number(usage.promptTokenCount || 0), completionTokens: Number(usage.candidatesTokenCount || 0), raw: body };
+    } catch (error) {
+      const missing = error instanceof Error && /MISSING|INVALID|FORBIDDEN/.test(error.message);
+      return { ok: false, provider: "vertex", status: missing ? 503 : 504, error: error instanceof Error ? error.message : "Vertex image failed", code: missing ? "OFFICIAL_CREDENTIAL_MISSING" : "OFFICIAL_TIMEOUT" };
     }
   }
 

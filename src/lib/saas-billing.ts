@@ -526,6 +526,11 @@ export async function publishPrice(
   db?: DbLike,
 ) {
   const sql = await database(db);
+  const provider = input.provider.trim().toLowerCase();
+  const model = input.model.trim();
+  if (!["openai", "google", "vertex", "leonardo"].includes(provider) || !model || model.length > 200) {
+    throw new Error("PRICE_OFFICIAL_PROVIDER_OR_MODEL_INVALID");
+  }
   const id = uid();
   const rows = await sql.query<Record<string, unknown>>(
     `with current_version as (
@@ -542,7 +547,7 @@ export async function publishPrice(
        returning *
      ) select * from inserted`,
     [
-      input.provider.trim(), input.model.trim(), input.capability, input.currency.toUpperCase(), id,
+      provider, model, input.capability, input.currency.toUpperCase(), id,
       Math.max(0, Math.trunc(input.inputMicrosPerMillion || 0)),
       Math.max(0, Math.trunc(input.outputMicrosPerMillion || 0)),
       Math.max(0, Math.trunc(input.imagePriceMinor || 0)),

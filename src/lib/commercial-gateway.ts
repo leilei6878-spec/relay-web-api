@@ -13,7 +13,7 @@ function errorResponse(error: string) {
   return { status: 503, code: "commercial_gateway_error" };
 }
 
-function replayFailure(provider: "openai" | "google" | "leonardo", status: string) {
+function replayFailure(provider: "openai" | "google" | "vertex" | "leonardo", status: string) {
   return {
     ok: false as const,
     provider,
@@ -187,7 +187,7 @@ async function commercialImageGenerationRun(input: {
       const saved = decodeUsageProviderResult(reservation.providerResultCiphertext);
       if (!saved || saved.kind !== "image") return replayFailure(resolved.provider, reservation.status);
       const recovered = saved as {
-        provider: "openai" | "google" | "leonardo";
+        provider: "openai" | "google" | "vertex" | "leonardo";
         model: string;
         id: string;
         images: { url: string; revised_prompt?: string }[];

@@ -7,6 +7,7 @@ import {
   createTenantOwner,
   getTenant,
   postBalanceAdjustment,
+  publishPrice,
   reserveUsage,
   settleUsage,
   checkpointUsageProviderResult,
@@ -148,6 +149,17 @@ test("commercial price math uses integer minor units and markup", () => {
     ),
     220,
   );
+});
+
+test("price publishing accepts Vertex as an official provider and rejects arbitrary providers", async () => {
+  const { pg, db } = await database();
+  const price = await publishPrice({ provider: "vertex", model: "gemini-3.7-flash", capability: "chat", currency: "USD", inputMicrosPerMillion: 1000, outputMicrosPerMillion: 2000 }, db);
+  assert.equal(price.provider, "vertex");
+  await assert.rejects(
+    () => publishPrice({ provider: "custom-http", model: "anything", capability: "chat", currency: "USD" }, db),
+    /OFFICIAL_PROVIDER_OR_MODEL_INVALID/,
+  );
+  await pg.close();
 });
 
 test("concurrent reservation replay does not double-hold tenant balance", async () => {

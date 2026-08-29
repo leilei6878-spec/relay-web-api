@@ -3,10 +3,11 @@ import { isIP } from "node:net";
 import { getSql, type Sql } from "./db";
 import { decryptSecretValue, encryptSecretValue } from "./secrets";
 import { uid } from "./utils";
+import { validateVertexProjectLocation, vertexAccessToken } from "./vertex-auth";
 
 type DbLike = Pick<Sql, "query">;
-type ConfigKind = "boolean" | "integer" | "enum" | "json" | "url" | "secret";
-type ConnectionTest = "openai" | "google" | "leonardo" | "stripe" | "stripe_webhook" | "webhook";
+type ConfigKind = "boolean" | "integer" | "enum" | "json" | "string" | "url" | "secret";
+type ConnectionTest = "openai" | "google" | "vertex" | "leonardo" | "stripe" | "stripe_webhook" | "webhook";
 type Resolver = (hostname: string, options: { all: true; verbatim: true }) => Promise<{ address: string; family: number }[]>;
 
 export type CommercialConfigDefinition = {
@@ -30,6 +31,9 @@ export const COMMERCIAL_CONFIG_CATALOG: readonly CommercialConfigDefinition[] = 
   { key: "legal.approved", label: "法务批准", group: "launch", kind: "boolean", envName: "RELAY_LEGAL_APPROVED", hardGate: true, description: "仅记录经过外部法务批准的期望状态，不能替代真实批准。" },
   { key: "providers.openai.apiKey", label: "OpenAI API Key", group: "providers", kind: "secret", envName: "OPENAI_API_KEY", secret: true, test: "openai", description: "服务端官方 OpenAI API 凭证。" },
   { key: "providers.google.apiKey", label: "Google Gemini API Key", group: "providers", kind: "secret", envName: "GEMINI_API_KEY", secret: true, test: "google", description: "服务端官方 Gemini API 凭证。" },
+  { key: "providers.vertex.serviceAccountJson", label: "Vertex Service Account", group: "providers", kind: "secret", envName: "GOOGLE_SERVICE_ACCOUNT_JSON", secret: true, test: "vertex", description: "Vertex AI 专用服务账号 JSON；只用于短期 OAuth Token。" },
+  { key: "providers.vertex.projectId", label: "Vertex Project ID", group: "providers", kind: "string", envName: "GOOGLE_CLOUD_PROJECT", description: "Google Cloud 项目 ID。" },
+  { key: "providers.vertex.location", label: "Vertex Location", group: "providers", kind: "string", envName: "GOOGLE_CLOUD_LOCATION", description: "Vertex 区域，例如 us-central1 或 global。" },
   { key: "providers.leonardo.apiKey", label: "Leonardo API Key", group: "providers", kind: "secret", envName: "LEONARDO_API_KEY", secret: true, test: "leonardo", description: "服务端 Leonardo Production API 凭证。" },
   { key: "providers.leonardo.modelMap", label: "Leonardo 模型映射", group: "providers", kind: "json", envName: "LEONARDO_MODEL_MAP_JSON", description: "逻辑模型到官方模型 UUID 的 JSON 对象。" },
   { key: "payments.provider", label: "支付渠道", group: "payments", kind: "enum", envName: "RELAY_PAYMENT_PROVIDER", allowed: ["disabled", "stripe"], description: "只允许内置并经过验签的支付适配器。" },
@@ -119,6 +123,12 @@ function normalizeValue(definition: CommercialConfigDefinition, value: unknown) 
     rejectPrivateWebhookLiteral(parsed);
     return parsed.toString().replace(/\/$/, "");
   }
+  if (definition.kind === "string") {
+    const text = String(value || "").trim();
+    if (definition.key === "providers.vertex.projectId") validateVertexProjectLocation(text, "global");
+    if (definition.key === "providers.vertex.location") validateVertexProjectLocation("valid-project", text);
+    return text;
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("CONFIG_JSON_OBJECT_REQUIRED");
   const serialized = JSON.stringify(value);
   if (serialized.length > 50_000) throw new Error("CONFIG_JSON_TOO_LARGE");
@@ -181,6 +191,10 @@ async function testConnection(definition: CommercialConfigDefinition, value: unk
     return /^whsec_[A-Za-z0-9_]+$/.test(String(value))
       ? { ok: true, detail: { mode: "format" } }
       : { ok: false, detail: { code: "STRIPE_WEBHOOK_SECRET_FORMAT" } };
+  }
+  if (definition.test === "vertex") {
+    await vertexAccessToken(String(value), { fetcher, useCache: false });
+    return { ok: true, detail: { mode: "oauth" } };
   }
   let url = "";
   let headers: Record<string, string> = {};

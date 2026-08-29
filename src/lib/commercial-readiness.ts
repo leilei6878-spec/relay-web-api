@@ -1,11 +1,12 @@
 import { getSql, type Sql } from "./db";
 import { effectiveCommercialEnv } from "./commercial-config";
+import { parseVertexServiceAccount, validateVertexProjectLocation } from "./vertex-auth";
 
 export type CommercialReadiness = {
   enabled: boolean;
   ready: boolean;
   blockers: string[];
-  officialProviders: { openai: boolean; google: boolean; leonardo: boolean };
+  officialProviders: { openai: boolean; google: boolean; vertex: boolean; leonardo: boolean };
   activePrices: number;
   onlineWorkers: number;
   gatewayReplicas: number;
@@ -20,9 +21,19 @@ export type CommercialReadiness = {
 export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, db?: Pick<Sql, "query">): Promise<CommercialReadiness> {
   if (env === process.env) env = await effectiveCommercialEnv(env, db);
   const enabled = env.RELAY_COMMERCIAL_ENABLED === "1";
+  let vertexConfigured = false;
+  try {
+    const service = env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim() || "";
+    const credentials = parseVertexServiceAccount(service);
+    validateVertexProjectLocation(env.GOOGLE_CLOUD_PROJECT?.trim() || credentials.project_id, env.GOOGLE_CLOUD_LOCATION?.trim() || "us-central1");
+    vertexConfigured = true;
+  } catch {
+    vertexConfigured = false;
+  }
   const officialProviders = {
     openai: Boolean(env.OPENAI_API_KEY?.trim()),
-    google: Boolean(env.GEMINI_API_KEY?.trim() || (env.GOOGLE_CLOUD_PROJECT?.trim() && env.GOOGLE_APPLICATION_CREDENTIALS?.trim())),
+    google: Boolean(env.GEMINI_API_KEY?.trim()),
+    vertex: vertexConfigured,
     leonardo: Boolean(env.LEONARDO_API_KEY?.trim()),
   };
   let activePrices = 0;

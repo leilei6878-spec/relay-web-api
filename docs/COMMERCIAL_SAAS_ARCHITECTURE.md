@@ -7,13 +7,13 @@ readiness endpoint returns `ready: true` and upstream contracts are approved.
 
 | Credential | Audience | Backend |
 |---|---|---|
-| `sk-saas-*` | Paying tenants | Official OpenAI, Google or Leonardo API only |
+| `sk-saas-*` | Paying tenants | Official OpenAI, Gemini API, Vertex AI or Leonardo API only |
 | `sk-relay-*` | Internal legacy operations | Web-account Worker pool |
 | `ad-relay-*` / admin cookie | Internal administrator | Control plane |
 | `wk-relay-*` | Trusted Worker | Job execution only |
 
-Commercial routing resolves `openai:<model>`, `google:<model>` or
-`leonardo:<official-model-uuid>`. Web aliases such as `chatgpt-web-auto`,
+Commercial routing resolves `openai:<model>`, `google:<model>`,
+`vertex:<model>` or `leonardo:<official-model-uuid>`. Web aliases such as `chatgpt-web-auto`,
 `nano-banana-2` and `leonardo-gemini` are rejected before account selection.
 Commercial streaming and image editing are intentionally disabled until their
 official-provider usage/asset settlement paths are authoritative.
@@ -136,6 +136,10 @@ configuration; Readiness must verify them as external facts.
 - Gemini `generateContent` uses
   `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`,
   `x-goog-api-key` and `usageMetadata`: https://ai.google.dev/api/generate-content
+- Vertex AI uses a service-account RS256 assertion exchanged for a short-lived
+  OAuth token and the regional publisher-model `generateContent` endpoint:
+  https://developers.google.com/identity/protocols/oauth2/service-account and
+  https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/function-calling
 - Leonardo Production API image generation uses Bearer auth, creates with
   `POST /api/rest/v1/generations` and polls `GET /generations/{id}`:
   https://docs.leonardo.ai/v1.0/docs/getting-started
