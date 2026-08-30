@@ -1,7 +1,7 @@
 import { getSql, type Sql } from "./db";
 import { coordIncr } from "./coord";
 import { effectiveCommercialEnv } from "./commercial-config";
-import { queueEmailDelivery } from "./email-outbox";
+import { deliverEmailDeliveryNow, prepareEmailDelivery, type PreparedEmailDelivery } from "./email-outbox";
 import { createTenantOwner } from "./saas-billing";
 import {
   generateTotpSecret,
@@ -20,9 +20,66 @@ export const SAAS_SESSION_COOKIE = "relay_saas_session";
 export const SAAS_CSRF_COOKIE = "relay_saas_csrf";
 
 type DbLike = Pick<Sql, "query">;
+type PublicEmailRequestOpts = {
+  fetcher?: typeof fetch;
+  env?: NodeJS.ProcessEnv;
+  deliverImmediately?: boolean;
+  delay?: (ms: number) => Promise<void>;
+};
 
 async function database(db?: DbLike) {
   return db || getSql();
+}
+
+async function nonEnumeratingEmailResponse(startedAt: number, delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))) {
+  const minimumMs = 250 + Math.floor(Math.random() * 101);
+  const remaining = minimumMs - (Date.now() - startedAt);
+  if (remaining > 0) await delay(remaining);
+  return { ok: true as const };
+}
+
+async function persistVerificationAndEmail(
+  input: {
+    userId: string;
+    verificationId: string;
+    verificationKind: "email" | "password_reset";
+    tokenHash: string;
+    expiresAt: string;
+    delivery: PreparedEmailDelivery;
+  },
+  sql: DbLike,
+) {
+  const rows = await sql.query<{ id: string }>(
+    `with retired_tokens as (
+       update relay_saas_verifications set consumed_at=now()
+        where user_id=$1 and kind=$2 and consumed_at is null
+       returning id
+     ), superseded_delivery as (
+       update relay_email_deliveries set status='superseded',payload_ciphertext='[SUPERSEDED]',claim_expires_at=null,
+         error_code='EMAIL_DELIVERY_SUPERSEDED',updated_at=now()
+        where $8::text is not null and dedupe_key like $8
+          and dedupe_key<>$7
+          and status in ('pending','retrying','not_configured','sending')
+       returning id
+     ), verification as (
+       insert into relay_saas_verifications(id,user_id,kind,token_hash,expires_at,created_at)
+       select $3,$1,$2,$4,$5,now() from (select count(*) from retired_tokens) barrier
+       returning id
+     ), queued as (
+       insert into relay_email_deliveries
+        (id,dedupe_key,kind,status,attempts,recipient_hmac,payload_ciphertext,payload_sha256,next_attempt_at,expires_at,created_at,updated_at)
+       select $6,$7,$9,'pending',0,$10,$11,$12,now(),$13,now(),now()
+        from verification cross join (select count(*) from superseded_delivery) barrier
+       returning id
+     ) select id from queued`,
+    [
+      input.userId, input.verificationKind, input.verificationId, input.tokenHash, input.expiresAt,
+      input.delivery.id, input.delivery.dedupeKey, input.delivery.supersedePattern, input.delivery.kind,
+      input.delivery.recipientHmac, input.delivery.payloadCiphertext, input.delivery.payloadSha256,
+      input.delivery.expiresAt,
+    ],
+  );
+  if (rows[0]?.id !== input.delivery.id) throw new Error("EMAIL_OUTBOX_ENQUEUE_FAILED");
 }
 
 function cookie(request: Request, name: string) {
@@ -111,17 +168,35 @@ export async function registerSaasOwner(
   const ip = clientIp(request);
   const attempts = await coordIncr(`saas:register:${ip}:${new Date().toISOString().slice(0, 13)}`, 2 * 60 * 60_000);
   if (attempts > 10) throw new Error("REGISTRATION_RATE_LIMITED");
-  const env = opts.env || await effectiveCommercialEnv(process.env, db);
+  const sql = await database(db);
+  const env = opts.env || await effectiveCommercialEnv(process.env, sql);
   const verificationRequired = env.NODE_ENV === "production"
     ? env.RELAY_SAAS_EMAIL_VERIFICATION_REQUIRED !== "0"
     : env.RELAY_SAAS_EMAIL_VERIFICATION_REQUIRED === "1";
-  const created = await createTenantOwner({
-    ...input,
-    userStatus: verificationRequired ? "pending_verification" : "active",
-    emailVerified: !verificationRequired,
-  }, db);
   if (verificationRequired) {
-    await sendSaasVerification(created.email, request, db, opts);
+    const ids = { tenantId: uid(), userId: uid() };
+    const token = secureToken(32);
+    const verificationId = uid();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+    const email = normalizeEmail(input.email);
+    const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || new URL(request.url).origin;
+    const delivery = prepareEmailDelivery({
+      dedupeKey: `verify-email:${ids.userId}:${verificationId}`,
+      supersedePrefix: `verify-email:${ids.userId}`,
+      kind: "verify-email",
+      to: email,
+      expiresAt,
+      payload: { template: "verify-email", to: email, tenant: input.tenantName.trim().slice(0, 120), link: `${publicUrl}/saas/verify?token=${encodeURIComponent(token)}` },
+    }, env);
+    const created = await createTenantOwner({
+      ...input,
+      userStatus: "pending_verification",
+      emailVerified: false,
+    }, sql, {
+      ids,
+      verification: { id: verificationId, tokenHash: sha256(token), expiresAt, delivery },
+    });
+    await deliverEmailDeliveryNow(delivery.id, sql, { env, fetcher: opts.fetcher });
     return {
       ...created,
       verificationRequired: true as const,
@@ -131,7 +206,8 @@ export async function registerSaasOwner(
       cookies: [] as string[],
     };
   }
-  const session = await createSaasSession(created.userId, created.tenantId, request, db);
+  const created = await createTenantOwner({ ...input, userStatus: "active", emailVerified: true }, sql);
+  const session = await createSaasSession(created.userId, created.tenantId, request, sql);
   return { ...created, verificationRequired: false as const, ...session };
 }
 
@@ -139,8 +215,9 @@ export async function sendSaasVerification(
   emailInput: string,
   request: Request,
   db?: DbLike,
-  opts: { fetcher?: typeof fetch; env?: NodeJS.ProcessEnv } = {},
+  opts: PublicEmailRequestOpts = {},
 ) {
+  const startedAt = Date.now();
   if (!trustedSaasOrigin(request)) throw new Error("INVALID_ORIGIN");
   const email = normalizeEmail(emailInput);
   const count = await coordIncr(`saas:verify-resend:${clientIp(request)}:${sha256(email).slice(0, 16)}`, 60 * 60_000);
@@ -154,32 +231,29 @@ export async function sendSaasVerification(
       where u.email_normalized=$1 and u.status='pending_verification' limit 1`,
     [email],
   );
-  if (!users[0]) return { ok: true as const };
-  const token = secureToken(32);
-  const verificationId = uid();
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
-  await sql.query(
-    `with expired as (
-       update relay_saas_verifications set consumed_at=now()
-        where user_id=$1 and kind='email' and consumed_at is null
-     ) insert into relay_saas_verifications(id,user_id,kind,token_hash,expires_at,created_at)
-       values ($2,$1,'email',$3,$4,now())`,
-    [users[0].id, verificationId, sha256(token), expiresAt],
-  );
-  const env = opts.env || await effectiveCommercialEnv(process.env, db);
-  const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || new URL(request.url).origin;
-  const delivery = await queueEmailDelivery({
-    dedupeKey: `verify-email:${users[0].id}:${verificationId}`,
-    supersedePrefix: `verify-email:${users[0].id}`,
-    kind: "verify-email",
-    to: users[0].email,
-    expiresAt,
-    payload: { template: "verify-email", to: users[0].email, tenant: users[0].tenant_name, link: `${publicUrl}/saas/verify?token=${encodeURIComponent(token)}` },
-  }, sql, {
-    env,
-    fetcher: opts.fetcher,
-  });
-  return { ok: true as const, deliveryId: delivery.id, deliveryStatus: delivery.status };
+  if (!users[0]) return nonEnumeratingEmailResponse(startedAt, opts.delay);
+  try {
+    const token = secureToken(32);
+    const verificationId = uid();
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+    const env = opts.env || await effectiveCommercialEnv(process.env, sql);
+    const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || new URL(request.url).origin;
+    const delivery = prepareEmailDelivery({
+      dedupeKey: `verify-email:${users[0].id}:${verificationId}`,
+      supersedePrefix: `verify-email:${users[0].id}`,
+      kind: "verify-email",
+      to: users[0].email,
+      expiresAt,
+      payload: { template: "verify-email", to: users[0].email, tenant: users[0].tenant_name, link: `${publicUrl}/saas/verify?token=${encodeURIComponent(token)}` },
+    }, env);
+    await persistVerificationAndEmail({
+      userId: users[0].id, verificationId, verificationKind: "email", tokenHash: sha256(token), expiresAt, delivery,
+    }, sql);
+    if (opts.deliverImmediately) await deliverEmailDeliveryNow(delivery.id, sql, { env, fetcher: opts.fetcher });
+  } catch {
+    console.error(JSON.stringify({ source: "relay-email-request", kind: "verify-email", error: "EMAIL_OUTBOX_QUEUE_FAILED" }));
+  }
+  return nonEnumeratingEmailResponse(startedAt, opts.delay);
 }
 
 export async function verifySaasEmail(token: string, request: Request, db?: DbLike) {
@@ -204,8 +278,9 @@ export async function requestSaasPasswordReset(
   emailInput: string,
   request: Request,
   db?: DbLike,
-  opts: { fetcher?: typeof fetch; env?: NodeJS.ProcessEnv } = {},
+  opts: PublicEmailRequestOpts = {},
 ) {
+  const startedAt = Date.now();
   if (!trustedSaasOrigin(request)) throw new Error("INVALID_ORIGIN");
   const email = normalizeEmail(emailInput);
   const count = await coordIncr(`saas:reset:${clientIp(request)}:${sha256(email).slice(0, 16)}`, 60 * 60_000);
@@ -216,28 +291,29 @@ export async function requestSaasPasswordReset(
     [email],
   );
   // Do not reveal whether the address exists.
-  if (!users[0]) return { ok: true as const };
-  const token = secureToken(32);
-  const verificationId = uid();
-  const expiresAt = new Date(Date.now() + 60 * 60_000).toISOString();
-  await sql.query(
-    "insert into relay_saas_verifications(id,user_id,kind,token_hash,expires_at,created_at) values ($1,$2,'password_reset',$3,$4,now())",
-    [verificationId, users[0].id, sha256(token), expiresAt],
-  );
-  const env = opts.env || await effectiveCommercialEnv(process.env, db);
-  const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || new URL(request.url).origin;
-  const delivery = await queueEmailDelivery({
-    dedupeKey: `password-reset:${users[0].id}:${verificationId}`,
-    supersedePrefix: `password-reset:${users[0].id}`,
-    kind: "password-reset",
-    to: users[0].email,
-    expiresAt,
-    payload: { template: "password-reset", to: users[0].email, link: `${publicUrl}/saas/reset?token=${encodeURIComponent(token)}` },
-  }, sql, {
-    env,
-    fetcher: opts.fetcher,
-  });
-  return { ok: true as const, deliveryId: delivery.id, deliveryStatus: delivery.status };
+  if (!users[0]) return nonEnumeratingEmailResponse(startedAt, opts.delay);
+  try {
+    const token = secureToken(32);
+    const verificationId = uid();
+    const expiresAt = new Date(Date.now() + 60 * 60_000).toISOString();
+    const env = opts.env || await effectiveCommercialEnv(process.env, sql);
+    const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || new URL(request.url).origin;
+    const delivery = prepareEmailDelivery({
+      dedupeKey: `password-reset:${users[0].id}:${verificationId}`,
+      supersedePrefix: `password-reset:${users[0].id}`,
+      kind: "password-reset",
+      to: users[0].email,
+      expiresAt,
+      payload: { template: "password-reset", to: users[0].email, link: `${publicUrl}/saas/reset?token=${encodeURIComponent(token)}` },
+    }, env);
+    await persistVerificationAndEmail({
+      userId: users[0].id, verificationId, verificationKind: "password_reset", tokenHash: sha256(token), expiresAt, delivery,
+    }, sql);
+    if (opts.deliverImmediately) await deliverEmailDeliveryNow(delivery.id, sql, { env, fetcher: opts.fetcher });
+  } catch {
+    console.error(JSON.stringify({ source: "relay-email-request", kind: "password-reset", error: "EMAIL_OUTBOX_QUEUE_FAILED" }));
+  }
+  return nonEnumeratingEmailResponse(startedAt, opts.delay);
 }
 
 export async function resetSaasPassword(token: string, password: string, request: Request, db?: DbLike) {

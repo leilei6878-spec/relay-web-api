@@ -99,6 +99,13 @@ test("new token supersedes queued ciphertext, expiry scrubs it and concurrent cl
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   }, db, { env: noEndpoint, acquireLock: lock });
   assert.equal(first.status, "not_configured");
+  const replay = await queueEmailDelivery({
+    dedupeKey: "password-reset:user-1:first", supersedePrefix: "password-reset:user-1",
+    kind: "password-reset", to: "reset@example.test", payload: { template: "password-reset", to: "reset@example.test", link: "https://relay/reset?token=first" },
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  }, db, { env: noEndpoint, acquireLock: lock });
+  assert.deepEqual(replay, first, "an idempotent enqueue replay must not supersede its own durable row");
+  assert.equal((await pg.query("select id from relay_email_deliveries")).rows.length, 1);
   const second = await queueEmailDelivery({
     dedupeKey: "password-reset:user-1:second", supersedePrefix: "password-reset:user-1",
     kind: "password-reset", to: "reset@example.test", payload: { template: "password-reset", to: "reset@example.test", link: "https://relay/reset?token=second" },
@@ -135,4 +142,3 @@ test("new token supersedes queued ciphertext, expiry scrubs it and concurrent cl
   assert.equal((await pg.query<{ status: string }>("select status from relay_email_deliveries where id=$1", [third.id])).rows[0]?.status, "delivered");
   await pg.close();
 });
-

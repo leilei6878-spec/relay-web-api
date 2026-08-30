@@ -14,6 +14,7 @@ import {
   verifySaasEmail,
   requestSaasPasswordReset,
   resetSaasPassword,
+  sendSaasVerification,
 } from "./saas-auth.ts";
 import { totpCode } from "./saas-crypto.ts";
 
@@ -160,23 +161,24 @@ test("MFA enrollment requires a current code and returns one-time recovery codes
 test("production registration requires delivered email verification before login", async () => {
   const { pg, db } = await database();
   let verificationLink = "";
+  const verificationLinks: string[] = [];
+  const emailEnv = {
+    NODE_ENV: "production",
+    RELAY_PUBLIC_URL: "https://relay.example.test",
+    RELAY_EMAIL_WEBHOOK_URL: "https://mail.example.test/send",
+    RELAY_EMAIL_WEBHOOK_SECRET: "verification-email-secret-0123456789abcdef",
+    RELAY_SECRETS_KEY: "verification-encryption-key-0123456789abcdef",
+  } as NodeJS.ProcessEnv;
+  const emailFetcher = async (_url: string | URL | Request, init?: RequestInit) => {
+    verificationLink = String(JSON.parse(String(init?.body)).link || "");
+    verificationLinks.push(verificationLink);
+    return Response.json({ ok: true });
+  };
   const registered = await registerSaasOwner(
     { tenantName: "Verify Co", ownerName: "Owner", email: "verify@example.test", password: "verify-password-123" },
     request("/api/saas/session", { method: "POST" }),
     db,
-    {
-      env: {
-        NODE_ENV: "production",
-        RELAY_PUBLIC_URL: "https://relay.example.test",
-        RELAY_EMAIL_WEBHOOK_URL: "https://mail.example.test/send",
-        RELAY_EMAIL_WEBHOOK_SECRET: "verification-email-secret-0123456789abcdef",
-        RELAY_SECRETS_KEY: "verification-encryption-key-0123456789abcdef",
-      } as NodeJS.ProcessEnv,
-      fetcher: async (_url, init) => {
-        verificationLink = String(JSON.parse(String(init?.body)).link || "");
-        return Response.json({ ok: true });
-      },
-    },
+    { env: emailEnv, fetcher: emailFetcher as typeof fetch },
   );
   assert.equal(registered.verificationRequired, true);
   assert.equal(registered.cookies.length, 0);
@@ -184,8 +186,22 @@ test("production registration requires delivered email verification before login
     () => loginSaas({ email: "verify@example.test", password: "verify-password-123" }, request("/api/saas/session", { method: "POST" }), db),
     /INVALID_CREDENTIALS/,
   );
-  const token = new URL(verificationLink).searchParams.get("token") || "";
-  assert.ok(token);
+  const firstToken = new URL(verificationLink).searchParams.get("token") || "";
+  assert.ok(firstToken);
+  assert.deepEqual(
+    await sendSaasVerification("verify@example.test", request("/api/saas/session", { method: "POST" }), db, {
+      env: emailEnv, fetcher: emailFetcher as typeof fetch, deliverImmediately: true, delay: async () => undefined,
+    }),
+    { ok: true },
+  );
+  assert.deepEqual(
+    await sendSaasVerification("missing@example.test", request("/api/saas/session", { method: "POST" }), db, { env: emailEnv, delay: async () => undefined }),
+    { ok: true },
+  );
+  assert.equal(verificationLinks.length, 2);
+  const token = new URL(verificationLinks[1]!).searchParams.get("token") || "";
+  assert.ok(token && token !== firstToken);
+  await assert.rejects(() => verifySaasEmail(firstToken, request("/api/saas/session", { method: "POST" }), db), /VERIFICATION_INVALID/);
   assert.equal((await verifySaasEmail(token, request("/api/saas/session", { method: "POST" }), db)).ok, true);
   const logged = await loginSaas(
     { email: "verify@example.test", password: "verify-password-123" },
@@ -196,6 +212,95 @@ test("production registration requires delivered email verification before login
   await pg.close();
 });
 
+test("production registration rolls back user, tenant and verification when its Outbox insert fails", async () => {
+  const { pg, db } = await database();
+  await pg.exec("alter table relay_email_deliveries add constraint test_reject_registration_email check (kind <> 'verify-email')");
+  let networkCalls = 0;
+  await assert.rejects(
+    () => registerSaasOwner(
+      { tenantName: "Atomic Registration", ownerName: "Owner", email: "atomic-register@example.test", password: "atomic-register-password-123" },
+      request("/api/saas/session", { method: "POST", headers: { "x-forwarded-for": "192.0.2.81" } }),
+      db,
+      {
+        env: {
+          NODE_ENV: "production", RELAY_PUBLIC_URL: "https://relay.example.test",
+          RELAY_EMAIL_WEBHOOK_URL: "https://mail.example.test/send",
+          RELAY_EMAIL_WEBHOOK_SECRET: "atomic-email-secret-0123456789abcdef",
+          RELAY_SECRETS_KEY: "atomic-encryption-key-0123456789abcdef",
+        } as NodeJS.ProcessEnv,
+        fetcher: (async () => { networkCalls += 1; return Response.json({ ok: true }); }) as typeof fetch,
+      },
+    ),
+    /test_reject_registration_email|constraint/i,
+  );
+  const counts = await pg.query<{ users: number; tenants: number; memberships: number; verifications: number; deliveries: number }>(
+    `select
+       (select count(*)::int from relay_saas_users) as users,
+       (select count(*)::int from relay_tenants) as tenants,
+       (select count(*)::int from relay_tenant_memberships) as memberships,
+       (select count(*)::int from relay_saas_verifications) as verifications,
+       (select count(*)::int from relay_email_deliveries) as deliveries`,
+  );
+  assert.deepEqual(counts.rows[0], { users: 0, tenants: 0, memberships: 0, verifications: 0, deliveries: 0 });
+  assert.equal(networkCalls, 0);
+  await pg.close();
+});
+
+test("public reset requests enqueue asynchronously and equalize known/unknown response timing", async () => {
+  const { pg, db } = await database();
+  await registerSaasOwner(
+    { tenantName: "Async Reset Co", ownerName: "Owner", email: "async-reset@example.test", password: "old-password-12345" },
+    request("/api/saas/session", { method: "POST", headers: { "x-forwarded-for": "192.0.2.82" } }), db,
+  );
+  let networkCalls = 0;
+  const delays: number[] = [];
+  const opts = {
+    env: {
+      RELAY_PUBLIC_URL: "https://relay.example.test", RELAY_EMAIL_WEBHOOK_URL: "https://mail.test",
+      RELAY_EMAIL_WEBHOOK_SECRET: "async-reset-email-secret-0123456789",
+      RELAY_SECRETS_KEY: "async-reset-encryption-key-0123456789",
+    } as NodeJS.ProcessEnv,
+    fetcher: (async () => { networkCalls += 1; return Response.json({ ok: true }); }) as typeof fetch,
+    delay: async (ms: number) => { delays.push(ms); },
+  };
+  assert.deepEqual(await requestSaasPasswordReset("async-reset@example.test", request("/api/saas/session", { method: "POST" }), db, opts), { ok: true });
+  assert.deepEqual(await requestSaasPasswordReset("missing-async@example.test", request("/api/saas/session", { method: "POST" }), db, opts), { ok: true });
+  assert.equal(networkCalls, 0, "the public request path must not synchronously call the receiver");
+  assert.equal(delays.length, 2);
+  assert.ok(delays.every((ms) => ms > 0 && ms <= 350));
+  const queued = await pg.query<{ status: string }>("select status from relay_email_deliveries");
+  assert.deepEqual(queued.rows, [{ status: "pending" }]);
+  await pg.close();
+});
+
+test("public reset hides queue configuration failures without logging the address", async () => {
+  const { pg, db } = await database();
+  await registerSaasOwner(
+    { tenantName: "Hidden Failure Co", ownerName: "Owner", email: "hidden-failure@example.test", password: "old-password-12345" },
+    request("/api/saas/session", { method: "POST", headers: { "x-forwarded-for": "192.0.2.83" } }), db,
+  );
+  const logged: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => { logged.push(args.map(String).join(" ")); };
+  try {
+    assert.deepEqual(
+      await requestSaasPasswordReset("hidden-failure@example.test", request("/api/saas/session", { method: "POST" }), db, {
+        env: { RELAY_PUBLIC_URL: "https://relay.example.test" } as NodeJS.ProcessEnv,
+        delay: async () => undefined,
+      }),
+      { ok: true },
+    );
+  } finally {
+    console.error = originalError;
+  }
+  assert.equal(logged.length, 1);
+  assert.match(logged[0]!, /EMAIL_OUTBOX_QUEUE_FAILED/);
+  assert.ok(!logged[0]!.includes("hidden-failure@example.test"));
+  assert.equal((await pg.query("select id from relay_saas_verifications where kind='password_reset'")).rows.length, 0);
+  assert.equal((await pg.query("select id from relay_email_deliveries")).rows.length, 0);
+  await pg.close();
+});
+
 test("password reset is non-enumerating, one-time and revokes existing sessions", async () => {
   const { pg, db } = await database();
   const previous = process.env.RELAY_PUBLIC_URL; process.env.RELAY_PUBLIC_URL = "https://relay.example.test";
@@ -203,18 +308,26 @@ test("password reset is non-enumerating, one-time and revokes existing sessions"
     { tenantName: "Reset Co", ownerName: "Owner", email: "reset@example.test", password: "old-password-12345" },
     request("/api/saas/session", { method: "POST" }), db,
   );
-  let link = "";
-  const response = await requestSaasPasswordReset("reset@example.test", request("/api/saas/session", { method: "POST" }), db, {
-    env: {
-      RELAY_PUBLIC_URL: "https://relay.example.test", RELAY_EMAIL_WEBHOOK_URL: "https://mail.test",
-      RELAY_EMAIL_WEBHOOK_SECRET: "reset-email-secret-0123456789abcdef",
-      RELAY_SECRETS_KEY: "reset-encryption-key-0123456789abcdef",
-    } as NodeJS.ProcessEnv,
-    fetcher: async (_url, init) => { link = JSON.parse(String(init?.body)).link; return Response.json({ ok: true }); },
-  });
-  assert.equal(response.ok, true);
-  assert.equal((await requestSaasPasswordReset("unknown@example.test", request("/api/saas/session", { method: "POST" }), db, { env: {} as NodeJS.ProcessEnv })).ok, true);
-  const token = new URL(link).searchParams.get("token") || "";
+  const links: string[] = [];
+  const resetEnv = {
+    RELAY_PUBLIC_URL: "https://relay.example.test", RELAY_EMAIL_WEBHOOK_URL: "https://mail.test",
+    RELAY_EMAIL_WEBHOOK_SECRET: "reset-email-secret-0123456789abcdef",
+    RELAY_SECRETS_KEY: "reset-encryption-key-0123456789abcdef",
+  } as NodeJS.ProcessEnv;
+  const resetOpts = {
+    env: resetEnv,
+    fetcher: (async (_url, init) => { links.push(JSON.parse(String(init?.body)).link); return Response.json({ ok: true }); }) as typeof fetch,
+    deliverImmediately: true,
+    delay: async () => undefined,
+  };
+  assert.deepEqual(await requestSaasPasswordReset("reset@example.test", request("/api/saas/session", { method: "POST" }), db, resetOpts), { ok: true });
+  const firstToken = new URL(links[0]!).searchParams.get("token") || "";
+  assert.deepEqual(await requestSaasPasswordReset("reset@example.test", request("/api/saas/session", { method: "POST" }), db, resetOpts), { ok: true });
+  assert.deepEqual(await requestSaasPasswordReset("unknown@example.test", request("/api/saas/session", { method: "POST" }), db, { env: {} as NodeJS.ProcessEnv, delay: async () => undefined }), { ok: true });
+  assert.equal(links.length, 2);
+  const token = new URL(links[1]!).searchParams.get("token") || "";
+  assert.ok(firstToken && token && firstToken !== token);
+  await assert.rejects(() => resetSaasPassword(firstToken, "discarded-password-123", request("/api/saas/session", { method: "POST" }), db), /RESET_INVALID/);
   assert.equal((await resetSaasPassword(token, "new-password-12345", request("/api/saas/session", { method: "POST" }), db)).ok, true);
   await assert.rejects(() => resetSaasPassword(token, "another-password-123", request("/api/saas/session", { method: "POST" }), db), /RESET_INVALID/);
   assert.equal(await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(registered.cookies) } }), db), null);

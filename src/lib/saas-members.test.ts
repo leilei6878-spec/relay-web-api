@@ -38,3 +38,29 @@ test("tenant invitations are hash-only, email-delivered and atomically accepted"
   await assert.rejects(() => updateTenantMemberRole(session, owner.userId, "viewer", "active", db), /LAST_OWNER_REQUIRED/);
   await pg.close();
 });
+
+test("tenant invitation rolls back its business row when the Outbox insert fails", async () => {
+  const { pg, db } = await database();
+  const owner = await createTenantOwner({ tenantName: "Atomic Invite Co", ownerName: "Owner", email: "owner@atomic-invite.test", password: "members-password-123" }, db);
+  const session = { userId: owner.userId, tenantId: owner.tenantId, email: owner.email, name: "Owner", tenantName: "Atomic Invite Co", tenantStatus: "active", role: "owner", sessionId: "s", csrfHash: "x", expiresAt: "", mfaVerified: false, mfaVerifiedAt: null, mfaEnabled: false } satisfies SaasSession;
+  await pg.exec("alter table relay_email_deliveries add constraint test_reject_invite_email check (kind <> 'tenant-invite')");
+  let networkCalls = 0;
+  await assert.rejects(
+    () => inviteTenantMember(session, { email: "developer@atomic-invite.test", role: "developer" }, {
+      db,
+      env: {
+        RELAY_EMAIL_WEBHOOK_URL: "https://mail.test", RELAY_PUBLIC_URL: "https://relay.test",
+        RELAY_EMAIL_WEBHOOK_SECRET: "atomic-invite-email-secret-0123456789",
+        RELAY_SECRETS_KEY: "atomic-invite-encryption-key-0123456789",
+      } as NodeJS.ProcessEnv,
+      fetcher: (async () => { networkCalls += 1; return Response.json({ ok: true }); }) as typeof fetch,
+    }),
+    /test_reject_invite_email|constraint/i,
+  );
+  const counts = await pg.query<{ invites: number; deliveries: number }>(
+    "select (select count(*)::int from relay_tenant_invites) as invites,(select count(*)::int from relay_email_deliveries) as deliveries",
+  );
+  assert.deepEqual(counts.rows[0], { invites: 0, deliveries: 0 });
+  assert.equal(networkCalls, 0);
+  await pg.close();
+});

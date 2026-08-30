@@ -2,6 +2,7 @@ import { getSql, type Sql } from "./db";
 import { hashSaasPassword, normalizeEmail } from "./saas-crypto";
 import type { CommercialCapability, PriceBookRow, Tenant, UsageReservation } from "./commercial-types";
 import { uid } from "./utils";
+import type { PreparedEmailDelivery } from "./email-outbox";
 import { decryptSecretValue, encryptSecretValue } from "./secrets";
 
 type DbLike = Pick<Sql, "query">;
@@ -68,6 +69,10 @@ function slugify(value: string) {
 export async function createTenantOwner(
   input: { tenantName: string; ownerName: string; email: string; password: string; currency?: string; userStatus?: "active" | "pending_verification"; emailVerified?: boolean },
   db?: DbLike,
+  opts: {
+    ids?: { tenantId: string; userId: string };
+    verification?: { id: string; tokenHash: string; expiresAt: string; delivery: PreparedEmailDelivery };
+  } = {},
 ) {
   const sql = await database(db);
   const email = normalizeEmail(input.email);
@@ -75,11 +80,16 @@ export async function createTenantOwner(
   const tenantName = input.tenantName.trim().slice(0, 120);
   const ownerName = input.ownerName.trim().slice(0, 120);
   if (!tenantName || !ownerName) throw new Error("企业名称和联系人不能为空");
-  const tenantId = uid();
-  const userId = uid();
+  const tenantId = opts.ids?.tenantId || uid();
+  const userId = opts.ids?.userId || uid();
   const slug = `${slugify(tenantName)}-${tenantId.slice(0, 6)}`;
   const passwordHash = hashSaasPassword(input.password);
   const currency = (input.currency || "USD").toUpperCase() === "CNY" ? "CNY" : "USD";
+  const verification = opts.verification;
+  if (verification && (
+    input.userStatus !== "pending_verification" || input.emailVerified !== false ||
+    verification.delivery.kind !== "verify-email" || verification.delivery.expiresAt !== verification.expiresAt
+  )) throw new Error("REGISTRATION_VERIFICATION_INVARIANT_FAILED");
   const rows = await sql.query<Record<string, unknown>>(
     `with inserted_user as (
        insert into relay_saas_users
@@ -96,11 +106,29 @@ export async function createTenantOwner(
        select inserted_tenant.id,inserted_user.id,'owner','active'
          from inserted_tenant cross join inserted_user
        returning tenant_id,user_id
+     ), verification as (
+       insert into relay_saas_verifications(id,user_id,kind,token_hash,expires_at,created_at)
+       select $12,inserted_user.id,'email',$13,$14,now() from inserted_user where $12::text is not null
+       returning id
+     ), queued_delivery as (
+       insert into relay_email_deliveries
+        (id,dedupe_key,kind,status,attempts,recipient_hmac,payload_ciphertext,payload_sha256,next_attempt_at,expires_at,created_at,updated_at)
+       select $15,$16,$17,'pending',0,$18,$19,$20,now(),$21,now(),now() from verification
+       returning id
      )
-     select tenant_id,user_id from inserted_membership`,
-    [userId, input.email.trim(), email, ownerName, passwordHash, tenantId, slug, tenantName, currency, input.userStatus || "active", input.emailVerified !== false],
+     select inserted_membership.tenant_id,inserted_membership.user_id,queued_delivery.id as delivery_id
+       from inserted_membership left join queued_delivery on true`,
+    [
+      userId, input.email.trim(), email, ownerName, passwordHash, tenantId, slug, tenantName, currency,
+      input.userStatus || "active", input.emailVerified !== false,
+      verification?.id || null, verification?.tokenHash || null, verification?.expiresAt || null,
+      verification?.delivery.id || null, verification?.delivery.dedupeKey || null, verification?.delivery.kind || null,
+      verification?.delivery.recipientHmac || null, verification?.delivery.payloadCiphertext || null,
+      verification?.delivery.payloadSha256 || null, verification?.delivery.expiresAt || null,
+    ],
   );
   if (!rows[0]) throw new Error("租户创建失败");
+  if (verification && rows[0].delivery_id !== verification.delivery.id) throw new Error("EMAIL_OUTBOX_ENQUEUE_FAILED");
   return { tenantId, userId, slug, email };
 }
 

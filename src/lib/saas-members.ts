@@ -4,7 +4,7 @@ import type { TenantRole } from "./commercial-types";
 import type { SaasSession } from "./saas-auth";
 import { uid } from "./utils";
 import { effectiveCommercialEnv } from "./commercial-config";
-import { queueEmailDelivery } from "./email-outbox";
+import { deliverEmailDeliveryNow, emailRecipientHmac, prepareEmailDelivery } from "./email-outbox";
 
 type DbLike = Pick<Sql, "query">;
 async function database(db?: DbLike) { return db || getSql(); }
@@ -33,31 +33,48 @@ export async function inviteTenantMember(
   const token = secureToken(32);
   const id = uid();
   const expiresAt = new Date(Date.now() + 72 * 60 * 60_000).toISOString();
-  const rows = await sql.query<{ id: string }>(
-    `insert into relay_tenant_invites
-      (id,tenant_id,email,email_normalized,role,token_hash,invited_by,expires_at,created_at)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,now())
-     on conflict (tenant_id,email_normalized) where accepted_at is null do update set
-       role=excluded.role,token_hash=excluded.token_hash,invited_by=excluded.invited_by,expires_at=excluded.expires_at,created_at=now()
-     returning id`,
-    [id, session.tenantId, input.email.trim(), email, input.role, sha256(token), session.userId, expiresAt],
-  );
-  if (!rows[0]) throw new Error("INVITE_CREATE_FAILED");
   const env = opts.env || await effectiveCommercialEnv(process.env, sql);
   const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || "";
-  const messageId = uid();
-  const delivery = await queueEmailDelivery({
-    dedupeKey: `tenant-invite:${rows[0].id}:${messageId}`,
-    supersedePrefix: `tenant-invite:${rows[0].id}`,
+  const scope = `tenant-invite:${session.tenantId}:${emailRecipientHmac(email, env).slice(0, 32)}`;
+  const delivery = prepareEmailDelivery({
+    dedupeKey: `${scope}:${uid()}`,
+    supersedePrefix: scope,
     kind: "tenant-invite",
     to: email,
     expiresAt,
     payload: { template: "tenant-invite", to: email, tenant: session.tenantName, role: input.role, link: `${publicUrl}/saas/invite?token=${encodeURIComponent(token)}` },
-  }, sql, {
-    env,
-    fetcher: opts.fetcher,
-  });
-  return { ok: true as const, inviteId: rows[0].id, deliveryId: delivery.id, deliveryStatus: delivery.status };
+  }, env);
+  const rows = await sql.query<{ invite_id: string; delivery_id: string }>(
+    `with invite as (
+       insert into relay_tenant_invites
+        (id,tenant_id,email,email_normalized,role,token_hash,invited_by,expires_at,created_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,now())
+       on conflict (tenant_id,email_normalized) where accepted_at is null do update set
+         role=excluded.role,token_hash=excluded.token_hash,invited_by=excluded.invited_by,
+         expires_at=excluded.expires_at,created_at=now()
+       returning id
+     ), superseded_delivery as (
+       update relay_email_deliveries set status='superseded',payload_ciphertext='[SUPERSEDED]',claim_expires_at=null,
+         error_code='EMAIL_DELIVERY_SUPERSEDED',updated_at=now()
+        where dedupe_key like $10 and dedupe_key<>$11
+          and status in ('pending','retrying','not_configured','sending')
+       returning id
+     ), queued as (
+       insert into relay_email_deliveries
+        (id,dedupe_key,kind,status,attempts,recipient_hmac,payload_ciphertext,payload_sha256,next_attempt_at,expires_at,created_at,updated_at)
+       select $9,$11,$12,'pending',0,$13,$14,$15,now(),$16,now(),now()
+        from invite cross join (select count(*) from superseded_delivery) barrier
+       returning id
+     ) select invite.id as invite_id,queued.id as delivery_id from invite cross join queued`,
+    [
+      id, session.tenantId, input.email.trim(), email, input.role, sha256(token), session.userId, expiresAt,
+      delivery.id, delivery.supersedePattern, delivery.dedupeKey, delivery.kind, delivery.recipientHmac,
+      delivery.payloadCiphertext, delivery.payloadSha256, delivery.expiresAt,
+    ],
+  );
+  if (!rows[0] || rows[0].delivery_id !== delivery.id) throw new Error("INVITE_CREATE_FAILED");
+  const state = await deliverEmailDeliveryNow(delivery.id, sql, { env, fetcher: opts.fetcher });
+  return { ok: true as const, inviteId: rows[0].invite_id, deliveryId: state.id, deliveryStatus: state.status };
 }
 
 export async function acceptTenantInvite(

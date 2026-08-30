@@ -4,6 +4,9 @@ Schema 17 routes email verification, password-reset and tenant-invite messages
 through a durable PostgreSQL Outbox. A request succeeds after the message is
 durably queued; a temporary receiver failure no longer loses the message or
 turns an already-created account/invite into an ambiguous HTTP failure.
+Registration, verification/reset-token rotation and tenant invitation commit
+their business row and encrypted Outbox row in one PostgreSQL statement. If
+either insert fails, neither side is left behind.
 
 ## Configuration
 
@@ -60,6 +63,12 @@ ciphertext. Plain email addresses and tokens are not exposed by the commercial
 admin API. When a newer token supersedes an older one, or a message is
 delivered/expired, its ciphertext is immediately replaced by a marker.
 Terminal metadata is deleted by the operational retention policy.
+Public verification-resend and password-reset-request responses have the same
+shape whether the address exists or not; Outbox IDs and status are never used
+as an account-existence oracle. These public recovery paths never call the
+receiver synchronously and use a small randomized minimum response duration;
+the Scheduler delivers the already-committed row on its next cycle. This also
+prevents receiver latency from becoming an email-existence timing oracle.
 
 The dedicated `scheduler` service checks due messages every 30 seconds and
 recovers claims left by a crashed process after two minutes. Commercial

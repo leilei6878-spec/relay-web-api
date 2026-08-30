@@ -9,6 +9,17 @@ type DbLike = Pick<Sql, "query">;
 type Resolver = Parameters<typeof assertPublicCommercialWebhookUrl>[1];
 type EmailKind = "verify-email" | "password-reset" | "tenant-invite";
 
+export type PreparedEmailDelivery = {
+  id: string;
+  dedupeKey: string;
+  supersedePattern: string | null;
+  kind: EmailKind;
+  recipientHmac: string;
+  payloadCiphertext: string;
+  payloadSha256: string;
+  expiresAt: string;
+};
+
 type DeliveryRow = Record<string, unknown> & {
   id: string;
   attempts: number;
@@ -29,6 +40,54 @@ function payloadHash(serialized: string) {
 
 function retryDelaySeconds(attempt: number) {
   return Math.min(3600, 60 * 2 ** Math.min(6, Math.max(0, attempt - 1)));
+}
+
+function safeDedupePart(value: string, label: string, max: number) {
+  const text = value.trim();
+  if (!text || text.length > max || !/^[A-Za-z0-9:._-]+$/.test(text)) throw new Error(`${label}_INVALID`);
+  return text;
+}
+
+export function emailRecipientHmac(to: string, env: NodeJS.ProcessEnv) {
+  const key = env.RELAY_SECRETS_KEY?.trim() || "";
+  if (key.length < 32) throw new Error("EMAIL_OUTBOX_ENCRYPTION_KEY_REQUIRED");
+  return createHmac("sha256", key).update(to.trim().toLowerCase()).digest("hex");
+}
+
+export function prepareEmailDelivery(
+  input: {
+    dedupeKey: string;
+    kind: EmailKind;
+    to: string;
+    payload: Record<string, unknown>;
+    expiresAt: string;
+    supersedePrefix?: string;
+  },
+  env: NodeJS.ProcessEnv,
+): PreparedEmailDelivery {
+  const key = env.RELAY_SECRETS_KEY?.trim() || "";
+  if (key.length < 32) throw new Error("EMAIL_OUTBOX_ENCRYPTION_KEY_REQUIRED");
+  const dedupeKey = safeDedupePart(input.dedupeKey, "EMAIL_OUTBOX_DEDUPE_KEY", 240);
+  const supersedePrefix = input.supersedePrefix
+    ? safeDedupePart(input.supersedePrefix, "EMAIL_OUTBOX_SUPERSEDE_PREFIX", 220)
+    : "";
+  if (supersedePrefix && !dedupeKey.startsWith(`${supersedePrefix}:`)) throw new Error("EMAIL_OUTBOX_SUPERSEDE_SCOPE_INVALID");
+  const expiresAt = new Date(input.expiresAt);
+  if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) throw new Error("EMAIL_OUTBOX_EXPIRY_INVALID");
+  const serialized = JSON.stringify(input.payload);
+  if (Buffer.byteLength(serialized, "utf8") > 20_000) throw new Error("EMAIL_OUTBOX_PAYLOAD_TOO_LARGE");
+  const ciphertext = encryptSecretValue(serialized, env);
+  if (!ciphertext.startsWith("enc:v1:")) throw new Error("EMAIL_OUTBOX_ENCRYPTION_REQUIRED");
+  return {
+    id: uid(),
+    dedupeKey,
+    supersedePattern: supersedePrefix ? `${supersedePrefix}:%` : null,
+    kind: input.kind,
+    recipientHmac: emailRecipientHmac(input.to, env),
+    payloadCiphertext: ciphertext,
+    payloadSha256: payloadHash(serialized),
+    expiresAt: expiresAt.toISOString(),
+  };
 }
 
 export async function sendEmailWebhook(
@@ -90,39 +149,47 @@ export async function queueEmailDelivery(
 ) {
   const sql = db || await getSql();
   const env = opts.env || await effectiveCommercialEnv(process.env, sql);
-  const key = env.RELAY_SECRETS_KEY?.trim() || "";
-  if (key.length < 32) throw new Error("EMAIL_OUTBOX_ENCRYPTION_KEY_REQUIRED");
-  const serialized = JSON.stringify(input.payload);
-  if (Buffer.byteLength(serialized, "utf8") > 20_000) throw new Error("EMAIL_OUTBOX_PAYLOAD_TOO_LARGE");
-  const ciphertext = encryptSecretValue(serialized, env);
-  if (!ciphertext.startsWith("enc:v1:")) throw new Error("EMAIL_OUTBOX_ENCRYPTION_REQUIRED");
-  const id = uid();
-  if (input.supersedePrefix) {
-    await sql.query(
-      `update relay_email_deliveries set status='superseded',payload_ciphertext='[SUPERSEDED]',claim_expires_at=null,
-         error_code='EMAIL_DELIVERY_SUPERSEDED',updated_at=now()
-        where dedupe_key like $1 and status in ('pending','retrying','not_configured','sending')`,
-      [`${input.supersedePrefix.replace(/[%_]/g, "")}:%`],
-    );
-  }
+  const prepared = prepareEmailDelivery(input, env);
   const rows = await sql.query<{ id: string }>(
-    `insert into relay_email_deliveries
-      (id,dedupe_key,kind,status,attempts,recipient_hmac,payload_ciphertext,payload_sha256,next_attempt_at,expires_at,created_at,updated_at)
-     values ($1,$2,$3,'pending',0,$4,$5,$6,now(),$7,now(),now())
-     on conflict(dedupe_key) do nothing returning id`,
-    [id, input.dedupeKey.slice(0, 240), input.kind,
-      createHmac("sha256", key).update(input.to.trim().toLowerCase()).digest("hex"),
-      ciphertext, payloadHash(serialized), input.expiresAt],
+    `with superseded as (
+       update relay_email_deliveries set status='superseded',payload_ciphertext='[SUPERSEDED]',claim_expires_at=null,
+         error_code='EMAIL_DELIVERY_SUPERSEDED',updated_at=now()
+        where $8::text is not null and dedupe_key like $8
+          and dedupe_key<>$2
+          and status in ('pending','retrying','not_configured','sending')
+       returning id
+     ), queued as (
+       insert into relay_email_deliveries
+        (id,dedupe_key,kind,status,attempts,recipient_hmac,payload_ciphertext,payload_sha256,next_attempt_at,expires_at,created_at,updated_at)
+       select $1,$2,$3,'pending',0,$4,$5,$6,now(),$7,now(),now()
+        from (select count(*) from superseded) barrier
+       on conflict(dedupe_key) do nothing returning id
+     ) select id from queued`,
+    [prepared.id, prepared.dedupeKey, prepared.kind, prepared.recipientHmac,
+      prepared.payloadCiphertext, prepared.payloadSha256, prepared.expiresAt, prepared.supersedePattern],
   );
-  const deliveryId = rows[0]?.id || (await sql.query<{ id: string }>("select id from relay_email_deliveries where dedupe_key=$1", [input.dedupeKey]))[0]?.id;
+  const deliveryId = rows[0]?.id || (await sql.query<{ id: string }>("select id from relay_email_deliveries where dedupe_key=$1", [prepared.dedupeKey]))[0]?.id;
   if (!deliveryId) throw new Error("EMAIL_OUTBOX_ENQUEUE_FAILED");
-  await deliverDueEmailNotifications(sql, {
+  return deliverEmailDeliveryNow(deliveryId, sql, {
     env,
     fetcher: opts.fetcher,
     resolver: opts.resolver,
     acquireLock: opts.acquireLock,
-    onlyId: deliveryId,
   });
+}
+
+export async function deliverEmailDeliveryNow(
+  deliveryId: string,
+  db?: DbLike,
+  opts: {
+    env?: NodeJS.ProcessEnv;
+    fetcher?: typeof fetch;
+    resolver?: Resolver;
+    acquireLock?: (id: string) => Promise<boolean>;
+  } = {},
+) {
+  const sql = db || await getSql();
+  await deliverDueEmailNotifications(sql, { ...opts, onlyId: deliveryId });
   const state = await sql.query<{ status: string }>("select status from relay_email_deliveries where id=$1", [deliveryId]);
   return { id: deliveryId, status: state[0]?.status || "pending" };
 }
