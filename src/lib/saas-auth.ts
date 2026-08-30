@@ -1,6 +1,7 @@
 import { getSql, type Sql } from "./db";
 import { coordIncr } from "./coord";
-import { assertPublicCommercialWebhookUrl, effectiveCommercialEnv } from "./commercial-config";
+import { effectiveCommercialEnv } from "./commercial-config";
+import { queueEmailDelivery } from "./email-outbox";
 import { createTenantOwner } from "./saas-billing";
 import {
   generateTotpSecret,
@@ -155,27 +156,30 @@ export async function sendSaasVerification(
   );
   if (!users[0]) return { ok: true as const };
   const token = secureToken(32);
+  const verificationId = uid();
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
   await sql.query(
     `with expired as (
        update relay_saas_verifications set consumed_at=now()
         where user_id=$1 and kind='email' and consumed_at is null
      ) insert into relay_saas_verifications(id,user_id,kind,token_hash,expires_at,created_at)
-       values ($2,$1,'email',$3,now()+interval '24 hours',now())`,
-    [users[0].id, uid(), sha256(token)],
+       values ($2,$1,'email',$3,$4,now())`,
+    [users[0].id, verificationId, sha256(token), expiresAt],
   );
   const env = opts.env || await effectiveCommercialEnv(process.env, db);
   const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || new URL(request.url).origin;
-  const delivery = env.RELAY_EMAIL_WEBHOOK_URL?.trim();
-  if (!delivery) throw new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
-  if (env.NODE_ENV === "production" && !opts.fetcher) await assertPublicCommercialWebhookUrl(delivery);
-  const response = await (opts.fetcher || fetch)(delivery, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(10_000),
-    body: JSON.stringify({ template: "verify-email", to: users[0].email, tenant: users[0].tenant_name, link: `${publicUrl}/saas/verify?token=${encodeURIComponent(token)}` }),
+  const delivery = await queueEmailDelivery({
+    dedupeKey: `verify-email:${users[0].id}:${verificationId}`,
+    supersedePrefix: `verify-email:${users[0].id}`,
+    kind: "verify-email",
+    to: users[0].email,
+    expiresAt,
+    payload: { template: "verify-email", to: users[0].email, tenant: users[0].tenant_name, link: `${publicUrl}/saas/verify?token=${encodeURIComponent(token)}` },
+  }, sql, {
+    env,
+    fetcher: opts.fetcher,
   });
-  if (!response.ok) throw new Error("EMAIL_DELIVERY_FAILED");
-  return { ok: true as const };
+  return { ok: true as const, deliveryId: delivery.id, deliveryStatus: delivery.status };
 }
 
 export async function verifySaasEmail(token: string, request: Request, db?: DbLike) {
@@ -214,23 +218,26 @@ export async function requestSaasPasswordReset(
   // Do not reveal whether the address exists.
   if (!users[0]) return { ok: true as const };
   const token = secureToken(32);
+  const verificationId = uid();
+  const expiresAt = new Date(Date.now() + 60 * 60_000).toISOString();
   await sql.query(
-    "insert into relay_saas_verifications(id,user_id,kind,token_hash,expires_at,created_at) values ($1,$2,'password_reset',$3,now()+interval '1 hour',now())",
-    [uid(), users[0].id, sha256(token)],
+    "insert into relay_saas_verifications(id,user_id,kind,token_hash,expires_at,created_at) values ($1,$2,'password_reset',$3,$4,now())",
+    [verificationId, users[0].id, sha256(token), expiresAt],
   );
   const env = opts.env || await effectiveCommercialEnv(process.env, db);
-  const delivery = env.RELAY_EMAIL_WEBHOOK_URL?.trim();
-  if (!delivery) throw new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
-  if (env.NODE_ENV === "production" && !opts.fetcher) await assertPublicCommercialWebhookUrl(delivery);
   const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || new URL(request.url).origin;
-  const response = await (opts.fetcher || fetch)(delivery, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(10_000),
-    body: JSON.stringify({ template: "password-reset", to: users[0].email, link: `${publicUrl}/saas/reset?token=${encodeURIComponent(token)}` }),
+  const delivery = await queueEmailDelivery({
+    dedupeKey: `password-reset:${users[0].id}:${verificationId}`,
+    supersedePrefix: `password-reset:${users[0].id}`,
+    kind: "password-reset",
+    to: users[0].email,
+    expiresAt,
+    payload: { template: "password-reset", to: users[0].email, link: `${publicUrl}/saas/reset?token=${encodeURIComponent(token)}` },
+  }, sql, {
+    env,
+    fetcher: opts.fetcher,
   });
-  if (!response.ok) throw new Error("EMAIL_DELIVERY_FAILED");
-  return { ok: true as const };
+  return { ok: true as const, deliveryId: delivery.id, deliveryStatus: delivery.status };
 }
 
 export async function resetSaasPassword(token: string, password: string, request: Request, db?: DbLike) {

@@ -26,6 +26,8 @@ Machine contract: [`openapi.yaml`](openapi.yaml). Admin/Worker APIs are not in t
 | [docs/BACKUP_RESTORE.md](docs/BACKUP_RESTORE.md) | Backup |
 | [docs/UPGRADE.md](docs/UPGRADE.md) / [ROLLBACK.md](docs/ROLLBACK.md) | Releases |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | Incidents |
+| [docs/COMMERCIAL_RUNBOOK.md](docs/COMMERCIAL_RUNBOOK.md) | Public paid SaaS launch gates |
+| [docs/EMAIL_DELIVERY.md](docs/EMAIL_DELIVERY.md) | Signed, encrypted customer-email Outbox |
 | [docs/ACCEPTANCE_REPORT.md](docs/ACCEPTANCE_REPORT.md) | RC evidence |
 
 ## Safety

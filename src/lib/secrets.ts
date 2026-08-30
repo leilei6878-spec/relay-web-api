@@ -6,8 +6,8 @@ import { isProduction, readEnv } from "./env-mode";
 const FILE = resolve("storage", "secrets.json");
 type Bag = Record<string, string>;
 
-function keyBuf() {
-  const secret = readEnv("RELAY_SECRETS_KEY");
+function keyBuf(env: NodeJS.ProcessEnv = process.env) {
+  const secret = readEnv("RELAY_SECRETS_KEY", env);
   if (!secret) {
     if (isProduction()) {
       throw new Error("PRODUCTION_FAIL_CLOSED: RELAY_SECRETS_KEY required; plaintext secrets are forbidden");
@@ -17,8 +17,8 @@ function keyBuf() {
   return scryptSync(secret, "relay-secrets-v1", 32);
 }
 
-function encrypt(plain: string) {
-  const key = keyBuf();
+function encrypt(plain: string, env: NodeJS.ProcessEnv = process.env) {
+  const key = keyBuf(env);
   if (!key) return plain;
   const iv = randomBytes(12);
   const c = createCipheriv("aes-256-gcm", key, iv);
@@ -27,9 +27,9 @@ function encrypt(plain: string) {
   return `enc:v1:${iv.toString("base64")}:${tag.toString("base64")}:${enc.toString("base64")}`;
 }
 
-function decrypt(raw: string) {
+function decrypt(raw: string, env: NodeJS.ProcessEnv = process.env) {
   if (!raw.startsWith("enc:v1:")) return raw;
-  const key = keyBuf();
+  const key = keyBuf(env);
   if (!key) throw new Error("RELAY_SECRETS_KEY required to read encrypted secret");
   const parts = raw.split(":");
   const iv = Buffer.from(parts[2] || "", "base64");
@@ -40,12 +40,12 @@ function decrypt(raw: string) {
   return Buffer.concat([d.update(data), d.final()]).toString("utf8");
 }
 
-export function encryptSecretValue(value: string) {
-  return encrypt(value);
+export function encryptSecretValue(value: string, env: NodeJS.ProcessEnv = process.env) {
+  return encrypt(value, env);
 }
 
-export function decryptSecretValue(value: string) {
-  return decrypt(value);
+export function decryptSecretValue(value: string, env: NodeJS.ProcessEnv = process.env) {
+  return decrypt(value, env);
 }
 
 async function load(): Promise<Bag> {

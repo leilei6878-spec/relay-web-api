@@ -41,23 +41,30 @@
    Confirm the Compose `scheduler` service is running and public readiness
    reports `schedulerOnline: true`; Gateway-local background timers are
    intentionally disabled when the dedicated service is configured.
-10. Complete counsel review of terms/privacy/DPA; set `RELAY_LEGAL_APPROVED=1`.
-11. Inspect `/api/saas/readiness` and resolve every infrastructure/configuration
+10. Configure and activate `email.webhookUrl` plus a dedicated 32+ character
+    `email.webhookSecret`. Verify the receiver checks timestamp/HMAC,
+    deduplicates `X-Relay-Email-Id` and durably accepts all three customer
+    templates. Exercise 5xx recovery, supersession, expiry and secret rotation.
+    See `EMAIL_DELIVERY.md`. Commercial mode is blocked until this signed
+    channel is configured; public registration remains a separate final gate.
+11. Complete counsel review of terms/privacy/DPA; set `RELAY_LEGAL_APPROVED=1`.
+12. Inspect `/api/saas/readiness` and resolve every infrastructure/configuration
     blocker. `ready` must remain false until the evidence in step 15 is valid.
-12. Complete a test-mode Checkout/payment/refund/reconciliation drill, then a
+13. Complete a test-mode Checkout/payment/refund/reconciliation drill, then a
     separately approved live-mode minimum-value transaction and refund.
-13. Temporarily set `RELAY_ALLOW_LIVE_PROVIDER_CANARY=1`, run every exact active
+14. Temporarily set `RELAY_ALLOW_LIVE_PROVIDER_CANARY=1`, run every exact active
     provider/model/capability/currency route in `/commercial-sandbox`, then close the
     canary hard gate. Readiness must report `missingCanaries: 0`.
-14. Run the 200-request, 5×20 concurrency and 24-hour soak gates.
-15. In `/commercial-readiness`, record the SHA-256 and external reference for
+15. Run the 200-request, 5×20 concurrency and 24-hour soak gates.
+16. In `/commercial-readiness`, record the SHA-256 and external reference for
     every requirement. Each passing item must name a reviewer other than the
     recording administrator. Record a later failure or withdrawal as a new
     `failed`/`revoked` version; never edit history.
-16. Verify `ready: true`, `paymentReady: true`, `adminMfaRequired: true`,
+17. Verify `ready: true`, `paymentReady: true`, `adminMfaRequired: true`,
     `adminMfaConfigured: true`, `missingEvidence: 0` and
-    `missingCanaries: 0`.
-17. Only then set `RELAY_SAAS_REGISTRATION_ENABLED=1`.
+    `missingCanaries: 0`, `emailDeliveryConfigured: true` and
+    `schedulerOnline: true`.
+18. Only then set `RELAY_SAAS_REGISTRATION_ENABLED=1`.
 
 ## Configuration and secret rotation
 
@@ -67,7 +74,11 @@ previous vendor credential valid through the observation window so a tested
 version rollback remains possible. Environment launch gates retain final veto.
 
 Back up `RELAY_SECRETS_KEY` in the external secret manager; it is required to
-decrypt versioned provider/payment secrets after a database restore.
+decrypt versioned provider/payment secrets and queued customer email after a
+database restore. Do not rotate this root key as an ordinary configuration
+change; use a separately rehearsed re-encryption procedure. Provider, payment,
+email and alert credentials can be independently replaced through versioned
+configuration.
 
 ## Billing incident
 

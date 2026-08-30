@@ -1,6 +1,6 @@
 # Upgrade
 
-Schema is the ordered set of `migrations/*.sql`. Current `SCHEMA_VERSION` is **16**
+Schema is the ordered set of `migrations/*.sql`. Current `SCHEMA_VERSION` is **17**
 (`src/lib/release.ts`, row `relay_meta.schema_version`).
 
 ## Procedure (release N → N+1)
@@ -15,6 +15,12 @@ Schema is the ordered set of `migrations/*.sql`. Current `SCHEMA_VERSION` is **1
 8. Re-enable workers.
 
 Migrations never require hand-editing SQL. If a migration fails, the transaction rolls back; the process does not go READY.
+
+Schema 17 adds `relay_email_deliveries`. Before enabling commercial mode,
+configure and test both `RELAY_EMAIL_WEBHOOK_URL` and a dedicated 32+ character
+`RELAY_EMAIL_WEBHOOK_SECRET`; keep the dedicated scheduler online. Existing
+schema-16 deployments may migrate with the channel unset while commercial and
+registration gates remain closed.
 
 JSON files are **not** part of production upgrade. To import a preview plane use:
 

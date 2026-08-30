@@ -22,7 +22,7 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
   if (env === process.env) env = await effectiveCommercialEnv(env, db);
   const policy = retentionPolicy(env);
   const sql = db || await getSql();
-  const [chargeResults, jobs, sessions, checks, usage, checkoutUrls, audit, alerts] = await Promise.all([
+  const [chargeResults, jobs, sessions, checks, usage, checkoutUrls, audit, alerts, emails] = await Promise.all([
     sql.query<{ count: number }>(
       `with updated as (
          update relay_usage_charges set extra=extra-'providerResultCiphertext'
@@ -83,6 +83,14 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
        ) select count(*)::int as count from deleted`,
       [policy.operationalDays],
     ),
+    sql.query<{ count: number }>(
+      `with deleted as (
+         delete from relay_email_deliveries
+          where status in ('delivered','expired','superseded')
+            and updated_at < now()-($1::text||' days')::interval returning id
+       ) select count(*)::int as count from deleted`,
+      [policy.operationalDays],
+    ),
   ]);
   // Billing transactions/entries are intentionally never deleted here. Object
   // media must use the configured S3 bucket lifecycle because deleting rows
@@ -97,6 +105,7 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
     redactedCheckoutUrls: Number(checkoutUrls[0]?.count || 0),
     deletedAudit: Number(audit[0]?.count || 0),
     deletedAlerts: Number(alerts[0]?.count || 0),
+    deletedEmailDeliveries: Number(emails[0]?.count || 0),
   };
 }
 

@@ -9,7 +9,7 @@ import { validateVertexProjectLocation, vertexAccessToken } from "./vertex-auth"
 
 type DbLike = Pick<Sql, "query">;
 type ConfigKind = "boolean" | "integer" | "enum" | "json" | "string" | "url" | "secret";
-type ConnectionTest = "openai" | "google" | "vertex" | "leonardo" | "stripe" | "stripe_webhook" | "webhook" | "alert_webhook";
+type ConnectionTest = "openai" | "google" | "vertex" | "leonardo" | "stripe" | "stripe_webhook" | "webhook" | "alert_webhook" | "email_webhook";
 type Resolver = (hostname: string, options: { all: true; verbatim: true }) => Promise<{ address: string; family: number }[]>;
 
 export type CommercialConfigDefinition = {
@@ -49,7 +49,8 @@ export const COMMERCIAL_CONFIG_CATALOG: readonly CommercialConfigDefinition[] = 
   { key: "payments.stripe.webhookSecret", label: "Stripe Webhook Secret", group: "payments", kind: "secret", envName: "STRIPE_WEBHOOK_SECRET", secret: true, test: "stripe_webhook", description: "用于原始请求体 Webhook 验签。" },
   { key: "payments.maxRechargeMinor", label: "单次充值上限", group: "payments", kind: "integer", envName: "RELAY_STRIPE_MAX_RECHARGE_MINOR", min: 100, max: 100_000_000, description: "最小货币单位，例如 USD cents。" },
   { key: "tax.mode", label: "税务模式", group: "payments", kind: "enum", envName: "RELAY_TAX_MODE", allowed: ["unconfigured", "stripe_automatic", "approved_exempt"], description: "Stripe Tax 或书面批准的免税销售范围。" },
-  { key: "email.webhookUrl", label: "邮件投递 Webhook", group: "delivery", kind: "url", envName: "RELAY_EMAIL_WEBHOOK_URL", test: "webhook", description: "只允许 HTTPS；连接测试会发送一条配置测试事件。" },
+  { key: "email.webhookUrl", label: "邮件投递 Webhook", group: "delivery", kind: "url", envName: "RELAY_EMAIL_WEBHOOK_URL", test: "email_webhook", description: "只允许 HTTPS；连接测试和验证/重置/邀请邮件均使用 HMAC 签名。" },
+  { key: "email.webhookSecret", label: "邮件 Webhook HMAC Secret", group: "delivery", kind: "secret", envName: "RELAY_EMAIL_WEBHOOK_SECRET", secret: true, description: "至少 32 字符；接收端用它验证 X-Relay-Signature，不能复用主加密密钥。" },
   { key: "alerts.webhookUrl", label: "告警 Webhook", group: "delivery", kind: "url", envName: "RELAY_ALERT_WEBHOOK_URL", test: "alert_webhook", description: "只允许 HTTPS；连接测试与正式打开/恢复通知均使用 HMAC 签名。" },
   { key: "alerts.webhookSecret", label: "告警 Webhook HMAC Secret", group: "delivery", kind: "secret", envName: "RELAY_ALERT_WEBHOOK_SECRET", secret: true, description: "至少 32 字符；用于 X-Relay-Signature 的 HMAC-SHA256，接收端据此验证事件来源。" },
   { key: "retention.requestContentDays", label: "请求内容保留天数", group: "retention", kind: "integer", envName: "RELAY_REQUEST_CONTENT_RETENTION_DAYS", min: 1, max: 365, description: "到期后清除请求与供应商结果内容。" },
@@ -114,6 +115,7 @@ function normalizeValue(definition: CommercialConfigDefinition, value: unknown) 
     }
     if (definition.key === "security.auditHashKey" && secret.length < 32) throw new Error("CONFIG_AUDIT_HASH_KEY_INVALID");
     if (definition.key === "alerts.webhookSecret" && secret.length < 32) throw new Error("CONFIG_ALERT_WEBHOOK_SECRET_INVALID");
+    if (definition.key === "email.webhookSecret" && secret.length < 32) throw new Error("CONFIG_EMAIL_WEBHOOK_SECRET_INVALID");
     return secret;
   }
   if (definition.kind === "boolean") {
@@ -233,11 +235,12 @@ async function testConnection(definition: CommercialConfigDefinition, value: unk
     method = "POST";
     headers = { "Content-Type": "application/json" };
     body = JSON.stringify({ type: "relay.configuration.test", at: new Date().toISOString() });
-    if (definition.test === "alert_webhook") {
-      const secret = env.RELAY_ALERT_WEBHOOK_SECRET?.trim() || "";
-      if (secret.length < 32) return { ok: false, detail: { code: "ALERT_WEBHOOK_SECRET_REQUIRED" } };
+    if (definition.test === "alert_webhook" || definition.test === "email_webhook") {
+      const email = definition.test === "email_webhook";
+      const secret = (email ? env.RELAY_EMAIL_WEBHOOK_SECRET : env.RELAY_ALERT_WEBHOOK_SECRET)?.trim() || "";
+      if (secret.length < 32) return { ok: false, detail: { code: email ? "EMAIL_WEBHOOK_SECRET_REQUIRED" : "ALERT_WEBHOOK_SECRET_REQUIRED" } };
       const timestamp = Math.floor(Date.now() / 1000).toString();
-      headers["X-Relay-Event-Id"] = `config-test-${uid()}`;
+      headers[email ? "X-Relay-Email-Id" : "X-Relay-Event-Id"] = `config-test-${uid()}`;
       headers["X-Relay-Timestamp"] = timestamp;
       headers["X-Relay-Signature"] = `v1=${createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex")}`;
     }

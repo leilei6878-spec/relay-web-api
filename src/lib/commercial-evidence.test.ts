@@ -18,7 +18,7 @@ async function database() {
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
     "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql",
     "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql",
-    "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql",
+    "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
@@ -131,6 +131,7 @@ test("commercial readiness cannot be enabled by environment flags until every re
     RELAY_REQUIRE_ADMIN_MFA: "1", RELAY_ADMIN_TOTP_SECRET: "JBSWY3DPEHPK3PXP", RELAY_REQUIRE_PRIVILEGED_SAAS_MFA: "1",
     RELAY_SECRETS_KEY: "evidence-test-secret-key-0123456789abcdef",
     RELAY_ALERT_WEBHOOK_URL: "https://alerts.example.test/relay", RELAY_ALERT_WEBHOOK_SECRET: "evidence-alert-secret-0123456789abcdef",
+    RELAY_EMAIL_WEBHOOK_URL: "https://mail.example.test/relay", RELAY_EMAIL_WEBHOOK_SECRET: "evidence-email-secret-0123456789abcdef",
     RELAY_SAAS_REGISTRATION_ENABLED: "0",
   } as NodeJS.ProcessEnv;
   const blocked = await commercialReadiness(env, db);

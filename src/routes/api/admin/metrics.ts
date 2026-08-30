@@ -26,11 +26,13 @@ export const Route = createFileRoute("/api/admin/metrics")({
         const [tenantRows, chargeRows, alertRows] = await Promise.all([
           sql.query<{ total: number; active: number }>("select count(*)::int as total,count(*) filter(where status in ('trial','active'))::int as active from relay_tenants"),
           sql.query<{ reserved: number; settled: number; charged: number }>("select count(*) filter(where status='reserved')::int as reserved,count(*) filter(where status='settled')::int as settled,coalesce(sum(charged_minor) filter(where status='settled'),0)::bigint as charged from relay_usage_charges"),
-          sql.query<{ open: number; critical: number; deliveryPending: number; deliveryFailed: number }>(
+          sql.query<{ open: number; critical: number; deliveryPending: number; deliveryFailed: number; emailPending: number; emailFailed: number }>(
             `select count(*) filter(where status='open')::int as open,
                     count(*) filter(where status='open' and severity='critical')::int as critical,
                     (select count(*)::int from relay_alert_deliveries where status in ('pending','sending','not_configured')) as "deliveryPending",
-                    (select count(*)::int from relay_alert_deliveries where status='retrying') as "deliveryFailed"
+                    (select count(*)::int from relay_alert_deliveries where status='retrying') as "deliveryFailed",
+                    (select count(*)::int from relay_email_deliveries where status in ('pending','sending','not_configured')) as "emailPending",
+                    (select count(*)::int from relay_email_deliveries where status='retrying') as "emailFailed"
                from relay_alert_events`,
           ),
         ]);

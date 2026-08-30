@@ -729,7 +729,7 @@ export async function publishPrice(
 
 export async function commercialAdminSnapshot(db?: DbLike) {
   const sql = await database(db);
-  const [tenants, plans, planPeriods, prices, orders, transactions, alerts, paymentEvents, refunds, disputes, tenantAudits] = await Promise.all([
+  const [tenants, plans, planPeriods, prices, orders, transactions, alerts, paymentEvents, refunds, disputes, tenantAudits, emailDeliveries] = await Promise.all([
     sql.query<Record<string, unknown>>("select * from relay_tenants order by created_at desc limit 500"),
     sql.query<Record<string, unknown>>("select * from relay_plans order by created_at asc"),
     sql.query<Record<string, unknown>>("select * from relay_plan_periods order by period_start desc limit 500"),
@@ -762,6 +762,11 @@ export async function commercialAdminSnapshot(db?: DbLike) {
               request_id,ip_hmac,user_agent_hmac,detail,created_at
          from relay_tenant_audit_events order by created_at desc,id desc limit 500`,
     ),
+    sql.query<Record<string, unknown>>(
+      `select id,dedupe_key,kind,status,attempts,recipient_hmac,last_attempt_at,next_attempt_at,
+              delivered_at,expires_at,http_status,error_code,created_at,updated_at
+         from relay_email_deliveries order by created_at desc limit 300`,
+    ),
   ]);
-  return { tenants, plans, planPeriods, prices, orders, transactions, alerts, paymentEvents, refunds, disputes, tenantAudits };
+  return { tenants, plans, planPeriods, prices, orders, transactions, alerts, paymentEvents, refunds, disputes, tenantAudits, emailDeliveries };
 }

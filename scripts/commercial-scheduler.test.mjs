@@ -8,15 +8,15 @@ test("dedicated scheduler runs every task at boot and respects independent inter
   const initialAt = 100_000_000;
   const initial = dueSchedulerTasks(last, initialAt, {});
   assert.deepEqual(initial, [
-    "heartbeat", "provider-canary", "commercial-monitor", "account-check", "inspection-cleanup",
+    "heartbeat", "email-delivery", "provider-canary", "commercial-monitor", "account-check", "inspection-cleanup",
     "availability-snapshot", "plan-renewal", "data-retention",
   ]);
   for (const name of initial) last[name] = initialAt;
   assert.deepEqual(dueSchedulerTasks(last, initialAt + 29_999, {}), []);
-  assert.deepEqual(dueSchedulerTasks(last, initialAt + 30_000, {}), ["heartbeat", "provider-canary"]);
+  assert.deepEqual(dueSchedulerTasks(last, initialAt + 30_000, {}), ["heartbeat", "email-delivery", "provider-canary"]);
   assert.deepEqual(
     dueSchedulerTasks({}, initialAt, { RELAY_SKIP_COMMERCIAL_MONITOR: "1", RELAY_SKIP_PLAN_RENEWAL: "1" }),
-    ["heartbeat", "provider-canary", "account-check", "inspection-cleanup", "availability-snapshot", "data-retention"],
+    ["heartbeat", "email-delivery", "provider-canary", "account-check", "inspection-cleanup", "availability-snapshot", "data-retention"],
   );
 });
 
@@ -37,7 +37,7 @@ test("scheduler loop isolates task failure and continues to the next cycle", asy
   } finally {
     console.error = originalError;
   }
-  assert.deepEqual(ran, ["heartbeat", "commercial-monitor", "inspection-cleanup", "heartbeat", "commercial-monitor"]);
+  assert.deepEqual(ran, ["heartbeat", "email-delivery", "commercial-monitor", "inspection-cleanup", "heartbeat", "email-delivery", "commercial-monitor"]);
 });
 
 test("production Compose keeps scheduler separate, persistent and without a published port", () => {

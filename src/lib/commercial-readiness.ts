@@ -25,6 +25,7 @@ export type CommercialReadiness = {
   tenantAuditConfigured: boolean;
   alertDeliveryConfigured: boolean;
   schedulerOnline: boolean;
+  emailDeliveryConfigured: boolean;
   registrationEnabled: boolean;
   paymentProvider: string;
   paymentReady: boolean;
@@ -127,6 +128,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   const customerPrivilegedMfaRequired = env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA === "1";
   const tenantAuditConfigured = (env.RELAY_AUDIT_HASH_KEY?.trim() || env.RELAY_SECRETS_KEY?.trim() || "").length >= 32;
   let alertDeliveryConfigured = false;
+  let emailDeliveryConfigured = false;
   try {
     const alertUrl = new URL(env.RELAY_ALERT_WEBHOOK_URL?.trim() || "");
     alertDeliveryConfigured = alertUrl.protocol === "https:" && !alertUrl.username && !alertUrl.password &&
@@ -134,6 +136,14 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
       (env.RELAY_ALERT_WEBHOOK_SECRET?.trim() || "").length >= 32;
   } catch {
     alertDeliveryConfigured = false;
+  }
+  try {
+    const emailUrl = new URL(env.RELAY_EMAIL_WEBHOOK_URL?.trim() || "");
+    emailDeliveryConfigured = emailUrl.protocol === "https:" && !emailUrl.username && !emailUrl.password &&
+      !emailUrl.search && !emailUrl.hash && Boolean(emailUrl.hostname) &&
+      (env.RELAY_EMAIL_WEBHOOK_SECRET?.trim() || "").length >= 32;
+  } catch {
+    emailDeliveryConfigured = false;
   }
   const paymentProvider = (env.RELAY_PAYMENT_PROVIDER || "disabled").trim();
   const stripeSecret = env.STRIPE_SECRET_KEY?.trim() || "";
@@ -162,11 +172,11 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   if (enabled && !customerPrivilegedMfaRequired) blockers.push("privileged customer MFA hard gate not enabled");
   if (enabled && !tenantAuditConfigured) blockers.push("tenant audit HMAC key missing or shorter than 32 characters");
   if (enabled && !alertDeliveryConfigured) blockers.push("signed alert Webhook delivery not configured");
+  if (enabled && !emailDeliveryConfigured) blockers.push("signed email Webhook delivery not configured");
   if (enabled && paymentProvider !== "stripe") blockers.push("Stripe payment provider not configured");
   if (enabled && paymentProvider === "stripe" && (!stripeSecret || !stripeWebhookSecret)) blockers.push("Stripe API or webhook secret missing");
   if (enabled && env.NODE_ENV === "production" && paymentProvider === "stripe" && !stripeLiveKey) blockers.push("Stripe live restricted/secret key required");
   if (enabled && !taxReady) blockers.push("tax mode requires Stripe Tax or documented approved exemption");
-  if (enabled && env.RELAY_SAAS_REGISTRATION_ENABLED === "1" && !env.RELAY_EMAIL_WEBHOOK_URL?.trim()) blockers.push("email verification delivery not configured");
   return {
     enabled,
     ready: enabled && blockers.length === 0,
@@ -188,6 +198,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     tenantAuditConfigured,
     alertDeliveryConfigured,
     schedulerOnline,
+    emailDeliveryConfigured,
     registrationEnabled: enabled && env.RELAY_SAAS_REGISTRATION_ENABLED === "1",
     paymentProvider,
     paymentReady,

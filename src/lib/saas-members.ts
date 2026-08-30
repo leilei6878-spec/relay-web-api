@@ -3,6 +3,8 @@ import { hashSaasPassword, normalizeEmail, secureToken, sha256 } from "./saas-cr
 import type { TenantRole } from "./commercial-types";
 import type { SaasSession } from "./saas-auth";
 import { uid } from "./utils";
+import { effectiveCommercialEnv } from "./commercial-config";
+import { queueEmailDelivery } from "./email-outbox";
 
 type DbLike = Pick<Sql, "query">;
 async function database(db?: DbLike) { return db || getSql(); }
@@ -30,28 +32,32 @@ export async function inviteTenantMember(
   const sql = await database(opts.db);
   const token = secureToken(32);
   const id = uid();
+  const expiresAt = new Date(Date.now() + 72 * 60 * 60_000).toISOString();
   const rows = await sql.query<{ id: string }>(
     `insert into relay_tenant_invites
       (id,tenant_id,email,email_normalized,role,token_hash,invited_by,expires_at,created_at)
-     values ($1,$2,$3,$4,$5,$6,$7,now()+interval '72 hours',now())
+     values ($1,$2,$3,$4,$5,$6,$7,$8,now())
      on conflict (tenant_id,email_normalized) where accepted_at is null do update set
        role=excluded.role,token_hash=excluded.token_hash,invited_by=excluded.invited_by,expires_at=excluded.expires_at,created_at=now()
      returning id`,
-    [id, session.tenantId, input.email.trim(), email, input.role, sha256(token), session.userId],
+    [id, session.tenantId, input.email.trim(), email, input.role, sha256(token), session.userId, expiresAt],
   );
   if (!rows[0]) throw new Error("INVITE_CREATE_FAILED");
-  const env = opts.env || process.env;
-  const delivery = env.RELAY_EMAIL_WEBHOOK_URL?.trim();
-  if (!delivery) throw new Error("EMAIL_DELIVERY_NOT_CONFIGURED");
+  const env = opts.env || await effectiveCommercialEnv(process.env, sql);
   const publicUrl = env.RELAY_PUBLIC_URL?.replace(/\/$/, "") || "";
-  const response = await (opts.fetcher || fetch)(delivery, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(10_000),
-    body: JSON.stringify({ template: "tenant-invite", to: email, tenant: session.tenantName, role: input.role, link: `${publicUrl}/saas/invite?token=${encodeURIComponent(token)}` }),
+  const messageId = uid();
+  const delivery = await queueEmailDelivery({
+    dedupeKey: `tenant-invite:${rows[0].id}:${messageId}`,
+    supersedePrefix: `tenant-invite:${rows[0].id}`,
+    kind: "tenant-invite",
+    to: email,
+    expiresAt,
+    payload: { template: "tenant-invite", to: email, tenant: session.tenantName, role: input.role, link: `${publicUrl}/saas/invite?token=${encodeURIComponent(token)}` },
+  }, sql, {
+    env,
+    fetcher: opts.fetcher,
   });
-  if (!response.ok) throw new Error("EMAIL_DELIVERY_FAILED");
-  return { ok: true as const, inviteId: rows[0].id };
+  return { ok: true as const, inviteId: rows[0].id, deliveryId: delivery.id, deliveryStatus: delivery.status };
 }
 
 export async function acceptTenantInvite(

@@ -8,7 +8,7 @@ import type { SaasSession } from "./saas-auth.ts";
 
 async function database() {
   const pg = new PGlite(); await pg.waitReady;
-  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
+  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql","0017_email_delivery_outbox.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
 
@@ -19,7 +19,11 @@ test("tenant invitations are hash-only, email-delivered and atomically accepted"
   let link = "";
   await inviteTenantMember(session, { email: "developer@members.test", role: "developer" }, {
     db,
-    env: { RELAY_EMAIL_WEBHOOK_URL: "https://mail.test", RELAY_PUBLIC_URL: "https://relay.test" } as NodeJS.ProcessEnv,
+    env: {
+      RELAY_EMAIL_WEBHOOK_URL: "https://mail.test", RELAY_PUBLIC_URL: "https://relay.test",
+      RELAY_EMAIL_WEBHOOK_SECRET: "invite-email-secret-0123456789abcdef",
+      RELAY_SECRETS_KEY: "invite-encryption-key-0123456789abcdef",
+    } as NodeJS.ProcessEnv,
     fetcher: async (_url, init) => { link = JSON.parse(String(init?.body)).link; return Response.json({ ok: true }); },
   });
   const stored = await pg.query<Record<string, unknown>>("select * from relay_tenant_invites");

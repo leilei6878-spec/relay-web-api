@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 const TASKS = [
   { name: "heartbeat", intervalMs: 30_000 },
+  { name: "email-delivery", intervalMs: 30_000 },
   { name: "provider-canary", intervalMs: 30_000, skip: "RELAY_SKIP_CANARY_SCHEDULER" },
   { name: "commercial-monitor", intervalMs: 60_000, skip: "RELAY_SKIP_COMMERCIAL_MONITOR" },
   { name: "account-check", intervalMs: 60_000, skip: "RELAY_SKIP_ACCOUNT_CHECK_SCHEDULER" },
@@ -28,6 +29,7 @@ export async function runSchedulerTask(name) {
     );
     return true;
   }
+  if (name === "email-delivery") return (await import("../src/lib/email-outbox.ts")).deliverDueEmailNotifications();
   if (name === "provider-canary") return (await import("../src/lib/provider-canary-scheduler.ts")).tickProviderCanaries();
   if (name === "commercial-monitor") return (await import("../src/lib/commercial-monitor.ts")).tickCommercialMonitor();
   if (name === "account-check") return (await import("../src/lib/account-check-scheduler.ts")).tickAccountCheckScheduler();
