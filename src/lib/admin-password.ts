@@ -1,5 +1,6 @@
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { base32Decode, verifyTotp } from "./saas-crypto";
+import { trustedClientIp } from "./client-network";
 
 const PREFIX = "scrypt";
 const KEY_BYTES = 32;
@@ -83,9 +84,8 @@ export function allowAdminBearer(request: Request, env: NodeJS.ProcessEnv = proc
   return directLoopbackRequest(request);
 }
 
-export function adminLoginAttemptKey(request: Request) {
-  const forwarded = request.headers.get("cf-connecting-ip") || request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for") || "unknown";
-  return forwarded.split(",", 1)[0]!.trim().slice(0, 128) || "unknown";
+export function adminLoginAttemptKey(request: Request, env: NodeJS.ProcessEnv = process.env) {
+  return trustedClientIp(request, env);
 }
 
 export function adminLoginBlocked(key: string, now = Date.now()) {

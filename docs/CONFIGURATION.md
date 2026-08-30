@@ -14,6 +14,7 @@ Production (`NODE_ENV=production`) **fails closed** unless all of these resolve
 | `RELAY_SECRETS_KEY` | `SESSION_ENCRYPTION_KEY` | AES-256-GCM for proxy/session secrets. |
 | `RELAY_S3_BUCKET` + access/secret | `S3_*` / `AWS_*` | Object media. Local disk forbidden. |
 | `RELAY_PUBLIC_URL` | `PUBLIC_BASE_URL` | Absolute URLs for stored images. |
+| `RELAY_TRUST_PROXY_HEADERS=1` + `RELAY_CLIENT_IP_HEADER` | | Select the one edge-overwritten client-IP header. Allowed: `x-real-ip`, `x-forwarded-for`, `cf-connecting-ip`. |
 | `RELAY_RELEASE_SHA` | platform commit SHA | Exact deployed Git commit; production readiness rejects `unknown`. |
 
 Forbidden in production: `RELAY_DEMO_MODE=true`, `RELAY_ALLOW_MOCK=1`, `RELAY_TEST_URL=self`.

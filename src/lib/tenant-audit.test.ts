@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { createHmac } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import type { SaasSession } from "./saas-auth.ts";
 import { auditedTenantMutation, listTenantAuditEvents } from "./tenant-audit.ts";
@@ -54,10 +55,16 @@ test("tenant mutation audit records terminal outcomes without raw network identi
   const { pg, db } = await database();
   const session = await seed(pg, "one");
   const previousKey = process.env.RELAY_AUDIT_HASH_KEY;
+  const previousTrust = process.env.RELAY_TRUST_PROXY_HEADERS;
+  const previousHeader = process.env.RELAY_CLIENT_IP_HEADER;
   process.env.RELAY_AUDIT_HASH_KEY = "audit-hmac-key-for-tests-0123456789abcdef";
+  process.env.RELAY_TRUST_PROXY_HEADERS = "1";
+  process.env.RELAY_CLIENT_IP_HEADER = "x-real-ip";
   try {
     const request = new Request("https://relay.example.test/api/saas/keys", {
       headers: {
+        "x-real-ip": "203.0.113.55",
+        "cf-connecting-ip": "198.51.100.99",
         "x-forwarded-for": "203.0.113.55, 10.0.0.2",
         "user-agent": "TenantBrowser/1.0 private-device",
         "x-request-id": "request-12345678",
@@ -82,6 +89,7 @@ test("tenant mutation audit records terminal outcomes without raw network identi
     assert.equal(new Set(events.rows.map((row) => row.operation_id)).size, 1);
     assert.ok(events.rows.every((row) => row.request_id === "request-12345678"));
     assert.ok(events.rows.every((row) => /^[0-9a-f]{64}$/.test(String(row.ip_hmac))));
+    assert.ok(events.rows.every((row) => row.ip_hmac === createHmac("sha256", process.env.RELAY_AUDIT_HASH_KEY!).update("203.0.113.55").digest("hex")));
     assert.ok(events.rows.every((row) => /^[0-9a-f]{64}$/.test(String(row.user_agent_hmac))));
     assert.equal(events.rows.find((row) => row.outcome === "succeeded")?.target_id, "key-created");
     const serialized = JSON.stringify(events.rows);
@@ -106,6 +114,10 @@ test("tenant mutation audit records terminal outcomes without raw network identi
   } finally {
     if (previousKey === undefined) delete process.env.RELAY_AUDIT_HASH_KEY;
     else process.env.RELAY_AUDIT_HASH_KEY = previousKey;
+    if (previousTrust === undefined) delete process.env.RELAY_TRUST_PROXY_HEADERS;
+    else process.env.RELAY_TRUST_PROXY_HEADERS = previousTrust;
+    if (previousHeader === undefined) delete process.env.RELAY_CLIENT_IP_HEADER;
+    else process.env.RELAY_CLIENT_IP_HEADER = previousHeader;
     await pg.close();
   }
 });

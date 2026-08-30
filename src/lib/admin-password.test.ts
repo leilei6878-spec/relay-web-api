@@ -74,12 +74,16 @@ test("administrator login failures are bounded per client window", () => {
   assert.equal(adminLoginBlocked(key, 2_000_002), false);
 });
 
-test("administrator login keys prefer the trusted edge address", () => {
+test("administrator login keys use only the configured edge-overwritten header", () => {
   const request = new Request("https://relay.example/login", {
     headers: {
       "cf-connecting-ip": "203.0.113.9",
+      "x-real-ip": "192.0.2.44",
       "x-forwarded-for": "198.51.100.2, 198.51.100.3",
     },
   });
-  assert.equal(adminLoginAttemptKey(request), "203.0.113.9");
+  assert.equal(adminLoginAttemptKey(request, {
+    NODE_ENV: "production", RELAY_TRUST_PROXY_HEADERS: "1", RELAY_CLIENT_IP_HEADER: "x-real-ip",
+  } as NodeJS.ProcessEnv), "192.0.2.44");
+  assert.equal(adminLoginAttemptKey(request, { NODE_ENV: "production" } as NodeJS.ProcessEnv), "unknown");
 });

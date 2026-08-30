@@ -1,6 +1,7 @@
 import { mockModeEnabled, readEnv } from "./env-mode";
 import { releaseIdentity } from "./release";
 import { adminMfaConfigured } from "./admin-password";
+import { trustedProxyNetworkConfigured } from "./client-network";
 
 export type CheckId =
   | "database"
@@ -12,6 +13,7 @@ export type CheckId =
   | "admin_auth"
   | "provider_config"
   | "encryption_key"
+  | "client_network"
   | "release_identity";
 
 export type CheckStatus = "ok" | "missing" | "degraded" | "forbidden";
@@ -41,6 +43,7 @@ const REQUIRED_IN_PRODUCTION: CheckId[] = [
   "admin_auth",
   "provider_config",
   "encryption_key",
+  "client_network",
   "release_identity",
 ];
 
@@ -81,6 +84,7 @@ export function runProductionReadinessCheck(env: NodeJS.ProcessEnv = process.env
   const gemini = readEnv("RELAY_PROVIDER_GEMINI", env) !== "off";
   const providerOk = chatgpt && gemini && !mock;
   const release = releaseIdentity(env);
+  const clientNetworkOk = trustedProxyNetworkConfigured(env);
 
   const items: CheckItem[] = [
     item(
@@ -153,6 +157,15 @@ export function runProductionReadinessCheck(env: NodeJS.ProcessEnv = process.env
           ? "Mock/Test/Demo mode is forbidden in production"
           : "Provider config disabled"
         : "Mock mode allowed in non-production",
+    ),
+    item(
+      "client_network",
+      production,
+      clientNetworkOk ? "ok" : production ? "missing" : "degraded",
+      `Trusted edge overwrites ${readEnv("RELAY_CLIENT_IP_HEADER", env)}`,
+      production
+        ? "RELAY_TRUST_PROXY_HEADERS=1 and RELAY_CLIENT_IP_HEADER=x-real-ip|x-forwarded-for|cf-connecting-ip are required"
+        : "Development may use unknown client identity",
     ),
     item(
       "release_identity",

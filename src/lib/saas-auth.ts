@@ -3,6 +3,7 @@ import { coordIncr } from "./coord";
 import { effectiveCommercialEnv } from "./commercial-config";
 import { deliverEmailDeliveryNow, prepareEmailDelivery, type PreparedEmailDelivery } from "./email-outbox";
 import { createTenantOwner } from "./saas-billing";
+import { trustedClientIp as clientIp } from "./client-network";
 import {
   generateTotpSecret,
   normalizeEmail,
@@ -93,11 +94,6 @@ function cookie(request: Request, name: string) {
 function secureRequest(request: Request) {
   const forwarded = (request.headers.get("x-forwarded-proto") || "").split(",")[0]?.trim();
   return new URL(request.url).protocol === "https:" || forwarded === "https";
-}
-
-function clientIp(request: Request) {
-  const value = request.headers.get("cf-connecting-ip") || request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for") || "unknown";
-  return value.split(",")[0]!.trim().slice(0, 128);
 }
 
 export function trustedSaasOrigin(request: Request) {

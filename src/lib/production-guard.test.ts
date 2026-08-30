@@ -51,10 +51,25 @@ test("production fully configured is ready", () => {
     RELAY_S3_BUCKET: "b",
     RELAY_S3_ACCESS_KEY: "k",
     RELAY_S3_SECRET_KEY: "s",
+    RELAY_TRUST_PROXY_HEADERS: "1",
+    RELAY_CLIENT_IP_HEADER: "x-real-ip",
     RELAY_RELEASE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   } as NodeJS.ProcessEnv);
   assert.equal(report.ready, true);
   assert.deepEqual(report.blockers, []);
+});
+
+test("production rejects an implicit or unsupported client-IP trust boundary", () => {
+  const base = {
+    NODE_ENV: "production", DATABASE_URL: "postgres://x", REDIS_URL: "redis://x",
+    RELAY_ADMIN_TOKEN: "ad-relay-aaaaaaaaaaaaaaaaaaaaaaaa", RELAY_ADMIN_USERNAME: "admin",
+    RELAY_ADMIN_PASSWORD_HASH: "scrypt:test:test", RELAY_WORKER_TOKEN: "wk-relay-aaaaaaaaaaaaaaaaaaaaaaaa",
+    RELAY_SECRETS_KEY: "test-encryption-key-not-for-prod", RELAY_S3_BUCKET: "b",
+    RELAY_S3_ACCESS_KEY: "k", RELAY_S3_SECRET_KEY: "s",
+    RELAY_RELEASE_SHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  } as NodeJS.ProcessEnv;
+  assert.match(runProductionReadinessCheck(base).blockers.join(" "), /client_network/);
+  assert.match(runProductionReadinessCheck({ ...base, RELAY_TRUST_PROXY_HEADERS: "1", RELAY_CLIENT_IP_HEADER: "x-client-ip" }).blockers.join(" "), /client_network/);
 });
 
 test("production refuses an unidentified release commit", () => {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import { createHash } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import { createAdminSession, findAdminSession, revokeAdminSession } from "./admin-sessions.ts";
 
@@ -14,13 +15,19 @@ async function database() {
 
 function request() {
   return new Request("https://relay.example.test/api/admin/session", {
-    headers: { "x-real-ip": "203.0.113.8", "user-agent": "relay-admin-test" },
+    headers: {
+      "x-real-ip": "203.0.113.8", "cf-connecting-ip": "198.51.100.99",
+      "x-forwarded-for": "192.0.2.77", "user-agent": "relay-admin-test",
+    },
   });
 }
 
 test("administrator browser sessions store only hashes, have bounded fixed expiry and expose MFA state", async () => {
   const { pg, db } = await database();
-  const session = await createAdminSession({ request: request(), authMethod: "password", mfaVerified: true, env: { RELAY_ADMIN_SESSION_HOURS: "99" } as NodeJS.ProcessEnv }, db);
+  const session = await createAdminSession({ request: request(), authMethod: "password", mfaVerified: true, env: {
+    NODE_ENV: "production", RELAY_ADMIN_SESSION_HOURS: "99",
+    RELAY_TRUST_PROXY_HEADERS: "1", RELAY_CLIENT_IP_HEADER: "x-real-ip",
+  } as NodeJS.ProcessEnv }, db);
   assert.match(session.token, /^as-relay-/);
   assert.equal(session.maxAge, 24 * 3600);
   const rows = await pg.query<Record<string, unknown>>("select * from relay_admin_sessions");
@@ -28,6 +35,7 @@ test("administrator browser sessions store only hashes, have bounded fixed expir
   assert.equal(JSON.stringify(rows.rows).includes(session.token), false);
   assert.match(String(rows.rows[0]?.token_sha256), /^[0-9a-f]{64}$/);
   assert.match(String(rows.rows[0]?.client_ip_sha256), /^[0-9a-f]{64}$/);
+  assert.equal(rows.rows[0]?.client_ip_sha256, createHash("sha256").update("203.0.113.8").digest("hex"));
   assert.equal(String(rows.rows[0]?.client_ip_sha256).includes("203.0.113.8"), false);
   const found = await findAdminSession(session.token, db);
   assert.equal(found?.mfaVerified, true);

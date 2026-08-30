@@ -1,6 +1,7 @@
 import { getSql, type Sql } from "./db";
 import { secureToken, sha256 } from "./saas-crypto";
 import { uid } from "./utils";
+import { trustedClientIp } from "./client-network";
 
 type DbLike = Pick<Sql, "query">;
 
@@ -22,13 +23,8 @@ function sessionHours(env: NodeJS.ProcessEnv) {
   return Math.max(1, Math.min(24, Number.isFinite(value) ? Math.floor(value) : 12));
 }
 
-function requestFingerprint(request: Request) {
-  const ip = (
-    request.headers.get("cf-connecting-ip") ||
-    request.headers.get("x-real-ip") ||
-    request.headers.get("x-forwarded-for") ||
-    "unknown"
-  ).split(",", 1)[0]!.trim().slice(0, 128) || "unknown";
+function requestFingerprint(request: Request, env: NodeJS.ProcessEnv) {
+  const ip = trustedClientIp(request, env);
   const userAgent = (request.headers.get("user-agent") || "unknown").slice(0, 1024);
   return { clientIpSha256: sha256(ip), userAgentSha256: sha256(userAgent) };
 }
@@ -48,7 +44,7 @@ export async function createAdminSession(
   const maxAge = hours * 3600;
   const token = `${ADMIN_SESSION_PREFIX}${secureToken(32)}`;
   const id = uid();
-  const fingerprint = requestFingerprint(input.request);
+  const fingerprint = requestFingerprint(input.request, env);
   const rows = await sql.query<Record<string, unknown>>(
     `insert into relay_admin_sessions
        (id,token_sha256,auth_method,mfa_verified_at,client_ip_sha256,user_agent_sha256,created_at,last_seen_at,expires_at)

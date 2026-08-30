@@ -3,6 +3,7 @@ import { effectiveCommercialEnv } from "./commercial-config";
 import { getSql, type Sql } from "./db";
 import type { SaasSession } from "./saas-auth";
 import { uid } from "./utils";
+import { trustedClientIp } from "./client-network";
 
 type DbLike = Pick<Sql, "query">;
 type Outcome = "started" | "succeeded" | "failed";
@@ -26,11 +27,6 @@ async function auditKey(db?: DbLike) {
 
 function hmac(value: string, key: string) {
   return createHmac("sha256", key).update(value).digest("hex");
-}
-
-function clientIp(request: Request) {
-  return (request.headers.get("cf-connecting-ip") || request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for") || "unknown")
-    .split(",", 1)[0]!.trim().slice(0, 128) || "unknown";
 }
 
 function cleanDetail(value: unknown, depth = 0): unknown {
@@ -91,7 +87,7 @@ async function writeTenantAuditEvent(input: {
   hashKey: string;
 }, db?: DbLike) {
   const sql = await database(db);
-  const ip = clientIp(input.request);
+  const ip = trustedClientIp(input.request);
   const userAgent = (input.request.headers.get("user-agent") || "unknown").slice(0, 1024);
   await sql.query(
     `insert into relay_tenant_audit_events

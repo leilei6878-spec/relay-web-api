@@ -1,6 +1,6 @@
 /** Release identity. Bump SCHEMA_VERSION when adding migrations/*.sql. */
 
-export const APP_VERSION = "0.10.0-rc16";
+export const APP_VERSION = "0.10.0-rc17";
 export const API_VERSION = "v1";
 export const SCHEMA_VERSION = 17;
 export const SELECTOR_PACK = {

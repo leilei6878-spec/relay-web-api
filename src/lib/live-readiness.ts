@@ -5,6 +5,7 @@ import { objectStoreConfigured } from "./media-store";
 import { persistenceMode } from "./persist-mode";
 import { runProductionReadinessCheck, type CheckId, type CheckItem, type CheckStatus } from "./production-guard";
 import { releaseIdentity } from "./release";
+import { trustedProxyNetworkConfigured } from "./client-network";
 
 export type LiveReadiness = {
   production: boolean;
@@ -95,6 +96,12 @@ export async function runLiveReadinessCheck(): Promise<LiveReadiness> {
     provider_config: {
       ok: !mockModeEnabled() || !isProduction(),
       detail: mockModeEnabled() ? "mock mode" : "ChatGPT + Gemini enabled",
+    },
+    client_network: {
+      ok: trustedProxyNetworkConfigured() || !isProduction(),
+      detail: trustedProxyNetworkConfigured()
+        ? `trusted edge header ${readEnv("RELAY_CLIENT_IP_HEADER")}`
+        : "trusted client-IP edge/header unset",
     },
     release_identity: {
       ok: release.commit !== "unknown" || !isProduction(),

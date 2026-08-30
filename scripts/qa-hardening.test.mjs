@@ -29,6 +29,8 @@ test("production Compose requires secrets and publishes the documented host port
   }
   assert.doesNotMatch(compose, /POSTGRES_PASSWORD:-relay|S3_SECRET_KEY:-relayrelay1/);
   assert.match(compose, /RELAY_BIND:-127\.0\.0\.1:8088/);
+  assert.match(compose, /RELAY_TRUST_PROXY_HEADERS: \$\{RELAY_TRUST_PROXY_HEADERS:-0\}/);
+  assert.match(compose, /RELAY_CLIENT_IP_HEADER: \$\{RELAY_CLIENT_IP_HEADER:-\}/);
 });
 
 test("offsite backup runner is opt-in, version-matched and cannot write source or live storage", () => {
