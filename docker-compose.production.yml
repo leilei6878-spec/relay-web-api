@@ -171,6 +171,8 @@ services:
       RELAY_STORAGE_DIR: /app/storage
       RELAY_EXTERNAL_SCHEDULER: "1"
     command: ["node", "--experimental-strip-types", "--import", "./scripts/register-ts-ext.mjs", "scripts/commercial-scheduler.mjs"]
+    healthcheck:
+      disable: true
     volumes:
       - ${RELAY_STORAGE_HOST:-relay_storage}:/app/storage
     restart: unless-stopped

@@ -46,6 +46,7 @@ test("production Compose keeps scheduler separate, persistent and without a publ
   assert.match(scheduler, /image: relay-gateway/);
   assert.match(scheduler, /RELAY_EXTERNAL_SCHEDULER: "1"/);
   assert.match(scheduler, /commercial-scheduler\.mjs/);
+  assert.match(scheduler, /healthcheck:\s*\n\s+disable: true/);
   assert.match(scheduler, /restart: unless-stopped/);
   assert.doesNotMatch(scheduler, /ports:/);
   assert.match(compose, /gateway:[\s\S]*RELAY_EXTERNAL_SCHEDULER: "1"/);
