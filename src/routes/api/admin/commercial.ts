@@ -5,6 +5,7 @@ import { getSql } from "@/lib/db";
 import { createStripeRefund, reconcileStripeOrder } from "@/lib/payments";
 import type { CommercialCapability } from "@/lib/commercial-types";
 import { uid } from "@/lib/utils";
+import { retryAlertDeliveriesNow } from "@/lib/commercial-monitor";
 
 export const Route = createFileRoute("/api/admin/commercial")({
   server: {
@@ -52,6 +53,8 @@ export const Route = createFileRoute("/api/admin/commercial")({
             result = await scheduleTenantPlanChange(String(body.tenantId || ""), String(body.planId || ""), "admin");
           } else if (action === "settle-plan-period") {
             result = await settleTenantPlanPeriod(String(body.tenantId || ""));
+          } else if (action === "retry-alert-deliveries") {
+            result = await retryAlertDeliveriesNow();
           } else if (action === "upsert-plan") {
             const sql = await getSql();
             const rows = await sql.query(
@@ -73,7 +76,7 @@ export const Route = createFileRoute("/api/admin/commercial")({
           const sql = await getSql();
           await sql.query(
             "insert into relay_commercial_audit(id,tenant_id,actor_type,actor_id,action,target_type,target_id,detail) values ($1,$2,'admin','admin',$3,$4,$5,$6::jsonb)",
-            [uid(), body.tenantId || null, action, action.includes("price") ? "price" : action.includes("order") ? "order" : "tenant", body.orderId || body.tenantId || null, JSON.stringify({ fields: Object.keys(body).filter((key) => !["action"].includes(key)) })],
+            [uid(), body.tenantId || null, action, action.includes("alert") ? "alert_delivery" : action.includes("price") ? "price" : action.includes("order") ? "order" : "tenant", body.orderId || body.tenantId || null, JSON.stringify({ fields: Object.keys(body).filter((key) => !["action"].includes(key)) })],
           );
           return Response.json({ ok: true, result });
         } catch (error) {

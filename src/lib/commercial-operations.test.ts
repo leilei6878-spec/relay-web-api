@@ -3,12 +3,12 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { collectCommercialSignals, persistCommercialSignals } from "./commercial-monitor.ts";
-import { retentionPolicy } from "./data-retention.ts";
+import { retentionPolicy, runDataRetention } from "./data-retention.ts";
 import { commercialReadiness } from "./commercial-readiness.ts";
 
 async function database() {
   const pg = new PGlite(); await pg.waitReady;
-  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
+  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
 
@@ -36,6 +36,23 @@ test("retention policy is bounded and never offers billing-ledger deletion", asy
   assert.doesNotMatch(source, /delete from relay_billing_(transactions|entries)/i);
   assert.match(source, /Billing transactions\/entries are intentionally never deleted/);
   assert.doesNotMatch(source, /delete from relay_tenant_audit_events/i);
+});
+
+test("resolved alert delivery history follows bounded operational retention", async () => {
+  const { pg, db } = await database();
+  await pg.query(
+    `insert into relay_alert_events(id,code,severity,status,message,fingerprint,first_seen_at,last_seen_at,resolved_at)
+     values ('old-alert','OLD_ALERT','warning','resolved','old','old-alert-fingerprint',now()-interval '20 days',now()-interval '20 days',now()-interval '20 days')`,
+  );
+  await pg.query(
+    `insert into relay_alert_deliveries(id,alert_id,event_type,status,attempts,payload,payload_sha256,next_attempt_at,delivered_at)
+     values ('old-delivery','old-alert','opened','delivered',1,'{}'::jsonb,$1,now()-interval '20 days',now()-interval '20 days')`,
+    ["a".repeat(64)],
+  );
+  const result = await runDataRetention({ RELAY_OPERATIONAL_RETENTION_DAYS: "7" } as NodeJS.ProcessEnv, db);
+  assert.equal(result.deletedAlerts, 1);
+  assert.equal((await pg.query<{ count: number }>("select count(*)::int as count from relay_alert_deliveries where alert_id='old-alert'")).rows[0]?.count, 0);
+  await pg.close();
 });
 
 test("monitor raises a critical signal for tenant audit operations missing a terminal outcome", async () => {
@@ -73,6 +90,7 @@ test("commercial readiness fails closed on credentials, prices, replicas, backup
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("Stripe")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("tax mode")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("audit HMAC")));
+  assert.ok(enabled.blockers.some((blocker) => blocker.includes("signed alert Webhook")));
   const unsafeBackup = await commercialReadiness({
     RELAY_COMMERCIAL_ENABLED: "1", RELAY_BACKUP_S3_ENDPOINT: "http://backup.example.test",
     RELAY_BACKUP_S3_BUCKET: "relay-offsite",

@@ -11,3 +11,8 @@
 Series: `relay_requests_total`, `relay_requests_success`, `relay_request_latency_ms`, `relay_queue_depth`, `relay_active_jobs`, `relay_active_leases`, `relay_healthy_accounts`, `relay_cooling_accounts`, `relay_invalid_accounts`, `relay_worker_online`, `relay_provider_health_*`, `relay_failovers`, `relay_retries`, `relay_stale_results_rejected`.
 
 Alert map: [ALERTING.md](./ALERTING.md).
+
+Commercial alert opening/recovery delivery is a persistent signed Outbox, not
+a one-shot callback. Delivery backlog/failures are exposed in
+`GET /api/admin/metrics` and Commercial Operations. See
+[ALERT_DELIVERY.md](./ALERT_DELIVERY.md).

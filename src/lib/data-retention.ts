@@ -1,5 +1,7 @@
-import { getSql } from "./db";
 import { effectiveCommercialEnv } from "./commercial-config";
+import { getSql, type Sql } from "./db";
+
+type DbLike = Pick<Sql, "query">;
 
 function boundedDays(raw: string | undefined, fallback: number, min: number, max: number) {
   const value = Number(raw || fallback);
@@ -16,11 +18,11 @@ export function retentionPolicy(env: NodeJS.ProcessEnv = process.env) {
   };
 }
 
-export async function runDataRetention(env: NodeJS.ProcessEnv = process.env) {
-  if (env === process.env) env = await effectiveCommercialEnv(env);
+export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?: DbLike) {
+  if (env === process.env) env = await effectiveCommercialEnv(env, db);
   const policy = retentionPolicy(env);
-  const sql = await getSql();
-  const [chargeResults, jobs, sessions, checks, usage, checkoutUrls, audit] = await Promise.all([
+  const sql = db || await getSql();
+  const [chargeResults, jobs, sessions, checks, usage, checkoutUrls, audit, alerts] = await Promise.all([
     sql.query<{ count: number }>(
       `with updated as (
          update relay_usage_charges set extra=extra-'providerResultCiphertext'
@@ -74,6 +76,13 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env) {
        ) select count(*)::int as count from deleted`,
       [policy.auditDays],
     ),
+    sql.query<{ count: number }>(
+      `with deleted as (
+         delete from relay_alert_events
+          where status='resolved' and resolved_at < now()-($1::text||' days')::interval returning id
+       ) select count(*)::int as count from deleted`,
+      [policy.operationalDays],
+    ),
   ]);
   // Billing transactions/entries are intentionally never deleted here. Object
   // media must use the configured S3 bucket lifecycle because deleting rows
@@ -87,6 +96,7 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env) {
     redactedChargeResults: Number(chargeResults[0]?.count || 0),
     redactedCheckoutUrls: Number(checkoutUrls[0]?.count || 0),
     deletedAudit: Number(audit[0]?.count || 0),
+    deletedAlerts: Number(alerts[0]?.count || 0),
   };
 }
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync } from "node:crypto";
+import { createHmac, generateKeyPairSync } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
@@ -21,7 +21,7 @@ async function database() {
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
     "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql",
-    "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql",
+    "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
@@ -89,11 +89,13 @@ test("hard gates require deployment authorization while safe values hot-reload",
   const customerMfaRequired = await createCommercialConfigVersion({ key: "security.customerPrivilegedMfaRequired", value: true, reason: "customer privileged MFA gate", actor: "admin" }, db);
   const customerMfaAge = await createCommercialConfigVersion({ key: "security.customerMfaMaxAgeHours", value: 12, reason: "customer MFA freshness", actor: "admin" }, db);
   const auditHashKey = await createCommercialConfigVersion({ key: "security.auditHashKey", value: "versioned-audit-hmac-key-0123456789abcdef", reason: "tenant audit correlation", actor: "admin" }, db);
+  const alertWebhookSecret = await createCommercialConfigVersion({ key: "alerts.webhookSecret", value: "versioned-alert-hmac-key-0123456789abcdef", reason: "signed alert delivery", actor: "admin" }, db);
   await activateCommercialConfigVersion(mfaSecret.id, "admin", db);
   await activateCommercialConfigVersion(mfaRequired.id, "admin", db);
   await activateCommercialConfigVersion(customerMfaRequired.id, "admin", db);
   await activateCommercialConfigVersion(customerMfaAge.id, "admin", db);
   await activateCommercialConfigVersion(auditHashKey.id, "admin", db);
+  await activateCommercialConfigVersion(alertWebhookSecret.id, "admin", db);
   const closed = await effectiveCommercialEnv({ RELAY_COMMERCIAL_ENABLED: "0", RELAY_PAYMENT_PROVIDER: "disabled" } as NodeJS.ProcessEnv, db);
   assert.equal(closed.RELAY_COMMERCIAL_ENABLED, "0");
   assert.equal(closed.RELAY_PAYMENT_PROVIDER, "stripe");
@@ -106,6 +108,7 @@ test("hard gates require deployment authorization while safe values hot-reload",
   assert.equal(opened.RELAY_SAAS_MFA_MAX_AGE_HOURS, "12");
   assert.equal(opened.RELAY_ADMIN_TOTP_SECRET, "JBSWY3DPEHPK3PXP");
   assert.equal(opened.RELAY_AUDIT_HASH_KEY, "versioned-audit-hmac-key-0123456789abcdef");
+  assert.equal(opened.RELAY_ALERT_WEBHOOK_SECRET, "versioned-alert-hmac-key-0123456789abcdef");
   const publicConfig = await listCommercialConfig(db);
   const auditConfig = publicConfig.find((entry) => entry.key === "security.auditHashKey")!;
   assert.equal(auditConfig.active?.value, null);
@@ -120,12 +123,20 @@ test("hard gates require deployment authorization while safe values hot-reload",
     /AUDIT_HASH_KEY_INVALID/,
   );
   await assert.rejects(
+    () => createCommercialConfigVersion({ key: "alerts.webhookSecret", value: "too-short", reason: "bad", actor: "admin" }, db),
+    /ALERT_WEBHOOK_SECRET_INVALID/,
+  );
+  await assert.rejects(
     () => createCommercialConfigVersion({ key: "email.webhookUrl", value: "http://insecure.test", reason: "bad", actor: "admin" }, db),
     /HTTPS_URL_REQUIRED/,
   );
   await assert.rejects(
     () => createCommercialConfigVersion({ key: "email.webhookUrl", value: "https://127.0.0.1/hook", reason: "bad", actor: "admin" }, db),
     /PRIVATE_ADDRESS_FORBIDDEN/,
+  );
+  await assert.rejects(
+    () => createCommercialConfigVersion({ key: "alerts.webhookUrl", value: "https://hooks.example.test/relay?token=must-not-store", reason: "bad", actor: "admin" }, db),
+    /HTTPS_URL_REQUIRED/,
   );
   await assert.rejects(
     () => createCommercialConfigVersion({ key: "providers.unknown.endpoint", value: "https://evil.test", reason: "bad", actor: "admin" }, db),
@@ -136,6 +147,9 @@ test("hard gates require deployment authorization while safe values hot-reload",
 
 test("Webhook connection testing rejects DNS results that resolve into private networks", async () => {
   const { pg, db } = await database();
+  const signingSecret = "config-alert-signing-secret-0123456789abcdef";
+  const secret = await createCommercialConfigVersion({ key: "alerts.webhookSecret", value: signingSecret, reason: "signed alert test", actor: "admin" }, db);
+  await activateCommercialConfigVersion(secret.id, "admin", db);
   const draft = await createCommercialConfigVersion({ key: "alerts.webhookUrl", value: "https://hooks.example.test/relay", reason: "SSRF test", actor: "admin" }, db);
   let fetched = false;
   const tested = await testCommercialConfigVersion(draft.id, "admin", {
@@ -149,7 +163,14 @@ test("Webhook connection testing rejects DNS results that resolve into private n
   const publicTest = await testCommercialConfigVersion(publicDraft.id, "admin", {
     db,
     resolver: async () => [{ address: "8.8.8.8", family: 4 }],
-    fetcher: (async () => Response.json({ ok: true })) as typeof fetch,
+    fetcher: (async (_url: string | URL | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      const timestamp = headers.get("x-relay-timestamp") || "";
+      const body = String(init?.body || "");
+      assert.match(headers.get("x-relay-event-id") || "", /^config-test-/);
+      assert.equal(headers.get("x-relay-signature"), `v1=${createHmac("sha256", signingSecret).update(`${timestamp}.${body}`).digest("hex")}`);
+      return Response.json({ ok: true });
+    }) as typeof fetch,
   });
   assert.equal(publicTest.validationStatus, "passed");
   await pg.close();

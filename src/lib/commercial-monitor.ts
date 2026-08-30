@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { assertPublicCommercialWebhookUrl, effectiveCommercialEnv } from "./commercial-config";
 import { commercialEvidenceStatus } from "./commercial-evidence";
 import { commercialReadiness } from "./commercial-readiness";
@@ -18,6 +18,22 @@ function fingerprint(signal: CommercialSignal) {
 }
 
 type DbLike = Pick<Sql, "query">;
+
+const alertSensitiveKey = /token|secret|password|cookie|authorization|api.?key|credential|email|ip.?address|user.?agent/i;
+const alertSensitiveValue = /(?:\bsk-[A-Za-z0-9_-]{8,}|whsec_[A-Za-z0-9_-]+|\bBearer\s+[A-Za-z0-9._-]{12,}|\b[^\s@]+@[^\s@]+\.[^\s@]+\b)/i;
+
+function cleanAlertDetail(value: unknown, depth = 0): unknown {
+  if (depth > 3 || value === null || value === undefined) return null;
+  if (typeof value === "boolean" || typeof value === "number") return value;
+  if (typeof value === "string") return alertSensitiveValue.test(value) ? "[REDACTED]" : value.slice(0, 200);
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => cleanAlertDetail(item, depth + 1));
+  if (typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !alertSensitiveKey.test(key)).slice(0, 30)
+      .map(([key, item]) => [key.slice(0, 80), cleanAlertDetail(item, depth + 1)]));
+  }
+  return null;
+}
 
 export async function collectCommercialSignals(db?: DbLike) {
   const sql = db || await getSql();
@@ -97,44 +113,260 @@ export async function collectCommercialSignals(db?: DbLike) {
   return signals;
 }
 
-async function deliverAlert(signal: CommercialSignal, db?: DbLike) {
-  const env = await effectiveCommercialEnv(process.env, db);
-  const url = env.RELAY_ALERT_WEBHOOK_URL?.trim();
-  if (!url) return { delivered: false, reason: "not_configured" };
-  await assertPublicCommercialWebhookUrl(url);
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(10_000),
-    body: JSON.stringify({ source: "relay-saas", ...signal, at: new Date().toISOString() }),
-  });
-  return { delivered: response.ok, status: response.status };
+export type AlertDeliveryResult = {
+  delivered: boolean;
+  configured: boolean;
+  status?: number;
+  errorCode?: string;
+};
+
+type AlertDeliveryRow = Record<string, unknown> & {
+  id: string;
+  alert_id: string;
+  event_type: "opened" | "resolved";
+  attempts: number;
+  payload: Record<string, unknown>;
+};
+
+type Resolver = Parameters<typeof assertPublicCommercialWebhookUrl>[1];
+
+export async function sendAlertWebhook(
+  deliveryId: string,
+  payload: Record<string, unknown>,
+  opts: { env?: NodeJS.ProcessEnv; fetcher?: typeof fetch; resolver?: Resolver; now?: Date } = {},
+): Promise<AlertDeliveryResult> {
+  const env = opts.env || process.env;
+  const url = env.RELAY_ALERT_WEBHOOK_URL?.trim() || "";
+  if (!url) return { delivered: false, configured: false, errorCode: "ALERT_WEBHOOK_NOT_CONFIGURED" };
+  const secret = env.RELAY_ALERT_WEBHOOK_SECRET?.trim() || "";
+  if (secret.length < 32) return { delivered: false, configured: false, errorCode: "ALERT_WEBHOOK_SECRET_INVALID" };
+  let endpoint: string;
+  try {
+    endpoint = await assertPublicCommercialWebhookUrl(url, opts.resolver);
+  } catch {
+    return { delivered: false, configured: false, errorCode: "ALERT_WEBHOOK_URL_INVALID" };
+  }
+  const body = JSON.stringify(payload);
+  const timestamp = Math.floor((opts.now || new Date()).getTime() / 1000).toString();
+  const signature = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
+  try {
+    const response = await (opts.fetcher || fetch)(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Relay-Event-Id": deliveryId,
+        "X-Relay-Timestamp": timestamp,
+        "X-Relay-Signature": `v1=${signature}`,
+      },
+      signal: AbortSignal.timeout(10_000),
+      body,
+    });
+    return response.ok
+      ? { delivered: true, configured: true, status: response.status }
+      : { delivered: false, configured: true, status: response.status, errorCode: "ALERT_WEBHOOK_HTTP_ERROR" };
+  } catch {
+    return { delivered: false, configured: true, errorCode: "ALERT_WEBHOOK_NETWORK_ERROR" };
+  }
 }
 
-export async function persistCommercialSignals(signals: CommercialSignal[], db?: DbLike) {
+function alertDeliveryPayload(alert: Record<string, unknown>, eventType: "opened" | "resolved", deliveryId: string) {
+  const detail = alert.extra && typeof alert.extra === "object" ? alert.extra : {};
+  let payload: Record<string, unknown> = {
+    source: "relay-saas",
+    deliveryId,
+    alertId: String(alert.id),
+    event: eventType,
+    code: String(alert.code),
+    severity: String(alert.severity),
+    status: eventType === "resolved" ? "resolved" : "open",
+    message: String(alert.message).slice(0, 500),
+    occurrences: Number(alert.occurrences || 1),
+    firstSeenAt: alert.first_seen_at,
+    lastSeenAt: alert.last_seen_at,
+    resolvedAt: eventType === "resolved" ? alert.resolved_at : null,
+    detail,
+  };
+  if (Buffer.byteLength(JSON.stringify(payload), "utf8") > 15_000) payload = { ...payload, detail: { truncated: true } };
+  return payload;
+}
+
+function canonicalJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJson);
+  if (value && typeof value === "object" && !(value instanceof Date)) {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right, "en"))
+      .map(([key, item]) => [key, canonicalJson(item)]));
+  }
+  return value;
+}
+
+function alertPayloadDigest(payload: unknown) {
+  return createHash("sha256").update(JSON.stringify(canonicalJson(payload))).digest("hex");
+}
+
+async function enqueueAlertDelivery(alert: Record<string, unknown>, eventType: "opened" | "resolved", sql: DbLike) {
+  const id = uid();
+  const payload = alertDeliveryPayload(alert, eventType, id);
+  const serialized = JSON.stringify(payload);
+  await sql.query(
+    `insert into relay_alert_deliveries
+      (id,alert_id,event_type,status,attempts,payload,payload_sha256,next_attempt_at,created_at,updated_at)
+     values ($1,$2,$3,'pending',0,$4::jsonb,$5,now(),now(),now())
+     on conflict (alert_id,event_type) do nothing`,
+    [id, alert.id, eventType, serialized, alertPayloadDigest(payload)],
+  );
+}
+
+function retryDelaySeconds(attempt: number) {
+  return Math.min(3600, 60 * 2 ** Math.min(6, Math.max(0, attempt - 1)));
+}
+
+export async function deliverDueAlertNotifications(
+  db?: DbLike,
+  opts: {
+    deliver?: (delivery: AlertDeliveryRow) => Promise<AlertDeliveryResult>;
+    acquireLock?: (id: string) => Promise<boolean>;
+    limit?: number;
+  } = {},
+) {
+  const sql = db || await getSql();
+  await sql.query(
+    `update relay_alert_deliveries set status='retrying',claim_expires_at=null,next_attempt_at=now(),
+       error_code='ALERT_DELIVERY_CLAIM_EXPIRED',updated_at=now()
+      where status='sending' and claim_expires_at < now()`,
+  );
+  const due = await sql.query<AlertDeliveryRow>(
+    `select * from relay_alert_deliveries
+      where status in ('pending','retrying','not_configured') and next_attempt_at<=now()
+      order by next_attempt_at,created_at limit $1`,
+    [Math.max(1, Math.min(100, Math.floor(opts.limit || 25)))],
+  );
+  const env = opts.deliver ? null : await effectiveCommercialEnv(process.env, sql);
+  const deliver = opts.deliver || ((delivery: AlertDeliveryRow) => sendAlertWebhook(delivery.id, delivery.payload, { env: env! }));
+  const acquireLock = opts.acquireLock || ((id: string) => coordSetNx(`alert:delivery:${id}`, "1", 2 * 60_000).catch(() => true));
+  let delivered = 0;
+  let failed = 0;
+  for (const row of due) {
+    if (!await acquireLock(row.id)) continue;
+    const claimed = await sql.query<AlertDeliveryRow>(
+      `update relay_alert_deliveries set status='sending',claim_expires_at=now()+interval '2 minutes',updated_at=now()
+        where id=$1 and status in ('pending','retrying','not_configured') and next_attempt_at<=now() returning *`,
+      [row.id],
+    );
+    const delivery = claimed[0];
+    if (!delivery) continue;
+    if (alertPayloadDigest(delivery.payload) !== String(delivery.payload_sha256)) {
+      await sql.query(
+        `update relay_alert_deliveries set status='retrying',claim_expires_at=null,
+           next_attempt_at=now()+interval '1 hour',error_code='ALERT_DELIVERY_PAYLOAD_HASH_MISMATCH',updated_at=now()
+          where id=$1 and status='sending'`,
+        [delivery.id],
+      );
+      failed += 1;
+      continue;
+    }
+    const result = await deliver(delivery).catch(() => ({
+      delivered: false, configured: true, errorCode: "ALERT_WEBHOOK_DELIVERY_ERROR",
+    } as AlertDeliveryResult));
+    if (!result.configured) {
+      await sql.query(
+        `update relay_alert_deliveries set status='not_configured',claim_expires_at=null,
+           next_attempt_at=now()+interval '5 minutes',http_status=null,error_code=$2,updated_at=now()
+          where id=$1 and status='sending'`,
+        [delivery.id, result.errorCode || "ALERT_WEBHOOK_NOT_CONFIGURED"],
+      );
+      continue;
+    }
+    const attempt = Number(delivery.attempts || 0) + 1;
+    if (result.delivered) {
+      await sql.query(
+        `update relay_alert_deliveries set status='delivered',attempts=$2,last_attempt_at=now(),
+           delivered_at=now(),claim_expires_at=null,http_status=$3,error_code=null,updated_at=now()
+          where id=$1 and status='sending'`,
+        [delivery.id, attempt, result.status || 200],
+      );
+      delivered += 1;
+      if (delivery.event_type === "opened") {
+        const alerts = await sql.query<Record<string, unknown>>("select * from relay_alert_events where id=$1", [delivery.alert_id]);
+        if (alerts[0]?.status === "resolved") await enqueueAlertDelivery(alerts[0], "resolved", sql);
+      }
+      continue;
+    }
+    const alerts = await sql.query<{ status: string }>("select status from relay_alert_events where id=$1", [delivery.alert_id]);
+    if (delivery.event_type === "opened" && alerts[0]?.status === "resolved") {
+      await sql.query(
+        `update relay_alert_deliveries set status='superseded',attempts=$2,last_attempt_at=now(),
+           claim_expires_at=null,http_status=$3,error_code=$4,updated_at=now()
+          where id=$1 and status='sending'`,
+        [delivery.id, attempt, result.status || null, result.errorCode || "ALERT_WEBHOOK_DELIVERY_FAILED"],
+      );
+    } else {
+      await sql.query(
+        `update relay_alert_deliveries set status='retrying',attempts=$2,last_attempt_at=now(),
+           claim_expires_at=null,next_attempt_at=now()+($3::text||' seconds')::interval,
+           http_status=$4,error_code=$5,updated_at=now()
+          where id=$1 and status='sending'`,
+        [delivery.id, attempt, retryDelaySeconds(attempt), result.status || null, result.errorCode || "ALERT_WEBHOOK_DELIVERY_FAILED"],
+      );
+    }
+    failed += 1;
+  }
+  return { scanned: due.length, delivered, failed };
+}
+
+export async function retryAlertDeliveriesNow(
+  db?: DbLike,
+  opts: Parameters<typeof deliverDueAlertNotifications>[1] = {},
+) {
+  const sql = db || await getSql();
+  await sql.query(
+    `update relay_alert_deliveries set next_attempt_at=now(),updated_at=now()
+      where status in ('pending','retrying','not_configured')`,
+  );
+  return deliverDueAlertNotifications(sql, opts);
+}
+
+export async function persistCommercialSignals(
+  signals: CommercialSignal[],
+  db?: DbLike,
+  deliveryOptions: Parameters<typeof deliverDueAlertNotifications>[1] = {},
+) {
   const sql = db || await getSql();
   const active = new Set(signals.map(fingerprint));
   for (const signal of signals) {
     const fp = fingerprint(signal);
-    const rows = await sql.query<{ id: string; created: boolean }>(
+    const rows = await sql.query<Record<string, unknown>>(
       `insert into relay_alert_events(id,code,severity,status,message,fingerprint,first_seen_at,last_seen_at,occurrences,extra)
        values ($1,$2,$3,'open',$4,$5,now(),now(),1,$6::jsonb)
        on conflict (fingerprint) where status='open' do update set
          severity=excluded.severity,message=excluded.message,last_seen_at=now(),occurrences=relay_alert_events.occurrences+1,extra=excluded.extra
-       returning id,(xmax=0) as created`,
-      [uid(), signal.code, signal.severity, signal.message, fp, JSON.stringify(signal.detail || {})],
+       returning *`,
+      [uid(), signal.code.slice(0, 120), signal.severity, signal.message.slice(0, 500), fp, JSON.stringify(cleanAlertDetail(signal.detail || {}))],
     );
-    const id = rows[0]?.id;
-    if (id && rows[0]?.created && await coordSetNx(`alert:deliver:${fp}`, "1", 15 * 60_000)) {
-      await deliverAlert(signal, sql).catch(() => ({ delivered: false }));
-    }
+    if (rows[0]) await enqueueAlertDelivery(rows[0], "opened", sql);
   }
-  const open = await sql.query<{ id: string; fingerprint: string }>("select id,fingerprint from relay_alert_events where status='open'");
+  const open = await sql.query<Record<string, unknown>>("select * from relay_alert_events where status='open'");
   for (const row of open) {
-    if (!active.has(row.fingerprint)) {
-      await sql.query("update relay_alert_events set status='resolved',resolved_at=now(),last_seen_at=now() where id=$1 and status='open'", [row.id]);
+    if (!active.has(String(row.fingerprint))) {
+      const resolved = await sql.query<Record<string, unknown>>(
+        "update relay_alert_events set status='resolved',resolved_at=now(),last_seen_at=now() where id=$1 and status='open' returning *",
+        [row.id],
+      );
+      if (!resolved[0]) continue;
+      const opened = await sql.query<{ status: string }>(
+        "select status from relay_alert_deliveries where alert_id=$1 and event_type='opened'",
+        [row.id],
+      );
+      if (opened[0]?.status === "delivered") await enqueueAlertDelivery(resolved[0], "resolved", sql);
+      else if (opened[0] && opened[0].status !== "sending") {
+        await sql.query(
+          "update relay_alert_deliveries set status='superseded',claim_expires_at=null,updated_at=now() where alert_id=$1 and event_type='opened' and status<>'delivered'",
+          [row.id],
+        );
+      }
     }
   }
+  return deliverDueAlertNotifications(sql, deliveryOptions);
 }
 
 export async function tickCommercialMonitor() {

@@ -33,7 +33,11 @@
    PostgreSQL/Redis and versioned replicated object storage.
 8. Configure and execute `scripts/offsite-backup.mjs`; restore the result in a
    separate environment.
-9. Configure `RELAY_ALERT_WEBHOOK_URL` and an external HTTPS uptime probe.
+9. Configure `RELAY_ALERT_WEBHOOK_URL`, a dedicated 32+ character
+   `RELAY_ALERT_WEBHOOK_SECRET` and an external HTTPS uptime probe. Verify the
+   receiver checks timestamp/HMAC, deduplicates `X-Relay-Event-Id`, accepts
+   duplicate delivery with 2xx and receives both opened/resolved events. See
+   `ALERT_DELIVERY.md`.
 10. Complete counsel review of terms/privacy/DPA; set `RELAY_LEGAL_APPROVED=1`.
 11. Inspect `/api/saas/readiness` and resolve every infrastructure/configuration
     blocker. `ready` must remain false until the evidence in step 15 is valid.

@@ -1,4 +1,5 @@
 import { lookup } from "node:dns/promises";
+import { createHmac } from "node:crypto";
 import { isIP } from "node:net";
 import { getSql, type Sql } from "./db";
 import { decryptSecretValue, encryptSecretValue } from "./secrets";
@@ -8,7 +9,7 @@ import { validateVertexProjectLocation, vertexAccessToken } from "./vertex-auth"
 
 type DbLike = Pick<Sql, "query">;
 type ConfigKind = "boolean" | "integer" | "enum" | "json" | "string" | "url" | "secret";
-type ConnectionTest = "openai" | "google" | "vertex" | "leonardo" | "stripe" | "stripe_webhook" | "webhook";
+type ConnectionTest = "openai" | "google" | "vertex" | "leonardo" | "stripe" | "stripe_webhook" | "webhook" | "alert_webhook";
 type Resolver = (hostname: string, options: { all: true; verbatim: true }) => Promise<{ address: string; family: number }[]>;
 
 export type CommercialConfigDefinition = {
@@ -49,7 +50,8 @@ export const COMMERCIAL_CONFIG_CATALOG: readonly CommercialConfigDefinition[] = 
   { key: "payments.maxRechargeMinor", label: "单次充值上限", group: "payments", kind: "integer", envName: "RELAY_STRIPE_MAX_RECHARGE_MINOR", min: 100, max: 100_000_000, description: "最小货币单位，例如 USD cents。" },
   { key: "tax.mode", label: "税务模式", group: "payments", kind: "enum", envName: "RELAY_TAX_MODE", allowed: ["unconfigured", "stripe_automatic", "approved_exempt"], description: "Stripe Tax 或书面批准的免税销售范围。" },
   { key: "email.webhookUrl", label: "邮件投递 Webhook", group: "delivery", kind: "url", envName: "RELAY_EMAIL_WEBHOOK_URL", test: "webhook", description: "只允许 HTTPS；连接测试会发送一条配置测试事件。" },
-  { key: "alerts.webhookUrl", label: "告警 Webhook", group: "delivery", kind: "url", envName: "RELAY_ALERT_WEBHOOK_URL", test: "webhook", description: "只允许 HTTPS；用于持久告警投递。" },
+  { key: "alerts.webhookUrl", label: "告警 Webhook", group: "delivery", kind: "url", envName: "RELAY_ALERT_WEBHOOK_URL", test: "alert_webhook", description: "只允许 HTTPS；连接测试与正式打开/恢复通知均使用 HMAC 签名。" },
+  { key: "alerts.webhookSecret", label: "告警 Webhook HMAC Secret", group: "delivery", kind: "secret", envName: "RELAY_ALERT_WEBHOOK_SECRET", secret: true, description: "至少 32 字符；用于 X-Relay-Signature 的 HMAC-SHA256，接收端据此验证事件来源。" },
   { key: "retention.requestContentDays", label: "请求内容保留天数", group: "retention", kind: "integer", envName: "RELAY_REQUEST_CONTENT_RETENTION_DAYS", min: 1, max: 365, description: "到期后清除请求与供应商结果内容。" },
   { key: "retention.sessionDays", label: "会话保留天数", group: "retention", kind: "integer", envName: "RELAY_SESSION_RETENTION_DAYS", min: 1, max: 365, description: "已撤销或过期 SaaS 会话的保留期。" },
   { key: "retention.operationalDays", label: "运营数据保留天数", group: "retention", kind: "integer", envName: "RELAY_OPERATIONAL_RETENTION_DAYS", min: 7, max: 730, description: "账号检查等运营数据保留期。" },
@@ -94,7 +96,7 @@ function rejectPrivateWebhookLiteral(parsed: URL) {
 
 export async function assertPublicCommercialWebhookUrl(value: string, resolver: Resolver = lookup as Resolver) {
   const parsed = new URL(value);
-  if (parsed.protocol !== "https:" || parsed.username || parsed.password || !parsed.hostname) throw new Error("CONFIG_HTTPS_URL_REQUIRED");
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash || !parsed.hostname) throw new Error("CONFIG_HTTPS_URL_REQUIRED");
   rejectPrivateWebhookLiteral(parsed);
   const addresses = await resolver(parsed.hostname, { all: true, verbatim: true });
   if (!addresses.length || addresses.some((entry) => privateAddress(entry.address))) throw new Error("CONFIG_WEBHOOK_PRIVATE_ADDRESS_FORBIDDEN");
@@ -111,6 +113,7 @@ function normalizeValue(definition: CommercialConfigDefinition, value: unknown) 
       if (!/^[A-Z2-7]{16,128}$/.test(secret) || base32Decode(secret).length < 10) throw new Error("CONFIG_ADMIN_TOTP_SECRET_INVALID");
     }
     if (definition.key === "security.auditHashKey" && secret.length < 32) throw new Error("CONFIG_AUDIT_HASH_KEY_INVALID");
+    if (definition.key === "alerts.webhookSecret" && secret.length < 32) throw new Error("CONFIG_ALERT_WEBHOOK_SECRET_INVALID");
     return secret;
   }
   if (definition.kind === "boolean") {
@@ -132,7 +135,7 @@ function normalizeValue(definition: CommercialConfigDefinition, value: unknown) 
   if (definition.kind === "url") {
     const text = String(value || "").trim();
     const parsed = new URL(text);
-    if (parsed.protocol !== "https:" || parsed.username || parsed.password || !parsed.hostname) throw new Error("CONFIG_HTTPS_URL_REQUIRED");
+    if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.search || parsed.hash || !parsed.hostname) throw new Error("CONFIG_HTTPS_URL_REQUIRED");
     rejectPrivateWebhookLiteral(parsed);
     return parsed.toString().replace(/\/$/, "");
   }
@@ -198,7 +201,7 @@ export async function createCommercialConfigVersion(
   return publicVersion(rows[0]);
 }
 
-async function testConnection(definition: CommercialConfigDefinition, value: unknown, fetcher: typeof fetch, resolver?: Resolver) {
+async function testConnection(definition: CommercialConfigDefinition, value: unknown, fetcher: typeof fetch, resolver?: Resolver, env: NodeJS.ProcessEnv = process.env) {
   if (!definition.test) return { ok: true, detail: { mode: "schema" } };
   if (definition.test === "stripe_webhook") {
     return /^whsec_[A-Za-z0-9_]+$/.test(String(value))
@@ -230,6 +233,14 @@ async function testConnection(definition: CommercialConfigDefinition, value: unk
     method = "POST";
     headers = { "Content-Type": "application/json" };
     body = JSON.stringify({ type: "relay.configuration.test", at: new Date().toISOString() });
+    if (definition.test === "alert_webhook") {
+      const secret = env.RELAY_ALERT_WEBHOOK_SECRET?.trim() || "";
+      if (secret.length < 32) return { ok: false, detail: { code: "ALERT_WEBHOOK_SECRET_REQUIRED" } };
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      headers["X-Relay-Event-Id"] = `config-test-${uid()}`;
+      headers["X-Relay-Timestamp"] = timestamp;
+      headers["X-Relay-Signature"] = `v1=${createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex")}`;
+    }
   }
   const response = await fetcher(url, { method, headers, body, signal: AbortSignal.timeout(10_000) });
   const parsed = await response.json().catch(() => ({})) as Record<string, unknown>;
@@ -251,7 +262,7 @@ export async function testCommercialConfigVersion(
   const value = row.secret_ciphertext ? decryptSecretValue(String(row.secret_ciphertext)) : row.value_json;
   let result: { ok: boolean; detail: Record<string, unknown> };
   try {
-    result = await testConnection(definition, value, opts.fetcher || fetch, opts.resolver);
+    result = await testConnection(definition, value, opts.fetcher || fetch, opts.resolver, await effectiveCommercialEnv(process.env, sql));
   } catch (error) {
     result = { ok: false, detail: { code: error instanceof Error ? error.name || "CONNECTION_FAILED" : "CONNECTION_FAILED" } };
   }

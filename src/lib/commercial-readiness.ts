@@ -23,6 +23,7 @@ export type CommercialReadiness = {
   adminMfaConfigured: boolean;
   customerPrivilegedMfaRequired: boolean;
   tenantAuditConfigured: boolean;
+  alertDeliveryConfigured: boolean;
   registrationEnabled: boolean;
   paymentProvider: string;
   paymentReady: boolean;
@@ -118,6 +119,15 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   const adminMfaConfigured = validAdminMfaConfig(env);
   const customerPrivilegedMfaRequired = env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA === "1";
   const tenantAuditConfigured = (env.RELAY_AUDIT_HASH_KEY?.trim() || env.RELAY_SECRETS_KEY?.trim() || "").length >= 32;
+  let alertDeliveryConfigured = false;
+  try {
+    const alertUrl = new URL(env.RELAY_ALERT_WEBHOOK_URL?.trim() || "");
+    alertDeliveryConfigured = alertUrl.protocol === "https:" && !alertUrl.username && !alertUrl.password &&
+      !alertUrl.search && !alertUrl.hash && Boolean(alertUrl.hostname) &&
+      (env.RELAY_ALERT_WEBHOOK_SECRET?.trim() || "").length >= 32;
+  } catch {
+    alertDeliveryConfigured = false;
+  }
   const paymentProvider = (env.RELAY_PAYMENT_PROVIDER || "disabled").trim();
   const stripeSecret = env.STRIPE_SECRET_KEY?.trim() || "";
   const stripeWebhookSecret = env.STRIPE_WEBHOOK_SECRET?.trim() || "";
@@ -143,6 +153,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   if (enabled && !adminMfaConfigured) blockers.push("administrator TOTP secret missing or invalid");
   if (enabled && !customerPrivilegedMfaRequired) blockers.push("privileged customer MFA hard gate not enabled");
   if (enabled && !tenantAuditConfigured) blockers.push("tenant audit HMAC key missing or shorter than 32 characters");
+  if (enabled && !alertDeliveryConfigured) blockers.push("signed alert Webhook delivery not configured");
   if (enabled && paymentProvider !== "stripe") blockers.push("Stripe payment provider not configured");
   if (enabled && paymentProvider === "stripe" && (!stripeSecret || !stripeWebhookSecret)) blockers.push("Stripe API or webhook secret missing");
   if (enabled && env.NODE_ENV === "production" && paymentProvider === "stripe" && !stripeLiveKey) blockers.push("Stripe live restricted/secret key required");
@@ -167,6 +178,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     adminMfaConfigured,
     customerPrivilegedMfaRequired,
     tenantAuditConfigured,
+    alertDeliveryConfigured,
     registrationEnabled: enabled && env.RELAY_SAAS_REGISTRATION_ENABLED === "1",
     paymentProvider,
     paymentReady,
