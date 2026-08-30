@@ -43,6 +43,8 @@ test("offsite backup runner is opt-in, version-matched and cannot write source o
   assert.match(dockerfile, /FROM minio\/mc:latest@sha256:[0-9a-f]{64} AS mc/);
   assert.match(dockerfile, /COPY --from=mc \/usr\/bin\/mc \/usr\/local\/bin\/mc/);
   assert.match(dockerfile, /safe\.directory \/workspace/);
+  assert.match(compose, /PG_DUMP_BIN: pg_dump/);
+  assert.match(compose, /PG_RESTORE_BIN: pg_restore/);
 });
 
 test("release container bases and production service images are digest-pinned", () => {

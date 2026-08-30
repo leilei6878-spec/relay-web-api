@@ -178,7 +178,8 @@ services:
       RELAY_BACKUP_S3_ACCESS_KEY: ${RELAY_BACKUP_S3_ACCESS_KEY:-}
       RELAY_BACKUP_S3_SECRET_KEY: ${RELAY_BACKUP_S3_SECRET_KEY:-}
       RELAY_BACKUP_LOCAL_DIR: /opt/backups
-      PG_DUMP_BIN: /usr/local/bin/pg_dump
+      PG_DUMP_BIN: pg_dump
+      PG_RESTORE_BIN: pg_restore
       MC_BIN: /usr/local/bin/mc
     volumes:
       - .:/workspace:ro
