@@ -157,7 +157,7 @@ export async function availabilityAnalytics(days = 30) {
 let timer: ReturnType<typeof setInterval> | null = null;
 
 export function startAvailabilitySnapshotScheduler() {
-  if (process.env.RELAY_TEST === "1" || process.env.RELAY_SKIP_ACCOUNT_ANALYTICS === "1") return false;
+  if (process.env.RELAY_TEST === "1" || process.env.RELAY_SKIP_ACCOUNT_ANALYTICS === "1" || process.env.RELAY_EXTERNAL_SCHEDULER === "1") return false;
   if (timer) return true;
   const initial = setTimeout(() => void captureAvailabilitySample().catch(() => undefined), 20_000);
   if (typeof initial === "object" && "unref" in initial) initial.unref();

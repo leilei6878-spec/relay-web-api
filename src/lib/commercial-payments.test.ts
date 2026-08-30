@@ -20,6 +20,7 @@ async function database() {
     tenantName: "Payment QA", ownerName: "Owner", email: "payments@example.test", password: "Test-Password-123!",
   }, db);
   await pg.query("insert into relay_workers(id,name,last_beat,draining) values ('pay-w1','pay-w1',now(),false),('pay-w2','pay-w2',now(),false)");
+  await pg.query("insert into relay_meta(key,value,updated_at) values ('scheduler_last_beat','test',now()) on conflict(key) do update set value='test',updated_at=now()");
   await pg.query(`insert into relay_price_book(id,version,provider,model,capability,currency,input_micros_per_million,output_micros_per_million,image_price_minor,markup_basis_points,effective_from,status)
     values ('pay-price',1,'openai','gpt-test','chat','USD',1,1,0,0,now(),'active')`);
   await pg.query(`insert into relay_provider_sandbox_runs(id,provider,model,capability,mode,status,currency,estimated_charge_minor,initiated_by,started_at,finished_at)

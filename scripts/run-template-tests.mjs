@@ -7,6 +7,7 @@ const tests = [
   join("scripts", "admin-mfa-generator.test.mjs"),
   join("scripts", "backup-restore.test.mjs"),
   join("scripts", "browser-smoke-verdict.test.mjs"),
+  join("scripts", "commercial-scheduler.test.mjs"),
   join("scripts", "migrate-json.test.mjs"),
   join("scripts", "migration-plan.test.mjs"),
   join("scripts", "openapi-contract.test.mjs"),

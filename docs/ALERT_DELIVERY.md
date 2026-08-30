@@ -5,6 +5,12 @@ Outbox. `relay_alert_events` remains the deduplicated alert state;
 `relay_alert_deliveries` stores independently retryable `opened` and `resolved`
 notifications.
 
+Execution is driven by the dedicated Compose `scheduler` service, not an
+`unref()` timer inside the HTTP process. The scheduler has no port, writes a
+30-second heartbeat to `relay_meta` and also owns plan renewal, retention,
+provider Canary and internal account maintenance. Commercial readiness blocks
+launch if that heartbeat is older than 90 seconds.
+
 ## Lifecycle
 
 - The first observation of an open fingerprint creates one `opened` delivery.
@@ -56,4 +62,3 @@ and secret-shaped values are removed or redacted before durable storage.
 The fixed Commercial Configuration connection test uses the same signature.
 Commercial readiness remains false unless both signed-delivery settings are
 valid; a URL flag alone is insufficient.
-

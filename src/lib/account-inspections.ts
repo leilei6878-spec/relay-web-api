@@ -336,7 +336,7 @@ export async function expireAccountInspections() {
 let cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startInspectionCleanupScheduler() {
-  if (process.env.RELAY_TEST === "1") return false;
+  if (process.env.RELAY_TEST === "1" || process.env.RELAY_EXTERNAL_SCHEDULER === "1") return false;
   if (cleanupTimer) return true;
   const initial = setTimeout(() => void expireAccountInspections().catch(() => undefined), 30_000);
   if (typeof initial === "object" && "unref" in initial) initial.unref();

@@ -21,7 +21,7 @@
     "check:auth": "node scripts/check-auth-invariant.mjs",
     "test": "node scripts/run-template-tests.mjs",
     "test:relay": "node scripts/run-relay-tests.mjs",
-    "test:ci": "npm run test:relay && node --experimental-strip-types --import ./scripts/register-ts-ext.mjs --test scripts/multi-process-lease.test.mjs scripts/multi-process-job-claim.test.mjs scripts/pg-cutover.test.mjs scripts/pg-reclaim.test.mjs scripts/qa-hardening.test.mjs scripts/migration-plan.test.mjs scripts/migrate-json.test.mjs scripts/backup-restore.test.mjs scripts/restore-security.test.mjs scripts/object-media-manifest.test.mjs scripts/verify-offsite-snapshot.test.mjs scripts/release-manifest.test.mjs scripts/secret-scan.test.mjs scripts/openapi-contract.test.mjs",
+    "test:ci": "npm run test:relay && node --experimental-strip-types --import ./scripts/register-ts-ext.mjs --test scripts/multi-process-lease.test.mjs scripts/multi-process-job-claim.test.mjs scripts/pg-cutover.test.mjs scripts/pg-reclaim.test.mjs scripts/qa-hardening.test.mjs scripts/migration-plan.test.mjs scripts/migrate-json.test.mjs scripts/backup-restore.test.mjs scripts/restore-security.test.mjs scripts/object-media-manifest.test.mjs scripts/verify-offsite-snapshot.test.mjs scripts/release-manifest.test.mjs scripts/commercial-scheduler.test.mjs scripts/secret-scan.test.mjs scripts/openapi-contract.test.mjs",
     "release:manifest": "node scripts/release-manifest.mjs",
     "export-worker": "node --experimental-strip-types scripts/export-worker.mjs workers/relay-worker.py",
     "test:chaos": "node scripts/chaos-harness.mjs",

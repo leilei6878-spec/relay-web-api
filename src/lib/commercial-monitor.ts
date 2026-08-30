@@ -378,7 +378,7 @@ export async function tickCommercialMonitor() {
 let timer: ReturnType<typeof setInterval> | null = null;
 
 export function startCommercialMonitor() {
-  if (process.env.RELAY_TEST === "1" || process.env.RELAY_SKIP_COMMERCIAL_MONITOR === "1") return false;
+  if (process.env.RELAY_TEST === "1" || process.env.RELAY_SKIP_COMMERCIAL_MONITOR === "1" || process.env.RELAY_EXTERNAL_SCHEDULER === "1") return false;
   if (timer) return true;
   const initial = setTimeout(() => void tickCommercialMonitor().catch(() => undefined), 25_000);
   if (typeof initial === "object" && "unref" in initial) initial.unref();

@@ -38,6 +38,9 @@
    receiver checks timestamp/HMAC, deduplicates `X-Relay-Event-Id`, accepts
    duplicate delivery with 2xx and receives both opened/resolved events. See
    `ALERT_DELIVERY.md`.
+   Confirm the Compose `scheduler` service is running and public readiness
+   reports `schedulerOnline: true`; Gateway-local background timers are
+   intentionally disabled when the dedicated service is configured.
 10. Complete counsel review of terms/privacy/DPA; set `RELAY_LEGAL_APPROVED=1`.
 11. Inspect `/api/saas/readiness` and resolve every infrastructure/configuration
     blocker. `ready` must remain false until the evidence in step 15 is valid.

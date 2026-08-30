@@ -91,6 +91,7 @@ test("commercial readiness fails closed on credentials, prices, replicas, backup
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("tax mode")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("audit HMAC")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("signed alert Webhook")));
+  assert.ok(enabled.blockers.some((blocker) => blocker.includes("scheduler is offline")));
   const unsafeBackup = await commercialReadiness({
     RELAY_COMMERCIAL_ENABLED: "1", RELAY_BACKUP_S3_ENDPOINT: "http://backup.example.test",
     RELAY_BACKUP_S3_BUCKET: "relay-offsite",

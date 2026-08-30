@@ -54,7 +54,7 @@ export async function tickAccountCheckScheduler(now = Date.now()) {
 let timer: ReturnType<typeof setInterval> | null = null;
 
 export function startAccountCheckScheduler() {
-  if (process.env.RELAY_TEST === "1" || process.env.RELAY_SKIP_ACCOUNT_CHECK_SCHEDULER === "1") return false;
+  if (process.env.RELAY_TEST === "1" || process.env.RELAY_SKIP_ACCOUNT_CHECK_SCHEDULER === "1" || process.env.RELAY_EXTERNAL_SCHEDULER === "1") return false;
   if (timer) return true;
   const initial = setTimeout(() => void tickAccountCheckScheduler().catch(() => undefined), 15_000);
   if (typeof initial === "object" && "unref" in initial) initial.unref();

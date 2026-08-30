@@ -118,6 +118,7 @@ test("commercial readiness cannot be enabled by environment flags until every re
      values ('price-ready-evidence',1,'openai','gpt-ready-evidence','chat','USD',1000000,1000000,now()-interval '1 minute','active')`,
   );
   await pg.query("insert into relay_workers(id,name,last_beat,draining) values ('evidence-worker','evidence-worker',now(),false)");
+  await pg.query("insert into relay_meta(key,value,updated_at) values ('scheduler_last_beat','test',now()) on conflict(key) do update set value='test',updated_at=now()");
   await pg.query(
     `insert into relay_provider_sandbox_runs(id,provider,model,capability,mode,status,currency,estimated_charge_minor,initiated_by,started_at,finished_at)
      values ('evidence-canary','openai','gpt-ready-evidence','chat','live','passed','USD',1,'admin',now(),now())`,

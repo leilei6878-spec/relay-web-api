@@ -54,6 +54,7 @@ services:
         echo "minio bucket ready"
 
   gateway:
+    image: relay-gateway
     build:
       context: .
       dockerfile: Dockerfile
@@ -127,6 +128,7 @@ services:
       RELAY_SKIP_COMMERCIAL_MONITOR: ${RELAY_SKIP_COMMERCIAL_MONITOR:-0}
       RELAY_SKIP_PLAN_RENEWAL: ${RELAY_SKIP_PLAN_RENEWAL:-0}
       RELAY_SKIP_RETENTION: ${RELAY_SKIP_RETENTION:-0}
+      RELAY_EXTERNAL_SCHEDULER: "1"
     volumes:
       - ${RELAY_STORAGE_HOST:-relay_storage}:/app/storage
       - ${RELAY_XRAY_BIN:-./bin/xray}:/app/bin/xray:ro
@@ -153,6 +155,24 @@ services:
       RELAY_CAPACITY: ${MAX_WORKER_CONCURRENCY:-3}
     shm_size: "2gb"
     init: true
+    restart: unless-stopped
+
+  scheduler:
+    image: relay-gateway
+    depends_on:
+      gateway:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://relay:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/relay
+      REDIS_URL: redis://redis:6379
+      RELAY_STORAGE_DIR: /app/storage
+      RELAY_EXTERNAL_SCHEDULER: "1"
+    command: ["node", "--experimental-strip-types", "--import", "./scripts/register-ts-ext.mjs", "scripts/commercial-scheduler.mjs"]
+    volumes:
+      - ${RELAY_STORAGE_HOST:-relay_storage}:/app/storage
     restart: unless-stopped
 
   backup:

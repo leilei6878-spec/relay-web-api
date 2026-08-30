@@ -56,5 +56,5 @@ test("release container bases and production service images are digest-pinned", 
   const compose = readFileSync("docker-compose.production.yml", "utf8");
   const images = compose.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith("image: "));
   assert.ok(images.length >= 4);
-  assert.ok(images.every((line) => /@sha256:[0-9a-f]{64}$/.test(line)), "Compose has an unpinned service image");
+  assert.ok(images.every((line) => line === "image: relay-gateway" || /@sha256:[0-9a-f]{64}$/.test(line)), "Compose has an unpinned external service image");
 });

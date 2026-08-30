@@ -97,7 +97,7 @@ export async function tickProviderCanaries(
 let timer: ReturnType<typeof setInterval> | null = null;
 
 export function startProviderCanaryScheduler() {
-  if (process.env.RELAY_TEST === "1" || process.env.RELAY_SKIP_CANARY_SCHEDULER === "1") return false;
+  if (process.env.RELAY_TEST === "1" || process.env.RELAY_SKIP_CANARY_SCHEDULER === "1" || process.env.RELAY_EXTERNAL_SCHEDULER === "1") return false;
   if (timer) return true;
   scheduleCanaries();
   timer = setInterval(() => {

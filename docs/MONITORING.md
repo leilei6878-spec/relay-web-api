@@ -16,3 +16,7 @@ Commercial alert opening/recovery delivery is a persistent signed Outbox, not
 a one-shot callback. Delivery backlog/failures are exposed in
 `GET /api/admin/metrics` and Commercial Operations. See
 [ALERT_DELIVERY.md](./ALERT_DELIVERY.md).
+
+The dedicated `scheduler` container must remain running. Public readiness
+exposes `schedulerOnline`; commercial mode is blocked when its database
+heartbeat is older than 90 seconds.

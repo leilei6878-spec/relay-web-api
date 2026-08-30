@@ -24,6 +24,7 @@ export type CommercialReadiness = {
   customerPrivilegedMfaRequired: boolean;
   tenantAuditConfigured: boolean;
   alertDeliveryConfigured: boolean;
+  schedulerOnline: boolean;
   registrationEnabled: boolean;
   paymentProvider: string;
   paymentReady: boolean;
@@ -71,6 +72,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   let missingEvidence: string[] = [];
   let evidenceUnavailable = false;
   let onlineWorkers = 0;
+  let schedulerOnline = false;
   try {
     const sql = db || await getSql();
     const rows = await sql.query<{ count: number }>(
@@ -98,6 +100,10 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
       "select count(*)::int as count from relay_workers where draining=false and last_beat > now()-interval '45 seconds'",
     );
     onlineWorkers = Number(workers[0]?.count || 0);
+    const scheduler = await sql.query<{ online: boolean }>(
+      "select updated_at > now()-interval '90 seconds' as online from relay_meta where key='scheduler_last_beat'",
+    );
+    schedulerOnline = Boolean(scheduler[0]?.online);
     const evidence = await commercialEvidenceStatus(env, sql);
     evidenceTotal = evidence.length;
     missingEvidence = evidence.filter((item) => !item.valid).map((item) => `${item.requirement}:${item.subject}:${item.reason}`);
@@ -109,6 +115,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     missingEvidence = [];
     evidenceUnavailable = true;
     onlineWorkers = 0;
+    schedulerOnline = false;
   }
   const gatewayReplicas = Math.max(1, Number(env.RELAY_GATEWAY_REPLICA_COUNT || 1));
   const missingProviderCredentials = activeProviders.filter((provider) => !officialProviders[provider as keyof typeof officialProviders]);
@@ -147,6 +154,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   if (enabled && !env.REDIS_URL?.trim()) blockers.push("Redis required for commercial rate/concurrency limits");
   if (enabled && onlineWorkers < minWorkers) blockers.push(`online workers ${onlineWorkers}/${minWorkers}`);
   if (enabled && gatewayReplicas < 2) blockers.push("at least two gateway replicas required");
+  if (enabled && !schedulerOnline) blockers.push("dedicated commercial scheduler is offline");
   if (enabled && !offsiteBackupConfigured) blockers.push("offsite backup target not configured");
   if (enabled && !legalApproved) blockers.push("commercial legal approval not recorded");
   if (enabled && !adminMfaRequired) blockers.push("administrator MFA hard gate not enabled");
@@ -179,6 +187,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     customerPrivilegedMfaRequired,
     tenantAuditConfigured,
     alertDeliveryConfigured,
+    schedulerOnline,
     registrationEnabled: enabled && env.RELAY_SAAS_REGISTRATION_ENABLED === "1",
     paymentProvider,
     paymentReady,

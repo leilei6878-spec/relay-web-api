@@ -103,7 +103,7 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
 let timer: ReturnType<typeof setInterval> | null = null;
 
 export function startDataRetentionScheduler() {
-  if (process.env.RELAY_TEST === "1" || process.env.RELAY_SKIP_RETENTION === "1") return false;
+  if (process.env.RELAY_TEST === "1" || process.env.RELAY_SKIP_RETENTION === "1" || process.env.RELAY_EXTERNAL_SCHEDULER === "1") return false;
   if (timer) return true;
   const initial = setTimeout(() => void runDataRetention().catch(() => undefined), 90_000);
   if (typeof initial === "object" && "unref" in initial) initial.unref();
