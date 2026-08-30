@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc15`
+- production version: `0.10.0-rc16`
 - schema: `17`
-- runtime commit: `95ddef50e11b0ec0b9368cf0df1a0e7311682b58`
+- runtime commit: `dc852f2a7f528d22743b24711825cf3942b1b01b`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -32,7 +32,7 @@ complete when only design intent or a narrow test exists.
 | Tenant data isolation | Tenant-bound sessions/keys, tenant-filtered history/usage and no commercial exposure of account/Worker/proxy topology | Complete |
 | CSRF/Origin and session security | Customer HttpOnly/Secure cookies, CSRF double submit and session-level fresh MFA for high-risk mutations; trusted Origin checks; administrator SHA-256-only short sessions, Strict cookies, revoke/logout, distributed login throttle and loopback-only root recovery | Complete |
 | Administrator MFA | Versioned encrypted TOTP, password+TOTP login, MFA-aware commercial administration guards and readiness blockers | Code/dark-launch complete; real authenticator enrollment intentionally pending |
-| Audit, privacy and retention | Append-only tenant mutation start/terminal events; HMAC-only IP/User-Agent; secret/email redaction; encrypted customer-email payloads scrubbed on delivery/expiry/supersession; tenant-isolated and platform views; request/result redaction, session/check/email retention and non-deleting billing/tenant-audit policy | Complete |
+| Audit, privacy and retention | Append-only tenant mutation start/terminal events; HMAC-only IP/User-Agent; secret/email redaction; encrypted customer-email payloads scrubbed on delivery/expiry/supersession; registration/reset/invite business rows and Outbox commit atomically; public recovery responses are shape/timing equalized and never synchronously call the receiver; tenant-isolated and platform views; request/result redaction, session/check/email retention and non-deleting billing/tenant-audit policy | Complete |
 | Monitoring and alerting | Dedicated scheduler heartbeat; Worker/failure/balance/reservation/payment/refund/dispute/evidence/plan-period/provider-credential/exact-Canary/incomplete-tenant-audit signals; separate durable alert and encrypted customer-email Outboxes; HMAC, payload hash, crash claim, backoff/manual retry, delivery metrics/state and retention | Complete in code and production dark launch; real signed alert/email receivers and external uptime probe not configured |
 | Payment/tax/refund/dispute | Raw Stripe signature verification, exact identity/amount/currency checks, cumulative single-line partial-tax allocation, ambiguous external refund rejection, idempotent balanced settlement and dispute fund events | Complete in code; live Stripe/Tax export drill not possible without merchant configuration |
 | Versioned commercial configuration | Fixed catalog including independently rotatable tenant-audit, alert-delivery and email-delivery HMAC keys, encrypted hint-only secret versions, signed fixed connection tests, atomic activation/rollback, hard launch gates, audit and SSRF-resistant Webhooks | Complete |
@@ -45,7 +45,7 @@ complete when only design intent or a narrow test exists.
 ## Final recovery drill
 
 Latest accepted backup:
-`/opt/backups/relay-email-outbox-final-20260830043033`
+`/opt/backups/relay-transactional-email-final-20260830051425`
 
 The first rc10 environment update contained an incorrect full commit suffix.
 Independent Git-bundle validation detected it; the Gateway was rebuilt from
