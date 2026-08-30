@@ -1,6 +1,6 @@
 # Commercial SaaS completion audit
 
-Date: 2026-08-29 (Asia/Shanghai)
+Date: 2026-08-30 (Asia/Shanghai)
 
 This document evaluates the original public paid SaaS objective against current
 code, automated tests and production evidence. A requirement is not marked
@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc13`
-- schema: `15`
-- runtime commit: `031f1967f3bbc70549702056f60a6b8a62545ba3`
+- production version: `0.10.0-rc14`
+- schema: `16`
+- runtime commit: `deafdb92b5192271a28965720b048ea157650c17`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -33,19 +33,19 @@ complete when only design intent or a narrow test exists.
 | CSRF/Origin and session security | Customer HttpOnly/Secure cookies, CSRF double submit and session-level fresh MFA for high-risk mutations; trusted Origin checks; administrator SHA-256-only short sessions, Strict cookies, revoke/logout, distributed login throttle and loopback-only root recovery | Complete |
 | Administrator MFA | Versioned encrypted TOTP, password+TOTP login, MFA-aware commercial administration guards and readiness blockers | Code/dark-launch complete; real authenticator enrollment intentionally pending |
 | Audit, privacy and retention | Append-only tenant mutation start/terminal events; HMAC-only IP/User-Agent; secret/email redaction; tenant-isolated and platform views; request/result redaction, session/check retention and non-deleting billing/tenant-audit policy | Complete |
-| Monitoring and alerting | Worker/failure/balance/reservation/payment/refund/dispute/evidence/plan-period/provider-credential/exact-Canary/incomplete-tenant-audit signals, durable deduplication and optional Webhook delivery | Complete in code; production alert receiver not configured |
+| Monitoring and alerting | Dedicated scheduler heartbeat; Worker/failure/balance/reservation/payment/refund/dispute/evidence/plan-period/provider-credential/exact-Canary/incomplete-tenant-audit signals; durable opened/resolved Outbox; HMAC, payload hash, crash claim, backoff/manual retry, delivery metrics/state and retention | Complete in code and production dark launch; real signed receiver and external uptime probe not configured |
 | Payment/tax/refund/dispute | Raw Stripe signature verification, exact identity/amount/currency checks, cumulative single-line partial-tax allocation, ambiguous external refund rejection, idempotent balanced settlement and dispute fund events | Complete in code; live Stripe/Tax export drill not possible without merchant configuration |
-| Versioned commercial configuration | Fixed catalog including rotatable tenant-audit HMAC key, encrypted hint-only secret versions, fixed official connection tests, atomic activation/rollback, hard launch gates, audit and SSRF-resistant Webhooks | Complete |
+| Versioned commercial configuration | Fixed catalog including rotatable tenant-audit and alert-delivery HMAC keys, encrypted hint-only secret versions, signed fixed connection tests, atomic activation/rollback, hard launch gates, audit and SSRF-resistant Webhooks | Complete |
 | External launch evidence | Append-only, SHA-256-bound, independently reviewed and expiring evidence for provider rights, model prices, canonical plan snapshots, legal/tax, live payments, email, HA, offsite restore, alerts, load, soak and CI; readiness/Checkout fail closed | Complete in code and dark-launch production; genuine external evidence is intentionally absent |
-| CI/CD release gates | Full-history workflow runs tests/type/lint/build/audit; pinned Actions/images; schema/15-migration and exact-commit contract; production CycloneDX SBOM; commit/tree/file hashes and root release-manifest digest; commit-named retained artifact | Gate passed locally and on production; authoritative GitHub execution still unavailable while push is denied |
+| CI/CD release gates | Full-history workflow runs tests/type/lint/build/audit; pinned Actions/images; schema/16-migration and exact-commit contract; production CycloneDX SBOM; commit/tree/file hashes and root release-manifest digest; commit-named retained artifact | Gate passed locally and on production; authoritative GitHub execution still unavailable while push is denied |
 | HA production topology | Versioned contract requires 2 Gateways, 2 Workers, managed multi-AZ PostgreSQL/Redis and replicated object storage | Not deployed; current host is one Gateway, one Worker and one VPS data plane |
 | Offsite backup and recovery | Opt-in PostgreSQL-16/Node/Git/`mc` runner; complete Git check; S3 object path/size/SHA-256 manifest; upload then remote re-download/byte verification; root manifest digest; standalone downloaded-snapshot verifier; same-host isolated full restore drill below | Tooling and same-host recovery proven; distinct-account/region target and genuine offsite restore evidence missing |
-| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 15, remote-root denial, administrator/customer MFA session, plan-period, exact-provider and tenant-audit probes, hard MFA/Canary/evidence gates and zero unintended commercial rows verified | Dark launch complete; public charging deliberately disabled |
+| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 16, dedicated scheduler heartbeat and durable alert Outbox; remote-root denial, administrator/customer MFA session, plan-period, exact-provider and tenant-audit probes, hard MFA/Canary/evidence gates and zero unintended tenant/financial rows verified | Dark launch complete; public charging deliberately disabled |
 
 ## Final recovery drill
 
 Latest accepted backup:
-`/opt/backups/relay-tenant-audit-final-20260830000055`
+`/opt/backups/relay-alert-outbox-final-20260830113151`
 
 The first rc10 environment update contained an incorrect full commit suffix.
 Independent Git-bundle validation detected it; the Gateway was rebuilt from
@@ -70,14 +70,15 @@ The corrected backup then passed the complete drill:
 - all SHA-256 checks: pass;
 - PostgreSQL custom dump restored into an isolated database: pass;
 - live/restored database signature comparison: pass;
-- restored schema: 15;
-- restored public tables: 44;
+- restored schema: 16;
+- restored public tables: 45;
 - restored accounts: 5;
 - restored administrator sessions: 0;
 - restored plans: 2; plan periods: 0;
 - distinct billing/payment/config/sandbox/evidence/plan-period/tenant-audit triggers: 8;
 - restored evidence/sandbox/configuration/tenant/order/ledger/tenant-audit rows: 0;
-- filesystem storage extraction: 272 files;
+- restored alert/delivery/scheduler rows: 1 / 1 / 1;
+- required filesystem storage manifest: 231 files;
 - MinIO S3 API export: 96 objects / 45,849,211 bytes, restored with an exact
   per-object SHA-256 manifest;
 - independent Git clone/fsck and exact HEAD comparison: pass;
