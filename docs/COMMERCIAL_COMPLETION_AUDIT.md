@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc16`
+- production version: `0.10.0-rc17`
 - schema: `17`
-- runtime commit: `dc852f2a7f528d22743b24711825cf3942b1b01b`
+- runtime commit: `b65e3e1385f987fc78e5db88459b18b844a0a7ef`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -30,7 +30,7 @@ complete when only design intent or a narrow test exists.
 | Customer self-service and commercial admin UI | Login/register/reset/verification, keys, balance, usage, members, Checkout; tenant/price/order/refund/dispute/admin controls; browser QA | Complete |
 | Official provider adapters and sandbox | OpenAI, Gemini API, Vertex AI and Leonardo request/usage adapters; every active provider requires its own current credential; cost-capped sandbox; append-only content-minimising provider/model/capability/currency Live evidence | Code and dark-launch acceptance complete; live Canary acceptance still requires contracts, credentials and reviewed prices |
 | Tenant data isolation | Tenant-bound sessions/keys, tenant-filtered history/usage and no commercial exposure of account/Worker/proxy topology | Complete |
-| CSRF/Origin and session security | Customer HttpOnly/Secure cookies, CSRF double submit and session-level fresh MFA for high-risk mutations; trusted Origin checks; administrator SHA-256-only short sessions, Strict cookies, revoke/logout, distributed login throttle and loopback-only root recovery | Complete |
+| CSRF/Origin, network identity and session security | Customer HttpOnly/Secure cookies, CSRF double submit and session-level fresh MFA for high-risk mutations; trusted Origin checks; one explicit edge-overwritten client-IP header with competing-header rejection and production fail-closed readiness; administrator SHA-256-only short sessions, Strict cookies, revoke/logout, distributed login throttle and loopback-only root recovery | Complete |
 | Administrator MFA | Versioned encrypted TOTP, password+TOTP login, MFA-aware commercial administration guards and readiness blockers | Code/dark-launch complete; real authenticator enrollment intentionally pending |
 | Audit, privacy and retention | Append-only tenant mutation start/terminal events; HMAC-only IP/User-Agent; secret/email redaction; encrypted customer-email payloads scrubbed on delivery/expiry/supersession; registration/reset/invite business rows and Outbox commit atomically; public recovery responses are shape/timing equalized and never synchronously call the receiver; tenant-isolated and platform views; request/result redaction, session/check/email retention and non-deleting billing/tenant-audit policy | Complete |
 | Monitoring and alerting | Dedicated scheduler heartbeat; Worker/failure/balance/reservation/payment/refund/dispute/evidence/plan-period/provider-credential/exact-Canary/incomplete-tenant-audit signals; separate durable alert and encrypted customer-email Outboxes; HMAC, payload hash, crash claim, backoff/manual retry, delivery metrics/state and retention | Complete in code and production dark launch; real signed alert/email receivers and external uptime probe not configured |
@@ -45,7 +45,7 @@ complete when only design intent or a narrow test exists.
 ## Final recovery drill
 
 Latest accepted backup:
-`/opt/backups/relay-transactional-email-final-20260830051425`
+`/opt/backups/relay-client-network-final-20260830054626`
 
 The first rc10 environment update contained an incorrect full commit suffix.
 Independent Git-bundle validation detected it; the Gateway was rebuilt from
