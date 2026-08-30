@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc14`
-- schema: `16`
-- runtime commit: `deafdb92b5192271a28965720b048ea157650c17`
+- production version: `0.10.0-rc15`
+- schema: `17`
+- runtime commit: `95ddef50e11b0ec0b9368cf0df1a0e7311682b58`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -32,20 +32,20 @@ complete when only design intent or a narrow test exists.
 | Tenant data isolation | Tenant-bound sessions/keys, tenant-filtered history/usage and no commercial exposure of account/Worker/proxy topology | Complete |
 | CSRF/Origin and session security | Customer HttpOnly/Secure cookies, CSRF double submit and session-level fresh MFA for high-risk mutations; trusted Origin checks; administrator SHA-256-only short sessions, Strict cookies, revoke/logout, distributed login throttle and loopback-only root recovery | Complete |
 | Administrator MFA | Versioned encrypted TOTP, password+TOTP login, MFA-aware commercial administration guards and readiness blockers | Code/dark-launch complete; real authenticator enrollment intentionally pending |
-| Audit, privacy and retention | Append-only tenant mutation start/terminal events; HMAC-only IP/User-Agent; secret/email redaction; tenant-isolated and platform views; request/result redaction, session/check retention and non-deleting billing/tenant-audit policy | Complete |
-| Monitoring and alerting | Dedicated scheduler heartbeat; Worker/failure/balance/reservation/payment/refund/dispute/evidence/plan-period/provider-credential/exact-Canary/incomplete-tenant-audit signals; durable opened/resolved Outbox; HMAC, payload hash, crash claim, backoff/manual retry, delivery metrics/state and retention | Complete in code and production dark launch; real signed receiver and external uptime probe not configured |
+| Audit, privacy and retention | Append-only tenant mutation start/terminal events; HMAC-only IP/User-Agent; secret/email redaction; encrypted customer-email payloads scrubbed on delivery/expiry/supersession; tenant-isolated and platform views; request/result redaction, session/check/email retention and non-deleting billing/tenant-audit policy | Complete |
+| Monitoring and alerting | Dedicated scheduler heartbeat; Worker/failure/balance/reservation/payment/refund/dispute/evidence/plan-period/provider-credential/exact-Canary/incomplete-tenant-audit signals; separate durable alert and encrypted customer-email Outboxes; HMAC, payload hash, crash claim, backoff/manual retry, delivery metrics/state and retention | Complete in code and production dark launch; real signed alert/email receivers and external uptime probe not configured |
 | Payment/tax/refund/dispute | Raw Stripe signature verification, exact identity/amount/currency checks, cumulative single-line partial-tax allocation, ambiguous external refund rejection, idempotent balanced settlement and dispute fund events | Complete in code; live Stripe/Tax export drill not possible without merchant configuration |
-| Versioned commercial configuration | Fixed catalog including rotatable tenant-audit and alert-delivery HMAC keys, encrypted hint-only secret versions, signed fixed connection tests, atomic activation/rollback, hard launch gates, audit and SSRF-resistant Webhooks | Complete |
+| Versioned commercial configuration | Fixed catalog including independently rotatable tenant-audit, alert-delivery and email-delivery HMAC keys, encrypted hint-only secret versions, signed fixed connection tests, atomic activation/rollback, hard launch gates, audit and SSRF-resistant Webhooks | Complete |
 | External launch evidence | Append-only, SHA-256-bound, independently reviewed and expiring evidence for provider rights, model prices, canonical plan snapshots, legal/tax, live payments, email, HA, offsite restore, alerts, load, soak and CI; readiness/Checkout fail closed | Complete in code and dark-launch production; genuine external evidence is intentionally absent |
-| CI/CD release gates | Full-history workflow runs tests/type/lint/build/audit; pinned Actions/images; schema/16-migration and exact-commit contract; production CycloneDX SBOM; commit/tree/file hashes and root release-manifest digest; commit-named retained artifact | Gate passed locally and on production; authoritative GitHub execution still unavailable while push is denied |
+| CI/CD release gates | Full-history workflow runs tests/type/lint/build/audit; pinned Actions/images; schema/17-migration and exact-commit contract; production CycloneDX SBOM; commit/tree/file hashes and root release-manifest digest; commit-named retained artifact | Gate passed locally and on production; authoritative GitHub execution still unavailable while push is denied |
 | HA production topology | Versioned contract requires 2 Gateways, 2 Workers, managed multi-AZ PostgreSQL/Redis and replicated object storage | Not deployed; current host is one Gateway, one Worker and one VPS data plane |
 | Offsite backup and recovery | Opt-in PostgreSQL-16/Node/Git/`mc` runner; complete Git check; S3 object path/size/SHA-256 manifest; upload then remote re-download/byte verification; root manifest digest; standalone downloaded-snapshot verifier; same-host isolated full restore drill below | Tooling and same-host recovery proven; distinct-account/region target and genuine offsite restore evidence missing |
-| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema 16, dedicated scheduler heartbeat and durable alert Outbox; remote-root denial, administrator/customer MFA session, plan-period, exact-provider and tenant-audit probes, hard MFA/Canary/evidence gates and zero unintended tenant/financial rows verified | Dark launch complete; public charging deliberately disabled |
+| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema17, dedicated scheduler heartbeat, durable alert Outbox and encrypted customer-email Outbox; remote-root denial, administrator/customer MFA session, plan-period, exact-provider and tenant-audit probes, hard MFA/Canary/evidence gates and zero unintended tenant/financial/email rows verified | Dark launch complete; public charging deliberately disabled |
 
 ## Final recovery drill
 
 Latest accepted backup:
-`/opt/backups/relay-alert-outbox-final-20260830113151`
+`/opt/backups/relay-email-outbox-final-20260830043033`
 
 The first rc10 environment update contained an incorrect full commit suffix.
 Independent Git-bundle validation detected it; the Gateway was rebuilt from
@@ -70,14 +70,14 @@ The corrected backup then passed the complete drill:
 - all SHA-256 checks: pass;
 - PostgreSQL custom dump restored into an isolated database: pass;
 - live/restored database signature comparison: pass;
-- restored schema: 16;
-- restored public tables: 45;
+- restored schema: 17;
+- restored public tables: 46;
 - restored accounts: 5;
 - restored administrator sessions: 0;
 - restored plans: 2; plan periods: 0;
-- distinct billing/payment/config/sandbox/evidence/plan-period/tenant-audit triggers: 8;
+- `information_schema` trigger rows: 15;
 - restored evidence/sandbox/configuration/tenant/order/ledger/tenant-audit rows: 0;
-- restored alert/delivery/scheduler rows: 1 / 1 / 1;
+- restored alert/delivery/email/scheduler rows: 1 / 1 / 0 / 1;
 - required filesystem storage manifest: 231 files;
 - MinIO S3 API export: 96 objects / 45,849,211 bytes, restored with an exact
   per-object SHA-256 manifest;
