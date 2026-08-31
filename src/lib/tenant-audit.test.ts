@@ -11,7 +11,7 @@ const migrations = [
   "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql",
   "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql",
   "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql",
-  "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql", "0019_legal_reconsent.sql", "0020_tenant_privacy_rights.sql", "0021_customer_session_security.sql", "0022_staged_mfa_enrollment.sql", "0023_customer_password_change.sql",
+  "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql", "0019_legal_reconsent.sql", "0020_tenant_privacy_rights.sql", "0021_customer_session_security.sql", "0022_staged_mfa_enrollment.sql", "0023_customer_password_change.sql", "0024_tenant_switching.sql",
 ];
 
 async function database() {
@@ -175,7 +175,7 @@ test("tenant audit route and all privileged tenant mutation routes keep the audi
   const auditRoute = await readFile("src/routes/api/saas/audit.ts", "utf8");
   assert.match(auditRoute, /assertSaasSession\(request, \["owner", "admin"\]\)/);
   assert.match(auditRoute, /listTenantAuditEvents\(auth\.session\.tenantId/);
-  for (const path of ["keys.ts", "members.ts", "billing.ts", "session.ts", "privacy.ts", "security.ts"]) {
+  for (const path of ["keys.ts", "members.ts", "billing.ts", "session.ts", "privacy.ts", "security.ts", "tenants.ts"]) {
     const source = await readFile(`src/routes/api/saas/${path}`, "utf8");
     assert.match(source, /auditedTenantMutation\(request, auth\.session/);
   }

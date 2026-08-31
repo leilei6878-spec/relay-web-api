@@ -36,6 +36,11 @@ official-provider usage/asset settlement paths are authoritative.
 
 - Tenant, users and memberships are first-class SQL rows.
 - Roles: owner, admin, billing, developer and viewer.
+- Users with multiple active memberships can list and switch tenants from the
+  shared SaaS Shell. Switching atomically revokes the source session, creates a
+  target-bound session, recomputes target legal state and preserves the exact
+  original MFA timestamp without extending step-up. See
+  [`TENANT_SWITCHING.md`](./TENANT_SWITCHING.md).
 - Passwords use scrypt with random salts.
 - Customer sessions use HttpOnly/Secure cookies; mutations require matching
   CSRF header/cookie plus trusted Origin.

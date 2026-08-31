@@ -69,6 +69,7 @@ import { Route as ApiSaasPrivacyRouteImport } from './routes/api/saas/privacy'
 import { Route as ApiSaasReadinessRouteImport } from './routes/api/saas/readiness'
 import { Route as ApiSaasSecurityRouteImport } from './routes/api/saas/security'
 import { Route as ApiSaasSessionRouteImport } from './routes/api/saas/session'
+import { Route as ApiSaasTenantsRouteImport } from './routes/api/saas/tenants'
 import { Route as ApiWebhooksStripeRouteImport } from './routes/api/webhooks/stripe'
 import { Route as ApiWorkerAccountInspectionsRouteImport } from './routes/api/worker/account-inspections'
 import { Route as ApiWorkerChunkRouteImport } from './routes/api/worker/chunk'
@@ -386,6 +387,11 @@ const ApiSaasSessionRoute = ApiSaasSessionRouteImport.update({
   path: '/api/saas/session',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSaasTenantsRoute = ApiSaasTenantsRouteImport.update({
+  id: '/api/saas/tenants',
+  path: '/api/saas/tenants',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiWebhooksStripeRoute = ApiWebhooksStripeRouteImport.update({
   id: '/api/webhooks/stripe',
   path: '/api/webhooks/stripe',
@@ -504,6 +510,7 @@ export interface FileRoutesByFullPath {
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/security': typeof ApiSaasSecurityRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
+  '/api/saas/tenants': typeof ApiSaasTenantsRoute
   '/api/webhooks/stripe': typeof ApiWebhooksStripeRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
@@ -577,6 +584,7 @@ export interface FileRoutesByTo {
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/security': typeof ApiSaasSecurityRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
+  '/api/saas/tenants': typeof ApiSaasTenantsRoute
   '/api/webhooks/stripe': typeof ApiWebhooksStripeRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
@@ -651,6 +659,7 @@ export interface FileRoutesById {
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/security': typeof ApiSaasSecurityRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
+  '/api/saas/tenants': typeof ApiSaasTenantsRoute
   '/api/webhooks/stripe': typeof ApiWebhooksStripeRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
   '/api/worker/chunk': typeof ApiWorkerChunkRoute
@@ -726,6 +735,7 @@ export interface FileRouteTypes {
     | '/api/saas/readiness'
     | '/api/saas/security'
     | '/api/saas/session'
+    | '/api/saas/tenants'
     | '/api/webhooks/stripe'
     | '/api/worker/account-inspections'
     | '/api/worker/chunk'
@@ -799,6 +809,7 @@ export interface FileRouteTypes {
     | '/api/saas/readiness'
     | '/api/saas/security'
     | '/api/saas/session'
+    | '/api/saas/tenants'
     | '/api/webhooks/stripe'
     | '/api/worker/account-inspections'
     | '/api/worker/chunk'
@@ -872,6 +883,7 @@ export interface FileRouteTypes {
     | '/api/saas/readiness'
     | '/api/saas/security'
     | '/api/saas/session'
+    | '/api/saas/tenants'
     | '/api/webhooks/stripe'
     | '/api/worker/account-inspections'
     | '/api/worker/chunk'
@@ -946,6 +958,7 @@ export interface RootRouteChildren {
   ApiSaasReadinessRoute: typeof ApiSaasReadinessRoute
   ApiSaasSecurityRoute: typeof ApiSaasSecurityRoute
   ApiSaasSessionRoute: typeof ApiSaasSessionRoute
+  ApiSaasTenantsRoute: typeof ApiSaasTenantsRoute
   ApiWebhooksStripeRoute: typeof ApiWebhooksStripeRoute
   ApiWorkerAccountInspectionsRoute: typeof ApiWorkerAccountInspectionsRoute
   ApiWorkerChunkRoute: typeof ApiWorkerChunkRoute
@@ -1381,6 +1394,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSaasSessionRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/saas/tenants': {
+      id: '/api/saas/tenants'
+      path: '/api/saas/tenants'
+      fullPath: '/api/saas/tenants'
+      preLoaderRoute: typeof ApiSaasTenantsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/webhooks/stripe': {
       id: '/api/webhooks/stripe'
       path: '/api/webhooks/stripe'
@@ -1522,6 +1542,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSaasReadinessRoute: ApiSaasReadinessRoute,
   ApiSaasSecurityRoute: ApiSaasSecurityRoute,
   ApiSaasSessionRoute: ApiSaasSessionRoute,
+  ApiSaasTenantsRoute: ApiSaasTenantsRoute,
   ApiWebhooksStripeRoute: ApiWebhooksStripeRoute,
   ApiWorkerAccountInspectionsRoute: ApiWorkerAccountInspectionsRoute,
   ApiWorkerChunkRoute: ApiWorkerChunkRoute,

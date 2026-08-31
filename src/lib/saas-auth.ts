@@ -509,6 +509,54 @@ export async function logoutSaas(request: Request, db?: DbLike) {
   return clearSaasCookies(request);
 }
 
+export async function switchSaasTenantSession(session: SaasSession, targetTenantId: string, request: Request, db?: DbLike) {
+  if (!targetTenantId || targetTenantId === session.tenantId) throw new Error("TENANT_SWITCH_TARGET_INVALID");
+  const sql = await database(db);
+  const token = secureToken(32);
+  const csrf = secureToken(24);
+  const nextSessionId = uid();
+  const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+  const rows = await sql.query<Record<string, unknown>>(
+    `with membership as (
+       select m.user_id,m.tenant_id,m.role,t.name as tenant_name,t.status as tenant_status
+         from relay_tenant_memberships m join relay_tenants t on t.id=m.tenant_id
+        where m.user_id=$1 and m.tenant_id=$2 and m.status='active'
+          and t.status in ('trial','active','suspended')
+     ), revoked as (
+       update relay_saas_sessions s set revoked_at=now(),revoked_reason='tenant_switch',revoked_by_session_id=$3
+        from membership m where s.id=$4 and s.user_id=m.user_id and s.revoked_at is null and s.expires_at>now()
+       returning s.id
+     ), inserted as (
+       insert into relay_saas_sessions
+        (id,user_id,tenant_id,token_hash,csrf_hash,ip_address,user_agent,expires_at,mfa_verified_at,last_seen_at,created_at)
+       select $3,m.user_id,m.tenant_id,$5,$6,$7,$8,$9,$10::timestamptz,now(),now()
+         from membership m join revoked r on true returning id,user_id,tenant_id
+     ) select i.id,i.user_id,i.tenant_id,m.role,m.tenant_name,m.tenant_status
+         from inserted i join membership m on m.tenant_id=i.tenant_id`,
+    [
+      session.userId, targetTenantId, nextSessionId, session.sessionId, sha256(token), sha256(csrf),
+      clientIp(request), (request.headers.get("user-agent") || "").slice(0, 500), expiresAt,
+      session.mfaVerifiedAt,
+    ],
+  );
+  const row = rows[0];
+  if (!row) throw new Error("TENANT_SWITCH_NOT_ALLOWED");
+  const legalAcceptanceRequired = !await userHasCurrentLegalAcceptance(session.userId, targetTenantId, process.env, sql);
+  const secure = secureRequest(request);
+  return {
+    sessionId: nextSessionId,
+    csrf,
+    expiresAt,
+    mfaVerified: Boolean(session.mfaVerifiedAt),
+    legalAcceptanceRequired,
+    tenant: { id: targetTenantId, name: String(row.tenant_name), status: String(row.tenant_status), role: row.role as TenantRole },
+    cookies: [
+      sessionCookie(SAAS_SESSION_COOKIE, token, 7 * 86_400, secure, true),
+      sessionCookie(SAAS_CSRF_COOKIE, csrf, 7 * 86_400, secure, false),
+    ],
+  };
+}
+
 export async function startSaasMfa(session: SaasSession, db?: DbLike) {
   const sql = await database(db);
   const secret = generateTotpSecret();

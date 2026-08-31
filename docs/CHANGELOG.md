@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0-rc24 — multi-tenant session switching (2026-08-31)
+
+- Authenticated users can list only their active tenant memberships and roles.
+- Shared SaaS Shell shows a selector for multi-tenant users, including
+  suspended memberships for restricted rights/security access.
+- Switch atomically revokes the source session and creates a random target
+  session; invalid targets leave the current session intact and concurrent
+  switches have one winner.
+- Original MFA timestamp is copied exactly, preventing tenant switching from
+  extending privileged step-up; target legal status is recomputed.
+
 ## 0.10.0-rc23 — authenticated password change (2026-08-31)
 
 - Customer security center verifies the current password and fresh MFA (when
