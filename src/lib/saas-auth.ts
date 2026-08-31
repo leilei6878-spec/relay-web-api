@@ -4,7 +4,7 @@ import { effectiveCommercialEnv } from "./commercial-config";
 import { deliverEmailDeliveryNow, prepareEmailDelivery, type PreparedEmailDelivery } from "./email-outbox";
 import { createTenantOwner } from "./saas-billing";
 import { trustedClientIp as clientIp } from "./client-network";
-import { prepareLegalAcceptance } from "./legal-documents";
+import { prepareLegalAcceptance, userHasCurrentLegalAcceptance } from "./legal-documents";
 import {
   generateTotpSecret,
   normalizeEmail,
@@ -396,10 +396,12 @@ export async function loginSaas(
   if (!membership) throw new Error("NO_ACTIVE_TENANT");
   await sql.query("update relay_saas_users set last_login_at=now(),updated_at=now() where id=$1", [user.id]);
   const session = await createSaasSession(String(user.id), String(membership.tenant_id), request, sql, mfaVerified);
+  const legalAcceptanceRequired = !await userHasCurrentLegalAcceptance(String(user.id), String(membership.tenant_id), process.env, sql);
   return {
     user: { id: String(user.id), email: String(user.email), name: String(user.name) },
     tenant: { id: String(membership.tenant_id), name: String(membership.tenant_name), role: String(membership.role) as TenantRole },
     ...session,
+    legalAcceptanceRequired,
   };
 }
 
@@ -417,6 +419,7 @@ export type SaasSession = {
   mfaVerified: boolean;
   mfaVerifiedAt: string | null;
   mfaEnabled: boolean;
+  legalAcceptanceRequired: boolean;
 };
 
 export async function getSaasSession(request: Request, db?: DbLike): Promise<SaasSession | null> {
@@ -437,6 +440,7 @@ export async function getSaasSession(request: Request, db?: DbLike): Promise<Saa
   );
   const row = rows[0];
   if (!row) return null;
+  const legalAcceptanceRequired = !await userHasCurrentLegalAcceptance(String(row.user_id), String(row.tenant_id), process.env, sql);
   return {
     sessionId: String(row.session_id),
     userId: String(row.user_id),
@@ -451,17 +455,19 @@ export async function getSaasSession(request: Request, db?: DbLike): Promise<Saa
     mfaVerified: Boolean(row.mfa_verified_at),
     mfaVerifiedAt: row.mfa_verified_at ? (row.mfa_verified_at instanceof Date ? row.mfa_verified_at.toISOString() : String(row.mfa_verified_at)) : null,
     mfaEnabled: Boolean(row.mfa_enabled),
+    legalAcceptanceRequired,
   };
 }
 
 export async function assertSaasSession(
   request: Request,
   roles?: TenantRole[],
-  opts: { requireCsrf?: boolean; requireMfa?: boolean } = {},
+  opts: { requireCsrf?: boolean; requireMfa?: boolean; requireLegal?: boolean } = {},
   db?: DbLike,
 ) {
   const session = await getSaasSession(request, db);
   if (!session) return { ok: false as const, status: 401, error: "SAAS_UNAUTHORIZED" };
+  if (opts.requireLegal !== false && session.legalAcceptanceRequired) return { ok: false as const, status: 403, error: "LEGAL_RECONSENT_REQUIRED" };
   if (roles?.length && !roles.includes(session.role)) return { ok: false as const, status: 403, error: "SAAS_ROLE_REQUIRED" };
   if (opts.requireCsrf) {
     if (!trustedSaasOrigin(request)) return { ok: false as const, status: 403, error: "INVALID_ORIGIN" };

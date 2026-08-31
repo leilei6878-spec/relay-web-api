@@ -21,8 +21,11 @@ function SaasLogin() {
   const [legalAccepted, setLegalAccepted] = useState(false);
 
   useEffect(() => {
-    void fetch("/api/saas/session", { credentials: "include" }).then((response) => {
-      if (response.ok) window.location.replace("/portal");
+    void fetch("/api/saas/session", { credentials: "include" }).then(async (response) => {
+      if (response.ok) {
+        const session = await response.json() as { legalAcceptanceRequired?: boolean };
+        window.location.replace(session.legalAcceptanceRequired ? "/saas/consent" : "/portal");
+      }
     }).catch(() => undefined);
     void fetch("/api/saas/legal", { credentials: "omit" }).then(async (response) => {
       if (response.ok) setLegal(await response.json() as LegalPublicMetadata);
@@ -51,7 +54,7 @@ function SaasLogin() {
           totp: /^\d{6}$/.test(totp.trim()) ? totp.trim() : undefined,
           recoveryCode: totp.trim() && !/^\d{6}$/.test(totp.trim()) ? totp.trim() : undefined }),
       });
-      const body = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; verificationRequired?: boolean };
+      const body = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; verificationRequired?: boolean; legalAcceptanceRequired?: boolean };
       if (!response.ok || !body.ok) {
         if (body.error === "MFA_REQUIRED") setError("请输入身份验证器中的 6 位验证码或一个未使用的恢复码");
         else if (body.error === "REGISTRATION_DISABLED") setError("公开注册尚未开放，请联系销售开通租户");
@@ -64,7 +67,7 @@ function SaasLogin() {
         setPassword("");
         return;
       }
-      window.location.replace("/portal");
+      window.location.replace(body.legalAcceptanceRequired ? "/saas/consent" : "/portal");
     } catch {
       setError("无法连接服务器");
     } finally {

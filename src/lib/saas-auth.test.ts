@@ -44,7 +44,7 @@ async function database() {
   await pg.waitReady;
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
-    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql",
+    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql", "0019_legal_reconsent.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return {
     pg,
@@ -112,6 +112,39 @@ test("owner registration, login, HttpOnly session and CSRF role gate", async () 
   if (previous === undefined) delete process.env.RELAY_PUBLIC_URL;
   else process.env.RELAY_PUBLIC_URL = previous;
   await pg.close();
+});
+
+test("stale legal acceptance blocks tenant APIs but keeps the consent surface reachable", async () => {
+  const { pg, db } = await database();
+  const registered = await registerSaasOwner(
+    { tenantName: "Reconsent Co", ownerName: "Owner", email: "reconsent@example.test", password: "reconsent-password-123" },
+    request("/api/saas/session", { method: "POST" }), db,
+  );
+  const keys = ["RELAY_REQUIRE_LEGAL_ACCEPTANCE", "RELAY_LEGAL_APPROVED", "RELAY_LEGAL_OPERATOR_NAME", "RELAY_LEGAL_CONTACT_EMAIL", "RELAY_TERMS_VERSION", "RELAY_PRIVACY_VERSION", "RELAY_LEGAL_EFFECTIVE_DATE", "RELAY_AUDIT_HASH_KEY"] as const;
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  Object.assign(process.env, {
+    RELAY_REQUIRE_LEGAL_ACCEPTANCE: "1", RELAY_LEGAL_APPROVED: "1",
+    RELAY_LEGAL_OPERATOR_NAME: "Reconsent Test Ltd.", RELAY_LEGAL_CONTACT_EMAIL: "privacy@reconsent.test",
+    RELAY_TERMS_VERSION: "reconsent-terms-v1", RELAY_PRIVACY_VERSION: "reconsent-privacy-v1",
+    RELAY_LEGAL_EFFECTIVE_DATE: "2026-08-31", RELAY_AUDIT_HASH_KEY: "reconsent-audit-key-0123456789abcdef",
+  });
+  try {
+    const mutation = request("/api/saas/keys", {
+      method: "POST",
+      headers: { cookie: cookieHeader(registered.cookies), "x-csrf-token": registered.csrf || "" },
+    });
+    const blocked = await assertSaasSession(mutation, ["owner"], { requireCsrf: true }, db);
+    assert.equal(blocked.ok, false);
+    if (!blocked.ok) assert.equal(blocked.error, "LEGAL_RECONSENT_REQUIRED");
+    assert.equal((await assertSaasSession(mutation, ["owner"], { requireCsrf: true, requireLegal: false }, db)).ok, true);
+    assert.equal((await getSaasSession(mutation, db))?.legalAcceptanceRequired, true);
+  } finally {
+    for (const key of keys) {
+      const value = previous[key];
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    await pg.close();
+  }
 });
 
 test("MFA enrollment requires a current code and returns one-time recovery codes", async () => {

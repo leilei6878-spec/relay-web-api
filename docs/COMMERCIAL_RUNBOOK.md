@@ -50,7 +50,9 @@
 11. Complete counsel review of terms/privacy/DPA. Configure versioned operator,
     contact, Terms/Privacy versions and effective date; verify the public
     content-bundle SHA-256 and both registration/invite explicit-acceptance
-    records following `LEGAL_ACCEPTANCE.md`. Then set the separately controlled
+    records following `LEGAL_ACCEPTANCE.md`. Rehearse a version change: existing
+    sessions must redirect to re-consent and paid API keys must fail until an
+    active Owner/Admin accepts the new bundle. Then set the separately controlled
     `RELAY_LEGAL_APPROVED=1` hard gate and record reviewed `legal_documents`
     evidence.
 12. Inspect `/api/saas/readiness` and resolve every infrastructure/configuration

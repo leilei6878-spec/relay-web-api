@@ -4,6 +4,7 @@ import { secureToken, sha256 } from "./saas-crypto";
 import type { CommercialApiKey, CommercialCapability } from "./commercial-types";
 import { uid } from "./utils";
 import { cachedCommercialReadiness } from "./commercial-readiness";
+import { tenantHasCurrentLegalAcceptance } from "./legal-documents";
 
 type DbLike = Pick<Sql, "query">;
 
@@ -100,10 +101,15 @@ export async function createTenantApiKey(
   return { id, token, hint };
 }
 
-export async function findTenantApiKey(token: string, db?: DbLike) {
+export async function findTenantApiKey(
+  token: string,
+  db?: DbLike,
+  opts: { env?: NodeJS.ProcessEnv; commercialReady?: () => Promise<boolean> } = {},
+) {
+  const env = opts.env || process.env;
   if (!token.startsWith("sk-saas-") || token.length < 32) return null;
-  if (process.env.NODE_ENV === "production" && process.env.RELAY_COMMERCIAL_ENABLED !== "1") return null;
-  if (process.env.NODE_ENV === "production" && !(await cachedCommercialReadiness()).ready) return null;
+  if (env.NODE_ENV === "production" && env.RELAY_COMMERCIAL_ENABLED !== "1") return null;
+  if (env.NODE_ENV === "production" && !(opts.commercialReady ? await opts.commercialReady() : (await cachedCommercialReadiness()).ready)) return null;
   const sql = await database(db);
   const rows = await sql.query<Record<string, unknown>>(
     `select k.*,t.status as tenant_status,t.plan_id,
@@ -120,7 +126,9 @@ export async function findTenantApiKey(token: string, db?: DbLike) {
       limit 1`,
     [sha256(token)],
   );
-  return rows[0] ? mapKey(rows[0]) : null;
+  if (!rows[0]) return null;
+  if (!await tenantHasCurrentLegalAcceptance(String(rows[0].tenant_id), env, sql)) return null;
+  return mapKey(rows[0]);
 }
 
 export async function listTenantApiKeys(tenantId: string, db?: DbLike) {

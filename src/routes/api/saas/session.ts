@@ -36,7 +36,7 @@ export const Route = createFileRoute("/api/saas/session")({
       GET: async ({ request }) => {
         const session = await getSaasSession(request);
         return session
-          ? Response.json({ ok: true, user: { id: session.userId, email: session.email, name: session.name, mfaEnabled: session.mfaEnabled }, tenant: { id: session.tenantId, name: session.tenantName, status: session.tenantStatus, role: session.role }, mfaVerified: session.mfaVerified }, { headers: { "Cache-Control": "no-store" } })
+          ? Response.json({ ok: true, user: { id: session.userId, email: session.email, name: session.name, mfaEnabled: session.mfaEnabled }, tenant: { id: session.tenantId, name: session.tenantName, status: session.tenantStatus, role: session.role }, mfaVerified: session.mfaVerified, legalAcceptanceRequired: session.legalAcceptanceRequired }, { headers: { "Cache-Control": "no-store" } })
           : Response.json({ ok: false, error: "SAAS_UNAUTHORIZED" }, { status: 401, headers: { "Cache-Control": "no-store" } });
       },
       POST: async ({ request }) => {
@@ -70,7 +70,7 @@ export const Route = createFileRoute("/api/saas/session")({
               { email: String(body.email || ""), password: String(body.password || ""), tenantId: body.tenantId ? String(body.tenantId) : undefined, totp: body.totp ? String(body.totp) : undefined, recoveryCode: body.recoveryCode ? String(body.recoveryCode) : undefined },
               request,
             );
-            return responseWithCookies({ ok: true, user: result.user, tenant: result.tenant, csrf: result.csrf, mfaVerified: result.mfaVerified }, result.cookies);
+            return responseWithCookies({ ok: true, user: result.user, tenant: result.tenant, csrf: result.csrf, mfaVerified: result.mfaVerified, legalAcceptanceRequired: result.legalAcceptanceRequired }, result.cookies);
           }
           if (action === "verify-email") {
             return Response.json(await verifySaasEmail(String(body.token || ""), request));
@@ -109,7 +109,7 @@ export const Route = createFileRoute("/api/saas/session")({
         }
       },
       DELETE: async ({ request }) => {
-        const auth = await assertSaasSession(request, undefined, { requireCsrf: true });
+        const auth = await assertSaasSession(request, undefined, { requireCsrf: true, requireLegal: false });
         if (!auth.ok) return Response.json({ ok: false, error: auth.error }, { status: auth.status });
         try {
           const cookies = await auditedTenantMutation(request, auth.session, {

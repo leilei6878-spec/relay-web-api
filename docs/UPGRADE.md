@@ -1,6 +1,6 @@
 # Upgrade
 
-Schema is the ordered set of `migrations/*.sql`. Current `SCHEMA_VERSION` is **18**
+Schema is the ordered set of `migrations/*.sql`. Current `SCHEMA_VERSION` is **19**
 (`src/lib/release.ts`, row `relay_meta.schema_version`).
 
 ## Procedure (release N → N+1)
@@ -27,6 +27,11 @@ acceptance bind the explicit user action to the active terms/privacy versions,
 exact public content bundle SHA-256 and HMAC-only network evidence. Existing
 users are not backfilled with fabricated consent; obtain a fresh acceptance
 before relying on the record for commercial service.
+
+Schema 19 permits the append-only `reconsent` method. Existing sessions are
+redirected to the explicit consent page when the effective Terms/Privacy bundle
+changes, and paid tenant API keys fail closed until an active Owner/Admin has
+accepted that exact bundle.
 
 JSON files are **not** part of production upgrade. To import a preview plane use:
 

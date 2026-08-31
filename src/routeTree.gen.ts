@@ -33,6 +33,7 @@ import { Route as ApiUsageRouteImport } from './routes/api/usage'
 import { Route as InternalReadinessRouteImport } from './routes/internal/readiness'
 import { Route as LegalPrivacyRouteImport } from './routes/legal/privacy'
 import { Route as LegalTermsRouteImport } from './routes/legal/terms'
+import { Route as SaasConsentRouteImport } from './routes/saas/consent'
 import { Route as SaasInviteRouteImport } from './routes/saas/invite'
 import { Route as SaasLoginRouteImport } from './routes/saas/login'
 import { Route as SaasResetRouteImport } from './routes/saas/reset'
@@ -57,6 +58,7 @@ import { Route as ApiAdminWorkerKitRouteImport } from './routes/api/admin/worker
 import { Route as ApiMediaIdRouteImport } from './routes/api/media/$id'
 import { Route as ApiSaasAuditRouteImport } from './routes/api/saas/audit'
 import { Route as ApiSaasBillingRouteImport } from './routes/api/saas/billing'
+import { Route as ApiSaasConsentRouteImport } from './routes/api/saas/consent'
 import { Route as ApiSaasInviteRouteImport } from './routes/api/saas/invite'
 import { Route as ApiSaasKeysRouteImport } from './routes/api/saas/keys'
 import { Route as ApiSaasLegalRouteImport } from './routes/api/saas/legal'
@@ -195,6 +197,11 @@ const LegalTermsRoute = LegalTermsRouteImport.update({
   path: '/legal/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SaasConsentRoute = SaasConsentRouteImport.update({
+  id: '/saas/consent',
+  path: '/saas/consent',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SaasInviteRoute = SaasInviteRouteImport.update({
   id: '/saas/invite',
   path: '/saas/invite',
@@ -320,6 +327,11 @@ const ApiSaasBillingRoute = ApiSaasBillingRouteImport.update({
   path: '/api/saas/billing',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSaasConsentRoute = ApiSaasConsentRouteImport.update({
+  id: '/api/saas/consent',
+  path: '/api/saas/consent',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSaasInviteRoute = ApiSaasInviteRouteImport.update({
   id: '/api/saas/invite',
   path: '/api/saas/invite',
@@ -432,6 +444,7 @@ export interface FileRoutesByFullPath {
   '/internal/readiness': typeof InternalReadinessRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
+  '/saas/consent': typeof SaasConsentRoute
   '/saas/invite': typeof SaasInviteRoute
   '/saas/login': typeof SaasLoginRoute
   '/saas/reset': typeof SaasResetRoute
@@ -456,6 +469,7 @@ export interface FileRoutesByFullPath {
   '/api/media/$id': typeof ApiMediaIdRoute
   '/api/saas/audit': typeof ApiSaasAuditRoute
   '/api/saas/billing': typeof ApiSaasBillingRoute
+  '/api/saas/consent': typeof ApiSaasConsentRoute
   '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
   '/api/saas/legal': typeof ApiSaasLegalRoute
@@ -499,6 +513,7 @@ export interface FileRoutesByTo {
   '/internal/readiness': typeof InternalReadinessRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
+  '/saas/consent': typeof SaasConsentRoute
   '/saas/invite': typeof SaasInviteRoute
   '/saas/login': typeof SaasLoginRoute
   '/saas/reset': typeof SaasResetRoute
@@ -523,6 +538,7 @@ export interface FileRoutesByTo {
   '/api/media/$id': typeof ApiMediaIdRoute
   '/api/saas/audit': typeof ApiSaasAuditRoute
   '/api/saas/billing': typeof ApiSaasBillingRoute
+  '/api/saas/consent': typeof ApiSaasConsentRoute
   '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
   '/api/saas/legal': typeof ApiSaasLegalRoute
@@ -567,6 +583,7 @@ export interface FileRoutesById {
   '/internal/readiness': typeof InternalReadinessRoute
   '/legal/privacy': typeof LegalPrivacyRoute
   '/legal/terms': typeof LegalTermsRoute
+  '/saas/consent': typeof SaasConsentRoute
   '/saas/invite': typeof SaasInviteRoute
   '/saas/login': typeof SaasLoginRoute
   '/saas/reset': typeof SaasResetRoute
@@ -591,6 +608,7 @@ export interface FileRoutesById {
   '/api/media/$id': typeof ApiMediaIdRoute
   '/api/saas/audit': typeof ApiSaasAuditRoute
   '/api/saas/billing': typeof ApiSaasBillingRoute
+  '/api/saas/consent': typeof ApiSaasConsentRoute
   '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
   '/api/saas/legal': typeof ApiSaasLegalRoute
@@ -636,6 +654,7 @@ export interface FileRouteTypes {
     | '/internal/readiness'
     | '/legal/privacy'
     | '/legal/terms'
+    | '/saas/consent'
     | '/saas/invite'
     | '/saas/login'
     | '/saas/reset'
@@ -660,6 +679,7 @@ export interface FileRouteTypes {
     | '/api/media/$id'
     | '/api/saas/audit'
     | '/api/saas/billing'
+    | '/api/saas/consent'
     | '/api/saas/invite'
     | '/api/saas/keys'
     | '/api/saas/legal'
@@ -703,6 +723,7 @@ export interface FileRouteTypes {
     | '/internal/readiness'
     | '/legal/privacy'
     | '/legal/terms'
+    | '/saas/consent'
     | '/saas/invite'
     | '/saas/login'
     | '/saas/reset'
@@ -727,6 +748,7 @@ export interface FileRouteTypes {
     | '/api/media/$id'
     | '/api/saas/audit'
     | '/api/saas/billing'
+    | '/api/saas/consent'
     | '/api/saas/invite'
     | '/api/saas/keys'
     | '/api/saas/legal'
@@ -770,6 +792,7 @@ export interface FileRouteTypes {
     | '/internal/readiness'
     | '/legal/privacy'
     | '/legal/terms'
+    | '/saas/consent'
     | '/saas/invite'
     | '/saas/login'
     | '/saas/reset'
@@ -794,6 +817,7 @@ export interface FileRouteTypes {
     | '/api/media/$id'
     | '/api/saas/audit'
     | '/api/saas/billing'
+    | '/api/saas/consent'
     | '/api/saas/invite'
     | '/api/saas/keys'
     | '/api/saas/legal'
@@ -838,6 +862,7 @@ export interface RootRouteChildren {
   InternalReadinessRoute: typeof InternalReadinessRoute
   LegalPrivacyRoute: typeof LegalPrivacyRoute
   LegalTermsRoute: typeof LegalTermsRoute
+  SaasConsentRoute: typeof SaasConsentRoute
   SaasInviteRoute: typeof SaasInviteRoute
   SaasLoginRoute: typeof SaasLoginRoute
   SaasResetRoute: typeof SaasResetRoute
@@ -862,6 +887,7 @@ export interface RootRouteChildren {
   ApiMediaIdRoute: typeof ApiMediaIdRoute
   ApiSaasAuditRoute: typeof ApiSaasAuditRoute
   ApiSaasBillingRoute: typeof ApiSaasBillingRoute
+  ApiSaasConsentRoute: typeof ApiSaasConsentRoute
   ApiSaasInviteRoute: typeof ApiSaasInviteRoute
   ApiSaasKeysRoute: typeof ApiSaasKeysRoute
   ApiSaasLegalRoute: typeof ApiSaasLegalRoute
@@ -1051,6 +1077,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LegalTermsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/saas/consent': {
+      id: '/saas/consent'
+      path: '/saas/consent'
+      fullPath: '/saas/consent'
+      preLoaderRoute: typeof SaasConsentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/saas/invite': {
       id: '/saas/invite'
       path: '/saas/invite'
@@ -1219,6 +1252,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSaasBillingRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/saas/consent': {
+      id: '/api/saas/consent'
+      path: '/api/saas/consent'
+      fullPath: '/api/saas/consent'
+      preLoaderRoute: typeof ApiSaasConsentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/saas/invite': {
       id: '/api/saas/invite'
       path: '/api/saas/invite'
@@ -1366,6 +1406,7 @@ const rootRouteChildren: RootRouteChildren = {
   InternalReadinessRoute: InternalReadinessRoute,
   LegalPrivacyRoute: LegalPrivacyRoute,
   LegalTermsRoute: LegalTermsRoute,
+  SaasConsentRoute: SaasConsentRoute,
   SaasInviteRoute: SaasInviteRoute,
   SaasLoginRoute: SaasLoginRoute,
   SaasResetRoute: SaasResetRoute,
@@ -1390,6 +1431,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiMediaIdRoute: ApiMediaIdRoute,
   ApiSaasAuditRoute: ApiSaasAuditRoute,
   ApiSaasBillingRoute: ApiSaasBillingRoute,
+  ApiSaasConsentRoute: ApiSaasConsentRoute,
   ApiSaasInviteRoute: ApiSaasInviteRoute,
   ApiSaasKeysRoute: ApiSaasKeysRoute,
   ApiSaasLegalRoute: ApiSaasLegalRoute,

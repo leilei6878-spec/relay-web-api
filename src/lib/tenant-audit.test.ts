@@ -11,7 +11,7 @@ const migrations = [
   "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql",
   "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql",
   "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql",
-  "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql",
+  "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql", "0019_legal_reconsent.sql",
 ];
 
 async function database() {
@@ -47,7 +47,7 @@ async function seed(pg: PGlite, suffix: string): Promise<SaasSession> {
     sessionId, userId, tenantId, email: `${suffix}@example.test`, name: `User ${suffix}`,
     tenantName: `Tenant ${suffix}`, tenantStatus: "active", role: "owner", csrfHash: `csrf-${suffix}`,
     expiresAt: new Date(Date.now() + 86_400_000).toISOString(), mfaVerified: true,
-    mfaVerifiedAt: new Date().toISOString(), mfaEnabled: true,
+    mfaVerifiedAt: new Date().toISOString(), mfaEnabled: true, legalAcceptanceRequired: false,
   };
 }
 

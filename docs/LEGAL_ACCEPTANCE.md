@@ -49,6 +49,24 @@ is worse than a missing record. Before relying on an older account for paid
 service, obtain a new explicit acceptance through a reviewed re-consent flow or
 contract process and retain the external evidence.
 
+## Version changes and re-consent
+
+When any effective operator/contact/version/date or bundled legal text changes,
+the canonical SHA-256 changes. Existing browser sessions remain authenticated
+only for the dedicated consent and logout surfaces; other tenant APIs return
+`LEGAL_RECONSENT_REQUIRED`, and Login/Portal redirect to `/saas/consent`.
+
+The consent page displays the new versions and full bundle hash, requires a new
+unchecked explicit action and appends a `reconsent` record. Replaying the same
+accepted bundle is idempotent. A later bundle change makes the record stale
+without editing history.
+
+Paid machine credentials also fail closed: a `sk-saas-*` key is not accepted
+unless at least one active Owner/Admin membership has accepted the exact current
+bundle. This prevents unattended paid traffic from continuing under superseded
+commercial terms. Internal `sk-relay-*` web-pool operations remain outside this
+customer legal gate.
+
 ## Acceptance test
 
 Before opening registration:
@@ -61,4 +79,5 @@ Before opening registration:
 4. Verify raw email/IP/User-Agent values do not appear in the acceptance table
    or commercial admin response.
 5. Attempt update/delete in an isolated restore and confirm both are rejected.
-
+6. Publish a new test version, confirm sessions redirect to re-consent and paid
+   keys fail, then record Owner/Admin re-consent and confirm both resume.

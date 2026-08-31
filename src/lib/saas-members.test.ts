@@ -9,14 +9,14 @@ import { legalDocumentMetadata } from "./legal-documents.ts";
 
 async function database() {
   const pg = new PGlite(); await pg.waitReady;
-  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql","0017_email_delivery_outbox.sql","0018_legal_acceptance.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
+  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql","0017_email_delivery_outbox.sql","0018_legal_acceptance.sql","0019_legal_reconsent.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
 
 test("tenant invitations are hash-only, email-delivered and atomically accepted", async () => {
   const { pg, db } = await database();
   const owner = await createTenantOwner({ tenantName: "Members Co", ownerName: "Owner", email: "owner@members.test", password: "members-password-123" }, db);
-  const session = { userId: owner.userId, tenantId: owner.tenantId, email: owner.email, name: "Owner", tenantName: "Members Co", tenantStatus: "active", role: "owner", sessionId: "s", csrfHash: "x", expiresAt: "", mfaVerified: false, mfaVerifiedAt: null, mfaEnabled: false } satisfies SaasSession;
+  const session = { userId: owner.userId, tenantId: owner.tenantId, email: owner.email, name: "Owner", tenantName: "Members Co", tenantStatus: "active", role: "owner", sessionId: "s", csrfHash: "x", expiresAt: "", mfaVerified: false, mfaVerifiedAt: null, mfaEnabled: false, legalAcceptanceRequired: false } satisfies SaasSession;
   let link = "";
   await inviteTenantMember(session, { email: "developer@members.test", role: "developer" }, {
     db,
@@ -63,7 +63,7 @@ test("tenant invitations are hash-only, email-delivered and atomically accepted"
 test("tenant invitation rolls back its business row when the Outbox insert fails", async () => {
   const { pg, db } = await database();
   const owner = await createTenantOwner({ tenantName: "Atomic Invite Co", ownerName: "Owner", email: "owner@atomic-invite.test", password: "members-password-123" }, db);
-  const session = { userId: owner.userId, tenantId: owner.tenantId, email: owner.email, name: "Owner", tenantName: "Atomic Invite Co", tenantStatus: "active", role: "owner", sessionId: "s", csrfHash: "x", expiresAt: "", mfaVerified: false, mfaVerifiedAt: null, mfaEnabled: false } satisfies SaasSession;
+  const session = { userId: owner.userId, tenantId: owner.tenantId, email: owner.email, name: "Owner", tenantName: "Atomic Invite Co", tenantStatus: "active", role: "owner", sessionId: "s", csrfHash: "x", expiresAt: "", mfaVerified: false, mfaVerifiedAt: null, mfaEnabled: false, legalAcceptanceRequired: false } satisfies SaasSession;
   await pg.exec("alter table relay_email_deliveries add constraint test_reject_invite_email check (kind <> 'tenant-invite')");
   let networkCalls = 0;
   await assert.rejects(

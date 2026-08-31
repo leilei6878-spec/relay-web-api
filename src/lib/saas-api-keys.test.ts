@@ -9,13 +9,14 @@ import {
   findTenantApiKey,
   revokeTenantApiKey,
 } from "./saas-api-keys.ts";
+import { legalDocumentMetadata } from "./legal-documents.ts";
 
 async function database() {
   const pg = new PGlite();
   await pg.waitReady;
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
-    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql",
+    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql", "0019_legal_reconsent.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return {
     pg,
@@ -100,5 +101,32 @@ test("plan features, model catalog and plan limits constrain every tenant key", 
   const spent = await enforceCommercialKeyLimits(found!, "chat", "openai:gpt-plan", new Date(), db);
   assert.equal(spent.ok, false);
   if (!spent.ok) assert.equal(spent.error, "MONTHLY_SPEND_LIMIT_REACHED");
+  await pg.close();
+});
+
+test("paid tenant API keys fail closed until an active owner/admin accepts the current legal bundle", async () => {
+  const { pg, db } = await database();
+  const owner = await createTenantOwner(
+    { tenantName: "Legal Key Co", ownerName: "Owner", email: "legal-key@example.test", password: "commercial-password-legal" }, db,
+  );
+  const created = await createTenantApiKey({ tenantId: owner.tenantId, createdBy: owner.userId, name: "Legal gated" }, db);
+  const env = {
+    NODE_ENV: "production", RELAY_COMMERCIAL_ENABLED: "1", RELAY_REQUIRE_LEGAL_ACCEPTANCE: "1",
+    RELAY_LEGAL_APPROVED: "1", RELAY_LEGAL_OPERATOR_NAME: "Legal Key Test Ltd.",
+    RELAY_LEGAL_CONTACT_EMAIL: "privacy@legal-key.test", RELAY_TERMS_VERSION: "legal-key-terms-v1",
+    RELAY_PRIVACY_VERSION: "legal-key-privacy-v1", RELAY_LEGAL_EFFECTIVE_DATE: "2026-08-31",
+  } as NodeJS.ProcessEnv;
+  const ready = async () => true;
+  assert.equal(await findTenantApiKey(created.token, db, { env, commercialReady: ready }), null);
+  const metadata = legalDocumentMetadata(env);
+  const digest = "c".repeat(64);
+  await pg.query(
+    `insert into relay_legal_acceptances
+      (id,user_id,tenant_id,terms_version,privacy_version,bundle_sha256,ip_hmac,user_agent_hmac,acceptance_method)
+     values ('legal-key-acceptance',$1,$2,$3,$4,$5,$6,$6,'reconsent')`,
+    [owner.userId, owner.tenantId, metadata.termsVersion, metadata.privacyVersion, metadata.bundleSha256, digest],
+  );
+  assert.equal((await findTenantApiKey(created.token, db, { env, commercialReady: ready }))?.tenantId, owner.tenantId);
+  assert.equal(await findTenantApiKey(created.token, db, { env: { ...env, RELAY_TERMS_VERSION: "legal-key-terms-v2" }, commercialReady: ready }), null);
   await pg.close();
 });

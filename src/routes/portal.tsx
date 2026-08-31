@@ -14,6 +14,7 @@ type SessionBody = {
   user: { id: string; email: string; name: string; mfaEnabled: boolean };
   tenant: { id: string; name: string; status: string; role: string };
   mfaVerified: boolean;
+  legalAcceptanceRequired: boolean;
 };
 
 type BillingBody = {
@@ -49,6 +50,10 @@ function Portal() {
       return;
     }
     const sessionBody = await sessionResponse.json() as SessionBody;
+    if (sessionBody.legalAcceptanceRequired) {
+      window.location.replace("/saas/consent");
+      return;
+    }
     const [billingBody, keyBody, memberBody, auditBody] = await Promise.all([
       fetch("/api/saas/billing", { credentials: "include" }).then((response) => response.json() as Promise<BillingBody>),
       fetch("/api/saas/keys", { credentials: "include" }).then((response) => response.json() as Promise<{ keys?: Record<string, unknown>[] }>),
