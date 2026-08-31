@@ -9,14 +9,14 @@ test("dedicated scheduler runs every task at boot and respects independent inter
   const initial = dueSchedulerTasks(last, initialAt, {});
   assert.deepEqual(initial, [
     "heartbeat", "email-delivery", "provider-canary", "commercial-monitor", "account-check", "inspection-cleanup",
-    "availability-snapshot", "plan-renewal", "data-retention",
+    "availability-snapshot", "plan-renewal", "privacy-closure", "data-retention",
   ]);
   for (const name of initial) last[name] = initialAt;
   assert.deepEqual(dueSchedulerTasks(last, initialAt + 29_999, {}), []);
   assert.deepEqual(dueSchedulerTasks(last, initialAt + 30_000, {}), ["heartbeat", "email-delivery", "provider-canary"]);
   assert.deepEqual(
     dueSchedulerTasks({}, initialAt, { RELAY_SKIP_COMMERCIAL_MONITOR: "1", RELAY_SKIP_PLAN_RENEWAL: "1" }),
-    ["heartbeat", "email-delivery", "provider-canary", "account-check", "inspection-cleanup", "availability-snapshot", "data-retention"],
+    ["heartbeat", "email-delivery", "provider-canary", "account-check", "inspection-cleanup", "availability-snapshot", "privacy-closure", "data-retention"],
   );
 });
 
@@ -29,7 +29,7 @@ test("scheduler loop isolates task failure and continues to the next cycle", asy
   try {
     await runSchedulerLoop({
       now: () => clock,
-      env: { RELAY_SKIP_CANARY_SCHEDULER: "1", RELAY_SKIP_ACCOUNT_CHECK_SCHEDULER: "1", RELAY_SKIP_ACCOUNT_ANALYTICS: "1", RELAY_SKIP_PLAN_RENEWAL: "1", RELAY_SKIP_RETENTION: "1" },
+      env: { RELAY_SKIP_CANARY_SCHEDULER: "1", RELAY_SKIP_ACCOUNT_CHECK_SCHEDULER: "1", RELAY_SKIP_ACCOUNT_ANALYTICS: "1", RELAY_SKIP_PLAN_RENEWAL: "1", RELAY_SKIP_PRIVACY_CLOSURE: "1", RELAY_SKIP_RETENTION: "1" },
       run: async (name) => { ran.push(name); if (cycles === 0) throw new Error("SAFE_TASK_FAILURE: must not leak detail"); },
       delay: async (ms) => { cycles += 1; clock += ms + 60_000; },
       shouldStop: () => cycles >= 2,

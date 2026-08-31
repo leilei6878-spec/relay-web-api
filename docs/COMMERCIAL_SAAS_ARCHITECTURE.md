@@ -122,6 +122,17 @@ period boundary. See [`PLAN_BILLING.md`](./PLAN_BILLING.md).
 - Object media requires an S3 lifecycle matching the declared policy.
 - Commercial tenant job/history APIs query by tenant ID and never expose the
   internal web account, Worker or proxy topology.
+- A tenant Owner with a recent MFA proof can download a tenant-scoped,
+  SHA-256-bound JSON export. Password/session/API-key hashes, MFA material,
+  payment secrets, network HMACs and encrypted provider results are excluded.
+- Tenant closure uses a configurable 1–30 day cooling-off period. The Owner can
+  cancel it before execution; non-zero cash/included balances, reservations,
+  open payments, refunds or disputes block completion instead of silently
+  forfeiting money.
+- Closure revokes API keys and sessions, disables memberships, consumes pending
+  verification tokens and pseudonymizes users that have no other active
+  tenant. Immutable billing, legal-acceptance, privacy-event and tenant-audit
+  evidence remains under its declared legal retention policy.
 
 ## Readiness gates
 

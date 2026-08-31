@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.10.0-rc20 — tenant privacy rights (2026-08-31)
+
+- Owner-only, tenant-scoped JSON export with exact response SHA-256 and no
+  retained duplicate archive.
+- Password/session/API-key hashes, MFA material, provider secrets, network
+  HMACs and encrypted upstream results are excluded from exports.
+- Configurable 1–30 day tenant-closure cooling-off period with cancellation,
+  financial/dispute blockers and hourly Scheduler execution.
+- Closure revokes keys/sessions, disables memberships, scrubs transient PII and
+  pseudonymizes only users without another active tenant; immutable financial,
+  legal and security evidence remains retained.
+- Privacy request identity cannot be deleted and event history is append-only;
+  overdue/blocked closures generate commercial alerts.
+- Privacy and MFA enrollment remain reachable without accepting a newer legal
+  bundle and for suspended tenants, while all ordinary service APIs stay
+  denied.
+
 ## Leonardo Image Generator (2026-08-26)
 
 - Third provider `leonardo` with logical models `leonardo-gpt-image-2` and `leonardo-gemini`.

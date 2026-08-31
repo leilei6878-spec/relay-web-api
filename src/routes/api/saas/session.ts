@@ -34,7 +34,7 @@ export const Route = createFileRoute("/api/saas/session")({
   server: {
     handlers: {
       GET: async ({ request }) => {
-        const session = await getSaasSession(request);
+        const session = await getSaasSession(request, undefined, { allowSuspended: true });
         return session
           ? Response.json({ ok: true, user: { id: session.userId, email: session.email, name: session.name, mfaEnabled: session.mfaEnabled }, tenant: { id: session.tenantId, name: session.tenantName, status: session.tenantStatus, role: session.role }, mfaVerified: session.mfaVerified, legalAcceptanceRequired: session.legalAcceptanceRequired }, { headers: { "Cache-Control": "no-store" } })
           : Response.json({ ok: false, error: "SAAS_UNAUTHORIZED" }, { status: 401, headers: { "Cache-Control": "no-store" } });
@@ -84,7 +84,7 @@ export const Route = createFileRoute("/api/saas/session")({
           if (action === "resend-verification") {
             return Response.json(await sendSaasVerification(String(body.email || ""), request));
           }
-          const auth = await assertSaasSession(request, ["owner", "admin"], { requireCsrf: true });
+          const auth = await assertSaasSession(request, ["owner", "admin"], { requireCsrf: true, requireLegal: false, allowSuspended: true });
           if (!auth.ok) return Response.json({ ok: false, error: auth.error }, { status: auth.status });
           if (action === "mfa-start") {
             const result = await auditedTenantMutation(request, auth.session, {
@@ -109,7 +109,7 @@ export const Route = createFileRoute("/api/saas/session")({
         }
       },
       DELETE: async ({ request }) => {
-        const auth = await assertSaasSession(request, undefined, { requireCsrf: true, requireLegal: false });
+        const auth = await assertSaasSession(request, undefined, { requireCsrf: true, requireLegal: false, allowSuspended: true });
         if (!auth.ok) return Response.json({ ok: false, error: auth.error }, { status: auth.status });
         try {
           const cookies = await auditedTenantMutation(request, auth.session, {

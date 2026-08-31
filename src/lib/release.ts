@@ -1,8 +1,8 @@
 /** Release identity. Bump SCHEMA_VERSION when adding migrations/*.sql. */
 
-export const APP_VERSION = "0.10.0-rc19";
+export const APP_VERSION = "0.10.0-rc20";
 export const API_VERSION = "v1";
-export const SCHEMA_VERSION = 19;
+export const SCHEMA_VERSION = 20;
 export const SELECTOR_PACK = {
   chatgpt: "chatgpt-v1",
   gemini: "gemini-v1",

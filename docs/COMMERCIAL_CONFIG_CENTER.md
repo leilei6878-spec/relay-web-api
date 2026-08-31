@@ -65,8 +65,10 @@ gate.
 
 Provider keys, Vertex service account/project/location, Leonardo model mapping,
 payment provider, Stripe keys, tax mode, email/alert Webhooks, recharge maximum
-and retention windows can use validated active versions. If no version is
-active, the existing environment variable is used.
+and retention/privacy windows can use validated active versions. This includes
+the tenant-closure cooling period (`1..30` days) and complete-export memory
+ceiling (`1..250` MiB). If no version is active, the existing environment
+variable is used.
 
 ## Rotation procedure
 

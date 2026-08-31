@@ -7,7 +7,7 @@ export const Route = createFileRoute("/api/saas/consent")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const auth = await assertSaasSession(request, undefined, { requireCsrf: true, requireLegal: false });
+        const auth = await assertSaasSession(request, undefined, { requireCsrf: true, requireLegal: false, allowSuspended: true });
         if (!auth.ok) return Response.json({ ok: false, error: auth.error }, { status: auth.status });
         const body = (await request.json().catch(() => ({}))) as {
           accepted?: boolean; termsVersion?: string; privacyVersion?: string; bundleSha256?: string;
@@ -29,4 +29,3 @@ export const Route = createFileRoute("/api/saas/consent")({
     },
   },
 });
-

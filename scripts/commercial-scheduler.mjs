@@ -11,6 +11,7 @@ const TASKS = [
   { name: "inspection-cleanup", intervalMs: 5 * 60_000 },
   { name: "availability-snapshot", intervalMs: 60 * 60_000, skip: "RELAY_SKIP_ACCOUNT_ANALYTICS" },
   { name: "plan-renewal", intervalMs: 60 * 60_000, skip: "RELAY_SKIP_PLAN_RENEWAL" },
+  { name: "privacy-closure", intervalMs: 60 * 60_000, skip: "RELAY_SKIP_PRIVACY_CLOSURE" },
   { name: "data-retention", intervalMs: 24 * 60 * 60_000, skip: "RELAY_SKIP_RETENTION" },
 ];
 
@@ -36,6 +37,7 @@ export async function runSchedulerTask(name) {
   if (name === "inspection-cleanup") return (await import("../src/lib/account-inspections.ts")).expireAccountInspections();
   if (name === "availability-snapshot") return (await import("../src/lib/account-analytics.ts")).captureAvailabilitySample();
   if (name === "plan-renewal") return (await import("../src/lib/plan-renewal-scheduler.ts")).tickPlanRenewals();
+  if (name === "privacy-closure") return (await import("../src/lib/saas-privacy.ts")).processDueTenantClosures();
   if (name === "data-retention") return (await import("../src/lib/data-retention.ts")).runDataRetention();
   throw new Error("SCHEDULER_TASK_UNKNOWN");
 }

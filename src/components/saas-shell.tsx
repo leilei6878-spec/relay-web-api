@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Activity, CreditCard, KeyRound, LogOut, ShieldCheck } from "lucide-react";
+import { Activity, CreditCard, Download, KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -34,9 +34,10 @@ export function SaasShell({
             <div><p className="text-sm font-medium">Relay SaaS</p><p className="text-[11px] text-subtle">Official AI API Gateway</p></div>
           </Link>
           <nav className="flex items-center gap-1 text-xs text-muted">
-            <a href="#overview" className="rounded px-3 py-2 hover:bg-elevated"><CreditCard className="mr-1 inline size-3.5" />账务</a>
-            <a href="#keys" className="rounded px-3 py-2 hover:bg-elevated"><KeyRound className="mr-1 inline size-3.5" />密钥</a>
-            <a href="#security" className="rounded px-3 py-2 hover:bg-elevated"><ShieldCheck className="mr-1 inline size-3.5" />安全</a>
+            <a href="/portal#overview" className="rounded px-3 py-2 hover:bg-elevated"><CreditCard className="mr-1 inline size-3.5" />账务</a>
+            <a href="/portal#keys" className="rounded px-3 py-2 hover:bg-elevated"><KeyRound className="mr-1 inline size-3.5" />密钥</a>
+            <a href="/portal#security" className="rounded px-3 py-2 hover:bg-elevated"><ShieldCheck className="mr-1 inline size-3.5" />安全</a>
+            <a href="/saas/privacy-center" className="rounded px-3 py-2 hover:bg-elevated"><Download className="mr-1 inline size-3.5" />数据权利</a>
           </nav>
           <div className="flex items-center gap-3">
             {tenant ? <div className="text-right"><p className="text-xs font-medium">{tenant.name}</p><p className="text-[11px] text-subtle">{tenant.role}</p></div> : null}

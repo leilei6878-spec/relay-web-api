@@ -3,6 +3,8 @@ import { CheckCircle2, Copy, CreditCard, KeyRound, Plus, ShieldCheck, WalletCard
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { SaasShell, saasMutationHeaders } from "@/components/saas-shell";
+import { PrivacyCenter, type PrivacyRequest } from "@/components/saas-privacy-center";
+import { SaasMfaDialog } from "@/components/saas-mfa-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
@@ -41,6 +43,7 @@ function Portal() {
   const [keys, setKeys] = useState<Record<string, unknown>[]>([]);
   const [members, setMembers] = useState<Record<string, unknown>[]>([]);
   const [audits, setAudits] = useState<Record<string, unknown>[]>([]);
+  const [privacyRequests, setPrivacyRequests] = useState<PrivacyRequest[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -50,23 +53,31 @@ function Portal() {
       return;
     }
     const sessionBody = await sessionResponse.json() as SessionBody;
+    if (sessionBody.tenant.status === "suspended") {
+      window.location.replace("/saas/privacy-center");
+      return;
+    }
     if (sessionBody.legalAcceptanceRequired) {
       window.location.replace("/saas/consent");
       return;
     }
-    const [billingBody, keyBody, memberBody, auditBody] = await Promise.all([
+    const [billingBody, keyBody, memberBody, auditBody, privacyBody] = await Promise.all([
       fetch("/api/saas/billing", { credentials: "include" }).then((response) => response.json() as Promise<BillingBody>),
       fetch("/api/saas/keys", { credentials: "include" }).then((response) => response.json() as Promise<{ keys?: Record<string, unknown>[] }>),
       fetch("/api/saas/members", { credentials: "include" }).then((response) => response.json() as Promise<{ members?: Record<string, unknown>[] }>),
       ["owner", "admin"].includes(sessionBody.tenant.role)
         ? fetch("/api/saas/audit?limit=100", { credentials: "include" }).then((response) => response.json() as Promise<{ events?: Record<string, unknown>[] }>)
         : Promise.resolve({ events: [] as Record<string, unknown>[] }),
+      sessionBody.tenant.role === "owner"
+        ? fetch("/api/saas/privacy", { credentials: "include" }).then((response) => response.json() as Promise<{ requests?: PrivacyRequest[] }>)
+        : Promise.resolve({ requests: [] as PrivacyRequest[] }),
     ]);
     setSession(sessionBody);
     setBilling(billingBody);
     setKeys(keyBody.keys || []);
     setMembers(memberBody.members || []);
     setAudits(auditBody.events || []);
+    setPrivacyRequests(privacyBody.requests || []);
     setLoading(false);
   }, []);
 
@@ -123,7 +134,8 @@ function Portal() {
         </section>
 
         {["owner", "admin"].includes(session.tenant.role) ? <section className="rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">租户安全审计</h2><p className="mt-1 text-xs text-subtle">密钥、成员、资金、套餐、MFA 与会话操作均写入不可修改审计链；IP 和浏览器仅保留不可逆 HMAC。</p></div><Rows rows={visibleAudits} empty="暂无高风险操作" render={(row) => <><div><p className="text-sm font-medium">{String(row.action)} · {String(row.target_type)}</p><p className="font-mono text-[11px] text-subtle">{date(row.created_at)} · actor {String(row.actor_user_id).slice(0, 12)} · request {String(row.request_id).slice(0, 12)}</p></div><Badge tone={row.outcome === "succeeded" ? "ok" : row.outcome === "failed" ? "danger" : "warn"}>{String(row.outcome)}</Badge></>} /></section> : null}
-        <section id="security" className="rounded-xl border border-border bg-surface p-5"><div className="flex items-center gap-2"><ShieldCheck className="size-4" /><h2 className="font-medium">账户安全</h2></div><p className="mt-2 text-sm text-muted">建议所有 Owner 和 Admin 启用 TOTP 多因素认证。</p><MfaDialog /></section>
+        <section id="security" className="rounded-xl border border-border bg-surface p-5"><div className="flex items-center gap-2"><ShieldCheck className="size-4" /><h2 className="font-medium">账户安全</h2></div><p className="mt-2 text-sm text-muted">建议所有 Owner 和 Admin 启用 TOTP 多因素认证。</p><SaasMfaDialog /></section>
+        {session.tenant.role === "owner" ? <PrivacyCenter tenantName={session.tenant.name} requests={privacyRequests} reload={load} /> : null}
         <section className="rounded-xl border border-border bg-surface"><div className="flex items-center justify-between border-b border-border px-5 py-4"><div><h2 className="font-medium">企业成员</h2><p className="mt-1 text-xs text-subtle">Owner、Admin、Billing、Developer、Viewer 权限分离。</p></div>{["owner", "admin"].includes(session.tenant.role) ? <InviteMemberDialog onSaved={load} /> : null}</div><div className="divide-y divide-border">{members.map((member) => <div key={String(member.id)} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"><div><p className="text-sm font-medium">{String(member.name)}</p><p className="text-xs text-subtle">{String(member.email)} · MFA {member.mfa_enabled ? "on" : "off"}</p></div><div className="flex items-center gap-2"><Badge tone={member.membership_status === "active" ? "ok" : "default"}>{String(member.role)}</Badge>{session.tenant.role === "owner" && member.id !== session.user.id ? <Button variant="ghost" size="sm" onClick={() => void toggleMember(member, load)}>{member.membership_status === "active" ? "停用" : "启用"}</Button> : null}</div></div>)}</div></section>
       </div>
     </SaasShell>
@@ -178,26 +190,6 @@ function RechargeDialog({ currency, onCreated }: { currency: string; onCreated: 
     setOpen(false); await onCreated(); window.location.assign(body.checkoutUrl);
   }
   return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button variant="secondary" size="sm">充值</Button></DialogTrigger><DialogContent title="安全充值"><div className="space-y-3"><Field label={`金额（${currency}）`}><Input type="number" min="1" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></Field><p className="text-xs text-subtle">下一步将跳转至 Stripe 托管收银台。本系统不接触或保存银行卡信息。</p><Button className="w-full" onClick={() => void create()}>前往安全支付</Button></div></DialogContent></Dialog>;
-}
-
-function MfaDialog() {
-  const [open, setOpen] = useState(false);
-  const [secret, setSecret] = useState("");
-  const [code, setCode] = useState("");
-  const [recovery, setRecovery] = useState<string[]>([]);
-  async function start() {
-    const response = await fetch("/api/saas/session", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ action: "mfa-start" }) });
-    const body = await response.json() as { secret?: string; error?: string };
-    if (!response.ok || !body.secret) { toast.error(body.error || "无法开始 MFA"); return; }
-    setSecret(body.secret);
-  }
-  async function confirm() {
-    const response = await fetch("/api/saas/session", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ action: "mfa-confirm", code }) });
-    const body = await response.json() as { ok?: boolean; recoveryCodes?: string[]; error?: string };
-    if (!response.ok || !body.ok) { toast.error(body.error || "验证码错误"); return; }
-    setRecovery(body.recoveryCodes || []); toast.success("MFA 已启用");
-  }
-  return <Dialog open={open} onOpenChange={setOpen}><DialogTrigger asChild><Button className="mt-4" variant="secondary">配置 MFA</Button></DialogTrigger><DialogContent title="TOTP 多因素认证">{recovery.length ? <div><p className="text-sm text-warn">请离线保存以下恢复码，每个恢复码只能使用一次。</p><pre className="mt-3 rounded-md bg-elevated p-3 text-xs">{recovery.join("\n")}</pre><Button className="mt-4 w-full" onClick={() => window.location.reload()}>已安全保存，刷新会话状态</Button></div> : secret ? <div className="space-y-3"><p className="text-sm text-muted">在身份验证器中手动添加密钥：</p><p className="break-all rounded-md bg-elevated p-3 font-mono text-xs">{secret}</p><Field label="当前 6 位验证码"><Input inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} /></Field><Button className="w-full" onClick={() => void confirm()}>验证并启用</Button></div> : <div><p className="text-sm text-muted">启用后登录必须同时输入密码和身份验证器验证码。</p><Button className="mt-4 w-full" onClick={() => void start()}>生成 TOTP 密钥</Button></div>}</DialogContent></Dialog>;
 }
 
 function InviteMemberDialog({ onSaved }: { onSaved: () => Promise<void> }) {

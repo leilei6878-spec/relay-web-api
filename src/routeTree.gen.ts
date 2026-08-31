@@ -36,6 +36,7 @@ import { Route as LegalTermsRouteImport } from './routes/legal/terms'
 import { Route as SaasConsentRouteImport } from './routes/saas/consent'
 import { Route as SaasInviteRouteImport } from './routes/saas/invite'
 import { Route as SaasLoginRouteImport } from './routes/saas/login'
+import { Route as SaasPrivacyCenterRouteImport } from './routes/saas/privacy-center'
 import { Route as SaasResetRouteImport } from './routes/saas/reset'
 import { Route as SaasVerifyRouteImport } from './routes/saas/verify'
 import { Route as V1ModelsRouteImport } from './routes/v1/models'
@@ -63,6 +64,7 @@ import { Route as ApiSaasInviteRouteImport } from './routes/api/saas/invite'
 import { Route as ApiSaasKeysRouteImport } from './routes/api/saas/keys'
 import { Route as ApiSaasLegalRouteImport } from './routes/api/saas/legal'
 import { Route as ApiSaasMembersRouteImport } from './routes/api/saas/members'
+import { Route as ApiSaasPrivacyRouteImport } from './routes/api/saas/privacy'
 import { Route as ApiSaasReadinessRouteImport } from './routes/api/saas/readiness'
 import { Route as ApiSaasSessionRouteImport } from './routes/api/saas/session'
 import { Route as ApiWebhooksStripeRouteImport } from './routes/api/webhooks/stripe'
@@ -212,6 +214,11 @@ const SaasLoginRoute = SaasLoginRouteImport.update({
   path: '/saas/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SaasPrivacyCenterRoute = SaasPrivacyCenterRouteImport.update({
+  id: '/saas/privacy-center',
+  path: '/saas/privacy-center',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SaasResetRoute = SaasResetRouteImport.update({
   id: '/saas/reset',
   path: '/saas/reset',
@@ -352,6 +359,11 @@ const ApiSaasMembersRoute = ApiSaasMembersRouteImport.update({
   path: '/api/saas/members',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSaasPrivacyRoute = ApiSaasPrivacyRouteImport.update({
+  id: '/api/saas/privacy',
+  path: '/api/saas/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSaasReadinessRoute = ApiSaasReadinessRouteImport.update({
   id: '/api/saas/readiness',
   path: '/api/saas/readiness',
@@ -447,6 +459,7 @@ export interface FileRoutesByFullPath {
   '/saas/consent': typeof SaasConsentRoute
   '/saas/invite': typeof SaasInviteRoute
   '/saas/login': typeof SaasLoginRoute
+  '/saas/privacy-center': typeof SaasPrivacyCenterRoute
   '/saas/reset': typeof SaasResetRoute
   '/saas/verify': typeof SaasVerifyRoute
   '/v1/models': typeof V1ModelsRoute
@@ -474,6 +487,7 @@ export interface FileRoutesByFullPath {
   '/api/saas/keys': typeof ApiSaasKeysRoute
   '/api/saas/legal': typeof ApiSaasLegalRoute
   '/api/saas/members': typeof ApiSaasMembersRoute
+  '/api/saas/privacy': typeof ApiSaasPrivacyRoute
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/webhooks/stripe': typeof ApiWebhooksStripeRoute
@@ -516,6 +530,7 @@ export interface FileRoutesByTo {
   '/saas/consent': typeof SaasConsentRoute
   '/saas/invite': typeof SaasInviteRoute
   '/saas/login': typeof SaasLoginRoute
+  '/saas/privacy-center': typeof SaasPrivacyCenterRoute
   '/saas/reset': typeof SaasResetRoute
   '/saas/verify': typeof SaasVerifyRoute
   '/v1/models': typeof V1ModelsRoute
@@ -543,6 +558,7 @@ export interface FileRoutesByTo {
   '/api/saas/keys': typeof ApiSaasKeysRoute
   '/api/saas/legal': typeof ApiSaasLegalRoute
   '/api/saas/members': typeof ApiSaasMembersRoute
+  '/api/saas/privacy': typeof ApiSaasPrivacyRoute
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/webhooks/stripe': typeof ApiWebhooksStripeRoute
@@ -586,6 +602,7 @@ export interface FileRoutesById {
   '/saas/consent': typeof SaasConsentRoute
   '/saas/invite': typeof SaasInviteRoute
   '/saas/login': typeof SaasLoginRoute
+  '/saas/privacy-center': typeof SaasPrivacyCenterRoute
   '/saas/reset': typeof SaasResetRoute
   '/saas/verify': typeof SaasVerifyRoute
   '/v1/models': typeof V1ModelsRoute
@@ -613,6 +630,7 @@ export interface FileRoutesById {
   '/api/saas/keys': typeof ApiSaasKeysRoute
   '/api/saas/legal': typeof ApiSaasLegalRoute
   '/api/saas/members': typeof ApiSaasMembersRoute
+  '/api/saas/privacy': typeof ApiSaasPrivacyRoute
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/webhooks/stripe': typeof ApiWebhooksStripeRoute
@@ -657,6 +675,7 @@ export interface FileRouteTypes {
     | '/saas/consent'
     | '/saas/invite'
     | '/saas/login'
+    | '/saas/privacy-center'
     | '/saas/reset'
     | '/saas/verify'
     | '/v1/models'
@@ -684,6 +703,7 @@ export interface FileRouteTypes {
     | '/api/saas/keys'
     | '/api/saas/legal'
     | '/api/saas/members'
+    | '/api/saas/privacy'
     | '/api/saas/readiness'
     | '/api/saas/session'
     | '/api/webhooks/stripe'
@@ -726,6 +746,7 @@ export interface FileRouteTypes {
     | '/saas/consent'
     | '/saas/invite'
     | '/saas/login'
+    | '/saas/privacy-center'
     | '/saas/reset'
     | '/saas/verify'
     | '/v1/models'
@@ -753,6 +774,7 @@ export interface FileRouteTypes {
     | '/api/saas/keys'
     | '/api/saas/legal'
     | '/api/saas/members'
+    | '/api/saas/privacy'
     | '/api/saas/readiness'
     | '/api/saas/session'
     | '/api/webhooks/stripe'
@@ -795,6 +817,7 @@ export interface FileRouteTypes {
     | '/saas/consent'
     | '/saas/invite'
     | '/saas/login'
+    | '/saas/privacy-center'
     | '/saas/reset'
     | '/saas/verify'
     | '/v1/models'
@@ -822,6 +845,7 @@ export interface FileRouteTypes {
     | '/api/saas/keys'
     | '/api/saas/legal'
     | '/api/saas/members'
+    | '/api/saas/privacy'
     | '/api/saas/readiness'
     | '/api/saas/session'
     | '/api/webhooks/stripe'
@@ -865,6 +889,7 @@ export interface RootRouteChildren {
   SaasConsentRoute: typeof SaasConsentRoute
   SaasInviteRoute: typeof SaasInviteRoute
   SaasLoginRoute: typeof SaasLoginRoute
+  SaasPrivacyCenterRoute: typeof SaasPrivacyCenterRoute
   SaasResetRoute: typeof SaasResetRoute
   SaasVerifyRoute: typeof SaasVerifyRoute
   V1ModelsRoute: typeof V1ModelsRoute
@@ -892,6 +917,7 @@ export interface RootRouteChildren {
   ApiSaasKeysRoute: typeof ApiSaasKeysRoute
   ApiSaasLegalRoute: typeof ApiSaasLegalRoute
   ApiSaasMembersRoute: typeof ApiSaasMembersRoute
+  ApiSaasPrivacyRoute: typeof ApiSaasPrivacyRoute
   ApiSaasReadinessRoute: typeof ApiSaasReadinessRoute
   ApiSaasSessionRoute: typeof ApiSaasSessionRoute
   ApiWebhooksStripeRoute: typeof ApiWebhooksStripeRoute
@@ -1098,6 +1124,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SaasLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/saas/privacy-center': {
+      id: '/saas/privacy-center'
+      path: '/saas/privacy-center'
+      fullPath: '/saas/privacy-center'
+      preLoaderRoute: typeof SaasPrivacyCenterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/saas/reset': {
       id: '/saas/reset'
       path: '/saas/reset'
@@ -1287,6 +1320,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSaasMembersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/saas/privacy': {
+      id: '/api/saas/privacy'
+      path: '/api/saas/privacy'
+      fullPath: '/api/saas/privacy'
+      preLoaderRoute: typeof ApiSaasPrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/saas/readiness': {
       id: '/api/saas/readiness'
       path: '/api/saas/readiness'
@@ -1409,6 +1449,7 @@ const rootRouteChildren: RootRouteChildren = {
   SaasConsentRoute: SaasConsentRoute,
   SaasInviteRoute: SaasInviteRoute,
   SaasLoginRoute: SaasLoginRoute,
+  SaasPrivacyCenterRoute: SaasPrivacyCenterRoute,
   SaasResetRoute: SaasResetRoute,
   SaasVerifyRoute: SaasVerifyRoute,
   V1ModelsRoute: V1ModelsRoute,
@@ -1436,6 +1477,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSaasKeysRoute: ApiSaasKeysRoute,
   ApiSaasLegalRoute: ApiSaasLegalRoute,
   ApiSaasMembersRoute: ApiSaasMembersRoute,
+  ApiSaasPrivacyRoute: ApiSaasPrivacyRoute,
   ApiSaasReadinessRoute: ApiSaasReadinessRoute,
   ApiSaasSessionRoute: ApiSaasSessionRoute,
   ApiWebhooksStripeRoute: ApiWebhooksStripeRoute,

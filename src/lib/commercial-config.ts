@@ -62,6 +62,8 @@ export const COMMERCIAL_CONFIG_CATALOG: readonly CommercialConfigDefinition[] = 
   { key: "retention.sessionDays", label: "会话保留天数", group: "retention", kind: "integer", envName: "RELAY_SESSION_RETENTION_DAYS", min: 1, max: 365, description: "已撤销或过期 SaaS 会话的保留期。" },
   { key: "retention.operationalDays", label: "运营数据保留天数", group: "retention", kind: "integer", envName: "RELAY_OPERATIONAL_RETENTION_DAYS", min: 7, max: 730, description: "账号检查等运营数据保留期。" },
   { key: "retention.auditDays", label: "运营审计保留天数", group: "retention", kind: "integer", envName: "RELAY_AUDIT_RETENTION_DAYS", min: 90, max: 2555, description: "短期平台运营审计保留期；租户高风险审计与资金账本不受此项删除。" },
+  { key: "retention.tenantClosureGraceDays", label: "租户关停冷静期天数", group: "retention", kind: "integer", envName: "RELAY_TENANT_CLOSURE_GRACE_DAYS", min: 1, max: 30, description: "Owner 申请关停后的可撤销冷静期；到期后仍会因余额、预授权、退款或拒付而阻塞。" },
+  { key: "retention.privacyExportMaxMiB", label: "单次数据导出上限 MiB", group: "retention", kind: "integer", envName: "RELAY_PRIVACY_EXPORT_MAX_MIB", min: 1, max: 250, description: "客户租户数据导出的内存安全上限；超过后拒绝，不会返回截断档案。" },
 ] as const;
 
 const definitions = new Map(COMMERCIAL_CONFIG_CATALOG.map((definition) => [definition.key, definition]));

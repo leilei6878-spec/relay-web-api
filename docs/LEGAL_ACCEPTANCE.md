@@ -53,8 +53,11 @@ contract process and retain the external evidence.
 
 When any effective operator/contact/version/date or bundled legal text changes,
 the canonical SHA-256 changes. Existing browser sessions remain authenticated
-only for the dedicated consent and logout surfaces; other tenant APIs return
+only for consent, logout, data-rights access and the MFA enrollment needed to
+protect a sensitive export/closure operation; service and billing APIs return
 `LEGAL_RECONSENT_REQUIRED`, and Login/Portal redirect to `/saas/consent`.
+The consent page links to `/saas/privacy-center`, so declining a new agreement
+never removes access to export or tenant-closure rights.
 
 The consent page displays the new versions and full bundle hash, requires a new
 unchecked explicit action and appends a `reconsent` record. Replaying the same

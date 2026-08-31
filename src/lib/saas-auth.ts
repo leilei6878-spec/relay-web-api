@@ -126,7 +126,7 @@ export function clearSaasCookies(request: Request) {
   ];
 }
 
-export async function createSaasSession(userId: string, tenantId: string, request: Request, db?: DbLike, mfaVerified = false) {
+export async function createSaasSession(userId: string, tenantId: string, request: Request, db?: DbLike, mfaVerified = false, allowSuspended = false) {
   const sql = await database(db);
   const token = secureToken(32);
   const csrf = secureToken(24);
@@ -137,9 +137,10 @@ export async function createSaasSession(userId: string, tenantId: string, reques
       (id,user_id,tenant_id,token_hash,csrf_hash,ip_address,user_agent,expires_at,mfa_verified_at,last_seen_at,created_at)
      select $1,m.user_id,m.tenant_id,$2,$3,$4,$5,$6,case when $9 then now() else null end,now(),now()
        from relay_tenant_memberships m join relay_tenants t on t.id=m.tenant_id
-      where m.user_id=$7 and m.tenant_id=$8 and m.status='active' and t.status in ('trial','active')
+      where m.user_id=$7 and m.tenant_id=$8 and m.status='active'
+        and (t.status in ('trial','active') or ($10::boolean and t.status='suspended'))
      returning id`,
-    [sessionId, sha256(token), sha256(csrf), clientIp(request), (request.headers.get("user-agent") || "").slice(0, 500), expiresAt, userId, tenantId, mfaVerified],
+    [sessionId, sha256(token), sha256(csrf), clientIp(request), (request.headers.get("user-agent") || "").slice(0, 500), expiresAt, userId, tenantId, mfaVerified, allowSuspended],
   );
   if (!rows[0]) throw new Error("用户没有可用租户权限");
   const secure = secureRequest(request);
@@ -386,8 +387,8 @@ export async function loginSaas(
   const memberships = await sql.query<Record<string, unknown>>(
     `select m.*,t.name as tenant_name,t.status as tenant_status
        from relay_tenant_memberships m join relay_tenants t on t.id=m.tenant_id
-      where m.user_id=$1 and m.status='active' and t.status in ('trial','active')
-      order by m.created_at asc`,
+      where m.user_id=$1 and m.status='active' and t.status in ('trial','active','suspended')
+      order by case when t.status in ('trial','active') then 0 else 1 end,m.created_at asc`,
     [String(user.id)],
   );
   const membership = input.tenantId
@@ -395,11 +396,11 @@ export async function loginSaas(
     : memberships[0];
   if (!membership) throw new Error("NO_ACTIVE_TENANT");
   await sql.query("update relay_saas_users set last_login_at=now(),updated_at=now() where id=$1", [user.id]);
-  const session = await createSaasSession(String(user.id), String(membership.tenant_id), request, sql, mfaVerified);
+  const session = await createSaasSession(String(user.id), String(membership.tenant_id), request, sql, mfaVerified, true);
   const legalAcceptanceRequired = !await userHasCurrentLegalAcceptance(String(user.id), String(membership.tenant_id), process.env, sql);
   return {
     user: { id: String(user.id), email: String(user.email), name: String(user.name) },
-    tenant: { id: String(membership.tenant_id), name: String(membership.tenant_name), role: String(membership.role) as TenantRole },
+    tenant: { id: String(membership.tenant_id), name: String(membership.tenant_name), status: String(membership.tenant_status), role: String(membership.role) as TenantRole },
     ...session,
     legalAcceptanceRequired,
   };
@@ -422,7 +423,7 @@ export type SaasSession = {
   legalAcceptanceRequired: boolean;
 };
 
-export async function getSaasSession(request: Request, db?: DbLike): Promise<SaasSession | null> {
+export async function getSaasSession(request: Request, db?: DbLike, opts: { allowSuspended?: boolean } = {}): Promise<SaasSession | null> {
   const token = cookie(request, SAAS_SESSION_COOKIE);
   if (!token) return null;
   const sql = await database(db);
@@ -434,9 +435,10 @@ export async function getSaasSession(request: Request, db?: DbLike): Promise<Saa
        join relay_tenants t on t.id=s.tenant_id
        join relay_tenant_memberships m on m.tenant_id=s.tenant_id and m.user_id=s.user_id
       where s.token_hash=$1 and s.revoked_at is null and s.expires_at > now()
-        and u.status='active' and m.status='active' and t.status in ('trial','active')
+        and u.status='active' and m.status='active'
+        and (t.status in ('trial','active') or ($2::boolean and t.status='suspended'))
       limit 1`,
-    [sha256(token)],
+    [sha256(token), opts.allowSuspended === true],
   );
   const row = rows[0];
   if (!row) return null;
@@ -462,10 +464,10 @@ export async function getSaasSession(request: Request, db?: DbLike): Promise<Saa
 export async function assertSaasSession(
   request: Request,
   roles?: TenantRole[],
-  opts: { requireCsrf?: boolean; requireMfa?: boolean; requireLegal?: boolean } = {},
+  opts: { requireCsrf?: boolean; requireMfa?: boolean; forceMfa?: boolean; requireLegal?: boolean; allowSuspended?: boolean } = {},
   db?: DbLike,
 ) {
-  const session = await getSaasSession(request, db);
+  const session = await getSaasSession(request, db, { allowSuspended: opts.allowSuspended });
   if (!session) return { ok: false as const, status: 401, error: "SAAS_UNAUTHORIZED" };
   if (opts.requireLegal !== false && session.legalAcceptanceRequired) return { ok: false as const, status: 403, error: "LEGAL_RECONSENT_REQUIRED" };
   if (roles?.length && !roles.includes(session.role)) return { ok: false as const, status: 403, error: "SAAS_ROLE_REQUIRED" };
@@ -477,12 +479,12 @@ export async function assertSaasSession(
       return { ok: false as const, status: 403, error: "CSRF_INVALID" };
     }
   }
-  if (opts.requireMfa) {
+  if (opts.requireMfa || opts.forceMfa) {
     const env = await effectiveCommercialEnv(process.env, db);
-    const required = env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA === "1" || env.RELAY_COMMERCIAL_ENABLED === "1";
+    const required = opts.forceMfa || env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA === "1" || env.RELAY_COMMERCIAL_ENABLED === "1";
     const maxAgeHours = Math.max(1, Math.min(168, Number(env.RELAY_SAAS_MFA_MAX_AGE_HOURS || 24)));
     const verifiedAt = session.mfaVerifiedAt ? Date.parse(session.mfaVerifiedAt) : Number.NaN;
-    if (required && (!Number.isFinite(verifiedAt) || verifiedAt < Date.now() - maxAgeHours * 60 * 60_000)) {
+    if (required && (!session.mfaEnabled || !Number.isFinite(verifiedAt) || verifiedAt < Date.now() - maxAgeHours * 60 * 60_000)) {
       return { ok: false as const, status: 403, error: "MFA_STEP_UP_REQUIRED" };
     }
   }

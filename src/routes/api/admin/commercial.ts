@@ -7,6 +7,7 @@ import type { CommercialCapability } from "@/lib/commercial-types";
 import { uid } from "@/lib/utils";
 import { retryAlertDeliveriesNow } from "@/lib/commercial-monitor";
 import { retryEmailDeliveriesNow } from "@/lib/email-outbox";
+import { processDueTenantClosures } from "@/lib/saas-privacy";
 
 export const Route = createFileRoute("/api/admin/commercial")({
   server: {
@@ -58,6 +59,8 @@ export const Route = createFileRoute("/api/admin/commercial")({
             result = await retryAlertDeliveriesNow();
           } else if (action === "retry-email-deliveries") {
             result = await retryEmailDeliveriesNow();
+          } else if (action === "process-privacy-closures") {
+            result = await processDueTenantClosures();
           } else if (action === "upsert-plan") {
             const sql = await getSql();
             const rows = await sql.query(

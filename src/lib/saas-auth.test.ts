@@ -44,7 +44,7 @@ async function database() {
   await pg.waitReady;
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
-    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql", "0019_legal_reconsent.sql",
+    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql", "0019_legal_reconsent.sql", "0020_tenant_privacy_rights.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return {
     pg,
@@ -114,7 +114,31 @@ test("owner registration, login, HttpOnly session and CSRF role gate", async () 
   await pg.close();
 });
 
-test("stale legal acceptance blocks tenant APIs but keeps the consent surface reachable", async () => {
+test("a suspended tenant cannot use service APIs but can reauthenticate for privacy rights", async () => {
+  const { pg, db } = await database();
+  const registered = await registerSaasOwner(
+    { tenantName: "Suspended Co", ownerName: "Owner", email: "suspended@example.test", password: "suspended-password-12345" },
+    request("/api/saas/session", { method: "POST" }),
+    db,
+  );
+  await pg.query("update relay_tenants set status='suspended' where id=$1", [registered.tenantId]);
+  const existing = request("/api/saas/session", { headers: { cookie: cookieHeader(registered.cookies) } });
+  assert.equal(await getSaasSession(existing, db), null);
+  const rightsSession = await getSaasSession(existing, db, { allowSuspended: true });
+  assert.equal(rightsSession?.tenantStatus, "suspended");
+  assert.equal((await assertSaasSession(existing, ["owner"], { requireLegal: false }, db)).ok, false);
+  assert.equal((await assertSaasSession(existing, ["owner"], { requireLegal: false, allowSuspended: true }, db)).ok, true);
+  const logged = await loginSaas(
+    { email: "suspended@example.test", password: "suspended-password-12345" },
+    request("/api/saas/session", { method: "POST" }),
+    db,
+  );
+  assert.equal(logged.tenant.status, "suspended");
+  assert.ok(await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(logged.cookies) } }), db, { allowSuspended: true }));
+  await pg.close();
+});
+
+test("stale legal acceptance blocks service APIs but keeps non-conditional rights surfaces reachable", async () => {
   const { pg, db } = await database();
   const registered = await registerSaasOwner(
     { tenantName: "Reconsent Co", ownerName: "Owner", email: "reconsent@example.test", password: "reconsent-password-123" },
@@ -168,6 +192,10 @@ test("MFA enrollment requires a current code and returns one-time recovery codes
   assert.equal(refreshed?.mfaVerified, true);
   const legacy = await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(legacySession.cookies) } }), db);
   assert.equal(legacy?.mfaVerified, false);
+  const forcedPrivacyMutation = request("/api/saas/privacy", { method: "POST", headers: { cookie: cookieHeader(legacySession.cookies), "x-csrf-token": csrfFrom(legacySession.cookies) } });
+  const forcedPrivacyMfa = await assertSaasSession(forcedPrivacyMutation, ["owner"], { requireCsrf: true, forceMfa: true }, db);
+  assert.equal(forcedPrivacyMfa.ok, false);
+  if (!forcedPrivacyMfa.ok) assert.equal(forcedPrivacyMfa.error, "MFA_STEP_UP_REQUIRED");
   const previousMfaGate = process.env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA;
   process.env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA = "1";
   const currentMutation = request("/api/saas/keys", { method: "POST", headers: { cookie: cookieHeader(registered.cookies), "x-csrf-token": csrfFrom(registered.cookies) } });

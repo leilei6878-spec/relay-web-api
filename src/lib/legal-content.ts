@@ -1,4 +1,4 @@
-export const LEGAL_CONTENT_REVISION = "relay-legal-2026-08-31-1";
+export const LEGAL_CONTENT_REVISION = "relay-legal-2026-08-31-2";
 
 export type LegalPublicMetadata = {
   configured: boolean;
@@ -27,5 +27,5 @@ export const LEGAL_PRIVACY_SECTIONS = [
   ["第三方处理方", "请求内容会按客户选择发送至 OpenAI、Google 或 Leonardo 的官方商业接口。各供应商按其商业条款与隐私政策处理数据。平台不会把商业客户请求发送到内部网页账号池。"],
   ["保留期限", "请求内容默认 30 天后脱敏；失效 Session 默认保留 30 天；运营检查默认 90 天；商业审计默认 365 天；账务流水默认保留 7 年或法律要求的更长期限。对象存储采用相匹配的生命周期规则。"],
   ["安全", "采用 HTTPS、HttpOnly Session、CSRF/Origin 校验、角色权限、TOTP MFA、租户级哈希密钥、加密密钥存储、追加式账本、告警和异地备份。"],
-  ["数据主体权利", "客户可请求访问、更正、导出或删除适用数据。依法必须保存的财务、风控和安全记录可能不被立即删除。"],
+  ["数据主体权利", "租户 Owner 可在通过近期 MFA 后自助导出可校验的数据档案，或申请关停租户。关停具有可撤销冷静期，余额、预授权、退款或拒付未清时保持阻塞；执行后撤销访问并最小化适用个人信息。依法必须保存的账务、法律接受、风控和安全审计记录按规定期限继续保留。"],
 ] as const;
