@@ -14,8 +14,10 @@ const ROLES = new Set<TenantRole>(["owner", "admin", "billing", "developer", "vi
 export async function listTenantMembers(tenantId: string, db?: DbLike) {
   const sql = await database(db);
   return sql.query<Record<string, unknown>>(
-    `select u.id,u.email,u.name,u.status,u.mfa_enabled,m.role,m.status as membership_status,m.created_at
+    `select u.id,u.email,u.name,u.status,u.mfa_enabled,m.role,m.status as membership_status,m.created_at,
+            (o.user_id=m.user_id) as is_designated_owner
        from relay_tenant_memberships m join relay_saas_users u on u.id=m.user_id
+       left join relay_tenant_ownership o on o.tenant_id=m.tenant_id
       where m.tenant_id=$1 order by m.created_at asc`,
     [tenantId],
   );
@@ -27,7 +29,8 @@ export async function inviteTenantMember(
   opts: { db?: DbLike; fetcher?: typeof fetch; env?: NodeJS.ProcessEnv } = {},
 ) {
   if (session.role !== "owner" && session.role !== "admin") throw new Error("SAAS_ROLE_REQUIRED");
-  if (!ROLES.has(input.role) || input.role === "owner" && session.role !== "owner") throw new Error("INVALID_ROLE");
+  if (!ROLES.has(input.role)) throw new Error("INVALID_ROLE");
+  if (input.role === "owner") throw new Error("OWNER_TRANSFER_REQUIRED");
   const email = normalizeEmail(input.email);
   if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error("INVALID_EMAIL");
   const sql = await database(opts.db);
@@ -164,6 +167,7 @@ export async function updateTenantMemberRole(
     [session.tenantId, userId],
   );
   if (!target[0]) throw new Error("MEMBER_NOT_FOUND");
+  if (role === "owner" && target[0].role !== "owner") throw new Error("OWNER_TRANSFER_REQUIRED");
   if (target[0].role === "owner" && (role !== "owner" || status !== "active")) {
     const owners = await sql.query<{ count: number }>(
       "select count(*)::int as count from relay_tenant_memberships where tenant_id=$1 and role='owner' and status='active'",
@@ -176,4 +180,16 @@ export async function updateTenantMemberRole(
     [session.tenantId, userId, role, status],
   );
   return { ok: true as const };
+}
+
+export async function transferTenantOwnership(session: SaasSession, targetUserId: string, db?: DbLike) {
+  if (session.role !== "owner") throw new Error("SAAS_OWNER_REQUIRED");
+  if (!targetUserId || targetUserId === session.userId) throw new Error("OWNERSHIP_TARGET_INVALID");
+  const sql = await database(db);
+  const rows = await sql.query<{ previous_owner: string; new_owner: string }>(
+    "select * from relay_transfer_tenant_ownership($1,$2,$3)",
+    [session.tenantId, session.userId, targetUserId],
+  );
+  if (!rows[0]) throw new Error("OWNERSHIP_TRANSFER_FAILED");
+  return { ok: true as const, previousOwnerId: rows[0].previous_owner, newOwnerId: rows[0].new_owner };
 }

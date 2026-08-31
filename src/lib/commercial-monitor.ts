@@ -39,7 +39,7 @@ export async function collectCommercialSignals(db?: DbLike) {
   const sql = db || await getSql();
   const env = await effectiveCommercialEnv(process.env, sql);
   const canaryHours = Math.max(1, Math.min(168, Number(env.RELAY_PROVIDER_CANARY_MAX_AGE_HOURS || 24)));
-  const [workers, reservations, failures, lowBalances, paymentEvents, refundSettlements, checkoutCreates, openDisputes, missingCanaries, duePlanPeriods, incompleteTenantAudits, overduePrivacyClosures, blockedPrivacyClosures] = await Promise.all([
+  const [workers, reservations, failures, lowBalances, paymentEvents, refundSettlements, checkoutCreates, openDisputes, missingCanaries, duePlanPeriods, incompleteTenantAudits, overduePrivacyClosures, blockedPrivacyClosures, ownerIntegrity] = await Promise.all([
     sql.query<{ count: number }>("select count(*)::int as count from relay_workers where draining=false and last_beat > now()-interval '45 seconds'"),
     sql.query<{ count: number }>("select count(*)::int as count from relay_usage_charges where status='reserved' and created_at < now()-interval '20 minutes'"),
     sql.query<{ total: number; failed: number }>(
@@ -90,6 +90,15 @@ export async function collectCommercialSignals(db?: DbLike) {
       `select count(*)::int as count from relay_privacy_requests
         where kind='tenant_closure' and status='blocked'`,
     ),
+    sql.query<{ count: number }>(
+      `select count(*)::int as count from relay_tenants t
+        where t.status in ('trial','active','suspended') and not exists (
+          select 1 from relay_tenant_ownership o
+          join relay_tenant_memberships m on m.tenant_id=o.tenant_id and m.user_id=o.user_id
+          join relay_saas_users u on u.id=o.user_id
+          where o.tenant_id=t.id and m.role='owner' and m.status='active' and u.status='active'
+        )`,
+    ),
   ]);
   const signals: CommercialSignal[] = [];
   if (Number(workers[0]?.count || 0) === 0) signals.push({ code: "WORKER_ZERO", severity: "critical", message: "No online worker is available" });
@@ -120,6 +129,11 @@ export async function collectCommercialSignals(db?: DbLike) {
     code: "PRIVACY_CLOSURE_BLOCKED",
     severity: "warning",
     message: `${blockedPrivacyClosures[0]?.count} tenant privacy closure request(s) require financial or dispute resolution`,
+  });
+  if (Number(ownerIntegrity[0]?.count || 0) > 0) signals.push({
+    code: "TENANT_OWNER_MISSING",
+    severity: "critical",
+    message: `${ownerIntegrity[0]?.count} tenant(s) lack one valid designated Owner`,
   });
   const missingEvidence = (await commercialEvidenceStatus(env, sql)).filter((item) => !item.valid);
   if (missingEvidence.length > 0) signals.push({

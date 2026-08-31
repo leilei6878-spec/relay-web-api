@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertSaasSession } from "@/lib/saas-auth";
-import { inviteTenantMember, listTenantMembers, updateTenantMemberRole } from "@/lib/saas-members";
+import { inviteTenantMember, listTenantMembers, transferTenantOwnership, updateTenantMemberRole } from "@/lib/saas-members";
 import { auditedTenantMutation } from "@/lib/tenant-audit";
 import type { TenantRole } from "@/lib/commercial-types";
 
@@ -31,8 +31,15 @@ export const Route = createFileRoute("/api/saas/members")({
       PATCH: async ({ request }) => {
         const auth = await assertSaasSession(request, ["owner", "admin"], { requireCsrf: true, requireMfa: true });
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
-        const body = (await request.json().catch(() => ({}))) as { userId?: string; role?: TenantRole; status?: "active" | "disabled" };
+        const body = (await request.json().catch(() => ({}))) as { action?: string; userId?: string; role?: TenantRole; status?: "active" | "disabled" };
         try {
+          if (body.action === "transfer-ownership") {
+            const transferAuth = await assertSaasSession(request, ["owner"], { requireCsrf: true, forceMfa: true });
+            if (!transferAuth.ok) return Response.json({ error: transferAuth.error }, { status: transferAuth.status });
+            return Response.json(await auditedTenantMutation(request, transferAuth.session, {
+              action: "ownership.transfer", targetType: "tenant_member", targetId: body.userId || null,
+            }, () => transferTenantOwnership(transferAuth.session, body.userId || "")));
+          }
           const role = body.role || "viewer";
           const status = body.status || "active";
           return Response.json(await auditedTenantMutation(request, auth.session, {

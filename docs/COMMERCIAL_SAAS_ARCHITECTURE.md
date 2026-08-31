@@ -36,6 +36,11 @@ official-provider usage/asset settlement paths are authoritative.
 
 - Tenant, users and memberships are first-class SQL rows.
 - Roles: owner, admin, billing, developer and viewer.
+- Each tenant has one database-designated Owner referencing an active Owner
+  membership. General invites/role edits cannot create Owner; an MFA-bound
+  stored function atomically promotes the target and demotes the source while
+  triggers reject direct orphaning. See
+  [`TENANT_OWNERSHIP.md`](./TENANT_OWNERSHIP.md).
 - Users with multiple active memberships can list and switch tenants from the
   shared SaaS Shell. Switching atomically revokes the source session, creates a
   target-bound session, recomputes target legal state and preserves the exact

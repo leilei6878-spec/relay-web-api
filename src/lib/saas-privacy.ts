@@ -278,9 +278,12 @@ async function completeTenantClosure(requestId: string, db?: DbLike) {
         from closed_tenant t where s.tenant_id=t.id and s.revoked_at is null returning s.id
      ), affected_users as (
        select m.user_id from relay_tenant_memberships m join closed_tenant t on t.id=m.tenant_id
+     ), released_ownership as (
+       delete from relay_tenant_ownership o using closed_tenant t where o.tenant_id=t.id returning o.tenant_id
      ), closed_memberships as (
        update relay_tenant_memberships m set status='disabled',updated_at=now()
-        from closed_tenant t where m.tenant_id=t.id returning m.user_id
+        from closed_tenant t,(select count(*) from released_ownership) barrier
+        where m.tenant_id=t.id returning m.user_id
      ), exclusive_users as (
        select a.user_id from affected_users a
         where not exists (
@@ -324,6 +327,7 @@ async function completeTenantClosure(requestId: string, db?: DbLike) {
        select $3,id,tenant_id,null,'completed',jsonb_build_object(
          'keysRevoked',(select count(*) from revoked_keys),
          'sessionsRevoked',(select count(*) from revoked_sessions),
+         'ownershipReleased',(select count(*) from released_ownership),
          'usersPseudonymized',(select count(*) from closed_users),
          'emailsScrubbed',(select count(*) from scrubbed_email)+(select count(*) from scrubbed_invite_email),
          'invitesScrubbed',(select count(*) from scrubbed_invites),

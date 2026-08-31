@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0-rc25 — designated tenant ownership (2026-08-31)
+
+- One composite-FK ownership row designates the active Owner membership for
+  every tenant; migration demotes additional legacy Owners.
+- Database triggers reject direct designated-Owner demotion/disable/delete and
+  conflicting Owner insert/update.
+- Owner role can no longer be granted by ordinary invite/role mutation.
+- MFA-enabled active target receives ownership through one serialized database
+  function; source becomes Admin and concurrent transfers have one winner.
+- Commercial monitor raises critical evidence for a missing/invalid Owner chain.
+
 ## 0.10.0-rc24 — multi-tenant session switching (2026-08-31)
 
 - Authenticated users can list only their active tenant memberships and roles.

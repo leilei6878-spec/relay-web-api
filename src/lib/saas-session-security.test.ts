@@ -27,7 +27,7 @@ async function seed(pg: PGlite) {
       "insert into relay_saas_users(id,email,email_normalized,name,password_hash,mfa_enabled) values ($1,$2,$2,$1,$3,true)",
       [id, `${id}@example.test`, hashSaasPassword(id === "security-user" ? "old-password-12345" : "foreign-password-12345")],
     );
-    await pg.query("insert into relay_tenant_memberships(tenant_id,user_id,role,status) values ('security-tenant',$1,'owner','active')", [id]);
+    await pg.query("insert into relay_tenant_memberships(tenant_id,user_id,role,status) values ('security-tenant',$1,$2,'active')", [id, id === "security-user" ? "owner" : "viewer"]);
   }
   const sessions = [
     ["session-current", "security-user", "token-current", "Windows Chrome", "203.0.113.10"],
