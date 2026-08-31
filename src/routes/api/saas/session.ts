@@ -57,6 +57,9 @@ export const Route = createFileRoute("/api/saas/session")({
               {
                 tenantName: String(body.tenantName || ""), ownerName: String(body.ownerName || ""),
                 email: String(body.email || ""), password: String(body.password || ""), currency: String(body.currency || "USD"),
+                legalAccepted: body.legalAccepted === true,
+                termsVersion: String(body.termsVersion || ""), privacyVersion: String(body.privacyVersion || ""),
+                legalBundleSha256: String(body.legalBundleSha256 || ""),
               },
               request,
             );

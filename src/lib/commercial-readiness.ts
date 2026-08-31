@@ -3,6 +3,7 @@ import { effectiveCommercialEnv } from "./commercial-config";
 import { commercialEvidenceStatus } from "./commercial-evidence";
 import { parseVertexServiceAccount, validateVertexProjectLocation } from "./vertex-auth";
 import { adminMfaConfigured as validAdminMfaConfig } from "./admin-password";
+import { legalDocumentMetadata } from "./legal-documents";
 
 export type CommercialReadiness = {
   enabled: boolean;
@@ -19,6 +20,7 @@ export type CommercialReadiness = {
   gatewayReplicas: number;
   offsiteBackupConfigured: boolean;
   legalApproved: boolean;
+  legalDocumentsConfigured: boolean;
   adminMfaRequired: boolean;
   adminMfaConfigured: boolean;
   customerPrivilegedMfaRequired: boolean;
@@ -123,6 +125,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   const minWorkers = Math.max(1, Number(env.RELAY_COMMERCIAL_MIN_WORKERS || 2));
   const offsiteBackupConfigured = validOffsiteTarget(env);
   const legalApproved = env.RELAY_LEGAL_APPROVED === "1";
+  const legalDocumentsConfigured = legalDocumentMetadata(env).configured;
   const adminMfaRequired = env.RELAY_REQUIRE_ADMIN_MFA === "1";
   const adminMfaConfigured = validAdminMfaConfig(env);
   const customerPrivilegedMfaRequired = env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA === "1";
@@ -167,6 +170,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
   if (enabled && !schedulerOnline) blockers.push("dedicated commercial scheduler is offline");
   if (enabled && !offsiteBackupConfigured) blockers.push("offsite backup target not configured");
   if (enabled && !legalApproved) blockers.push("commercial legal approval not recorded");
+  if (enabled && !legalDocumentsConfigured) blockers.push("versioned legal operator/contact/terms/privacy metadata not configured");
   if (enabled && !adminMfaRequired) blockers.push("administrator MFA hard gate not enabled");
   if (enabled && !adminMfaConfigured) blockers.push("administrator TOTP secret missing or invalid");
   if (enabled && !customerPrivilegedMfaRequired) blockers.push("privileged customer MFA hard gate not enabled");
@@ -192,6 +196,7 @@ export async function commercialReadiness(env: NodeJS.ProcessEnv = process.env, 
     gatewayReplicas,
     offsiteBackupConfigured,
     legalApproved,
+    legalDocumentsConfigured,
     adminMfaRequired,
     adminMfaConfigured,
     customerPrivilegedMfaRequired,

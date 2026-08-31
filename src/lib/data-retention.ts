@@ -92,7 +92,8 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
       [policy.operationalDays],
     ),
   ]);
-  // Billing transactions/entries are intentionally never deleted here. Object
+  // Billing transactions/entries, tenant audit and legal acceptances are
+  // intentionally never deleted here. Object
   // media must use the configured S3 bucket lifecycle because deleting rows
   // without an authoritative object deletion would create hidden retained data.
   return {

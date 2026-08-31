@@ -3,6 +3,7 @@ import { Activity, Building2, LockKeyhole } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import type { LegalPublicMetadata } from "@/lib/legal-content";
 
 export const Route = createFileRoute("/saas/login")({ component: SaasLogin });
 
@@ -16,10 +17,15 @@ function SaasLogin() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [legal, setLegal] = useState<LegalPublicMetadata | null>(null);
+  const [legalAccepted, setLegalAccepted] = useState(false);
 
   useEffect(() => {
     void fetch("/api/saas/session", { credentials: "include" }).then((response) => {
       if (response.ok) window.location.replace("/portal");
+    }).catch(() => undefined);
+    void fetch("/api/saas/legal", { credentials: "omit" }).then(async (response) => {
+      if (response.ok) setLegal(await response.json() as LegalPublicMetadata);
     }).catch(() => undefined);
   }, []);
 
@@ -29,11 +35,19 @@ function SaasLogin() {
     setError("");
     setNotice("");
     try {
+      if (mode === "register" && (!legal?.configured || !legal.approved || !legalAccepted)) {
+        setError("法律文件尚未批准，或你尚未明确同意当前版本");
+        return;
+      }
       const response = await fetch("/api/saas/session", {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: mode, tenantName, ownerName, email, password,
+          legalAccepted: mode === "register" && legalAccepted,
+          termsVersion: mode === "register" ? legal?.termsVersion : undefined,
+          privacyVersion: mode === "register" ? legal?.privacyVersion : undefined,
+          legalBundleSha256: mode === "register" ? legal?.bundleSha256 : undefined,
           totp: /^\d{6}$/.test(totp.trim()) ? totp.trim() : undefined,
           recoveryCode: totp.trim() && !/^\d{6}$/.test(totp.trim()) ? totp.trim() : undefined }),
       });
@@ -80,13 +94,14 @@ function SaasLogin() {
           <Field label="邮箱"><Input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></Field>
           <Field label="密码"><Input type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={10} /></Field>
           {mode === "login" ? <Field label="MFA 验证码或恢复码（启用后必填）"><Input autoComplete="one-time-code" maxLength={64} value={totp} onChange={(event) => setTotp(event.target.value.trim())} /></Field> : null}
+          {mode === "register" ? <label className="flex items-start gap-2 rounded-lg border border-border bg-elevated p-3 text-xs leading-5 text-muted"><input className="mt-1" type="checkbox" checked={legalAccepted} onChange={(event) => setLegalAccepted(event.target.checked)} required /><span>我已阅读并明确同意 <a className="underline" href="/legal/terms" target="_blank" rel="noreferrer">服务条款 {legal?.termsVersion || "未配置"}</a> 与 <a className="underline" href="/legal/privacy" target="_blank" rel="noreferrer">隐私政策 {legal?.privacyVersion || "未配置"}</a>。{legal?.bundleSha256 ? <span className="block font-mono text-[10px] text-subtle">文件 {legal.bundleSha256.slice(0, 16)}…</span> : null}</span></label> : null}
           {error ? <p role="alert" className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2.5 text-sm text-danger">{error}</p> : null}
           {notice ? <p className="rounded-lg border border-ok/30 bg-ok/5 px-3 py-2.5 text-sm text-ok">{notice}</p> : null}
-          <Button type="submit" className="w-full" disabled={busy}>{busy ? "请稍候…" : mode === "login" ? "登录" : "创建租户"}</Button>
+          <Button type="submit" className="w-full" disabled={busy || mode === "register" && (!legal?.configured || !legal.approved || !legalAccepted)}>{busy ? "请稍候…" : mode === "login" ? "登录" : legal?.configured && legal.approved ? legalAccepted ? "创建租户" : "请先明确同意法律文件" : "等待法律文件批准"}</Button>
           {mode === "login" ? <a href="/saas/reset" className="block text-center text-xs text-muted underline">忘记密码</a> : null}
           {mode === "login" ? <button type="button" className="block w-full text-center text-xs text-muted underline" onClick={() => void resend()}>重新发送验证邮件</button> : null}
         </form>
-        <p className="mt-6 text-center text-[11px] leading-5 text-subtle">注册即表示同意 <a className="underline" href="/legal/terms">服务条款</a> 与 <a className="underline" href="/legal/privacy">隐私政策</a>。</p>
+        <p className="mt-6 text-center text-[11px] leading-5 text-subtle">注册前请阅读 <a className="underline" href="/legal/terms">服务条款</a> 与 <a className="underline" href="/legal/privacy">隐私政策</a>；只有主动勾选后才会记录同意。</p>
       </section>
     </main>
   );

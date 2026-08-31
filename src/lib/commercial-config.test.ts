@@ -21,7 +21,7 @@ async function database() {
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
     "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql",
-    "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql",
+    "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
@@ -91,6 +91,11 @@ test("hard gates require deployment authorization while safe values hot-reload",
   const auditHashKey = await createCommercialConfigVersion({ key: "security.auditHashKey", value: "versioned-audit-hmac-key-0123456789abcdef", reason: "tenant audit correlation", actor: "admin" }, db);
   const alertWebhookSecret = await createCommercialConfigVersion({ key: "alerts.webhookSecret", value: "versioned-alert-hmac-key-0123456789abcdef", reason: "signed alert delivery", actor: "admin" }, db);
   const emailWebhookSecret = await createCommercialConfigVersion({ key: "email.webhookSecret", value: "versioned-email-hmac-key-0123456789abcdef", reason: "signed email delivery", actor: "admin" }, db);
+  const legalOperator = await createCommercialConfigVersion({ key: "legal.operatorName", value: "Relay Config Test Ltd.", reason: "legal identity", actor: "admin" }, db);
+  const legalContact = await createCommercialConfigVersion({ key: "legal.contactEmail", value: "privacy@relay.example.test", reason: "legal contact", actor: "admin" }, db);
+  const legalTerms = await createCommercialConfigVersion({ key: "legal.termsVersion", value: "terms-config-v1", reason: "terms version", actor: "admin" }, db);
+  const legalPrivacy = await createCommercialConfigVersion({ key: "legal.privacyVersion", value: "privacy-config-v1", reason: "privacy version", actor: "admin" }, db);
+  const legalDate = await createCommercialConfigVersion({ key: "legal.effectiveDate", value: "2026-08-31", reason: "legal effective date", actor: "admin" }, db);
   await activateCommercialConfigVersion(mfaSecret.id, "admin", db);
   await activateCommercialConfigVersion(mfaRequired.id, "admin", db);
   await activateCommercialConfigVersion(customerMfaRequired.id, "admin", db);
@@ -98,6 +103,7 @@ test("hard gates require deployment authorization while safe values hot-reload",
   await activateCommercialConfigVersion(auditHashKey.id, "admin", db);
   await activateCommercialConfigVersion(alertWebhookSecret.id, "admin", db);
   await activateCommercialConfigVersion(emailWebhookSecret.id, "admin", db);
+  for (const item of [legalOperator, legalContact, legalTerms, legalPrivacy, legalDate]) await activateCommercialConfigVersion(item.id, "admin", db);
   const closed = await effectiveCommercialEnv({ RELAY_COMMERCIAL_ENABLED: "0", RELAY_PAYMENT_PROVIDER: "disabled" } as NodeJS.ProcessEnv, db);
   assert.equal(closed.RELAY_COMMERCIAL_ENABLED, "0");
   assert.equal(closed.RELAY_PAYMENT_PROVIDER, "stripe");
@@ -112,6 +118,11 @@ test("hard gates require deployment authorization while safe values hot-reload",
   assert.equal(opened.RELAY_AUDIT_HASH_KEY, "versioned-audit-hmac-key-0123456789abcdef");
   assert.equal(opened.RELAY_ALERT_WEBHOOK_SECRET, "versioned-alert-hmac-key-0123456789abcdef");
   assert.equal(opened.RELAY_EMAIL_WEBHOOK_SECRET, "versioned-email-hmac-key-0123456789abcdef");
+  assert.equal(opened.RELAY_LEGAL_OPERATOR_NAME, "Relay Config Test Ltd.");
+  assert.equal(opened.RELAY_LEGAL_CONTACT_EMAIL, "privacy@relay.example.test");
+  assert.equal(opened.RELAY_TERMS_VERSION, "terms-config-v1");
+  assert.equal(opened.RELAY_PRIVACY_VERSION, "privacy-config-v1");
+  assert.equal(opened.RELAY_LEGAL_EFFECTIVE_DATE, "2026-08-31");
   const publicConfig = await listCommercialConfig(db);
   const auditConfig = publicConfig.find((entry) => entry.key === "security.auditHashKey")!;
   assert.equal(auditConfig.active?.value, null);
@@ -137,6 +148,9 @@ test("hard gates require deployment authorization while safe values hot-reload",
     () => createCommercialConfigVersion({ key: "email.webhookUrl", value: "http://insecure.test", reason: "bad", actor: "admin" }, db),
     /HTTPS_URL_REQUIRED/,
   );
+  await assert.rejects(() => createCommercialConfigVersion({ key: "legal.contactEmail", value: "invalid", reason: "bad", actor: "admin" }, db), /LEGAL_CONTACT_INVALID/);
+  await assert.rejects(() => createCommercialConfigVersion({ key: "legal.termsVersion", value: "terms version spaces", reason: "bad", actor: "admin" }, db), /LEGAL_VERSION_INVALID/);
+  await assert.rejects(() => createCommercialConfigVersion({ key: "legal.effectiveDate", value: "2026-99-99", reason: "bad", actor: "admin" }, db), /LEGAL_DATE_INVALID/);
   await assert.rejects(
     () => createCommercialConfigVersion({ key: "email.webhookUrl", value: "https://127.0.0.1/hook", reason: "bad", actor: "admin" }, db),
     /PRIVATE_ADDRESS_FORBIDDEN/,

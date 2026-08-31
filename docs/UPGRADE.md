@@ -1,6 +1,6 @@
 # Upgrade
 
-Schema is the ordered set of `migrations/*.sql`. Current `SCHEMA_VERSION` is **17**
+Schema is the ordered set of `migrations/*.sql`. Current `SCHEMA_VERSION` is **18**
 (`src/lib/release.ts`, row `relay_meta.schema_version`).
 
 ## Procedure (release N → N+1)
@@ -21,6 +21,12 @@ configure and test both `RELAY_EMAIL_WEBHOOK_URL` and a dedicated 32+ character
 `RELAY_EMAIL_WEBHOOK_SECRET`; keep the dedicated scheduler online. Existing
 schema-16 deployments may migrate with the channel unset while commercial and
 registration gates remain closed.
+
+Schema 18 adds append-only `relay_legal_acceptances`. Registration and invite
+acceptance bind the explicit user action to the active terms/privacy versions,
+exact public content bundle SHA-256 and HMAC-only network evidence. Existing
+users are not backfilled with fabricated consent; obtain a fresh acceptance
+before relying on the record for commercial service.
 
 JSON files are **not** part of production upgrade. To import a preview plane use:
 

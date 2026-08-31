@@ -17,13 +17,34 @@ import {
   sendSaasVerification,
 } from "./saas-auth.ts";
 import { totpCode } from "./saas-crypto.ts";
+import { legalDocumentMetadata } from "./legal-documents.ts";
+
+const PRODUCTION_LEGAL_ENV = {
+  RELAY_LEGAL_APPROVED: "1",
+  RELAY_LEGAL_OPERATOR_NAME: "Relay Test Operator Ltd.",
+  RELAY_LEGAL_CONTACT_EMAIL: "privacy@relay.example.test",
+  RELAY_TERMS_VERSION: "terms-test-v1",
+  RELAY_PRIVACY_VERSION: "privacy-test-v1",
+  RELAY_LEGAL_EFFECTIVE_DATE: "2026-08-31",
+  RELAY_AUDIT_HASH_KEY: "legal-audit-hmac-key-0123456789abcdef",
+};
+
+function acceptedLegal(env: NodeJS.ProcessEnv) {
+  const metadata = legalDocumentMetadata(env);
+  return {
+    legalAccepted: true,
+    termsVersion: metadata.termsVersion,
+    privacyVersion: metadata.privacyVersion,
+    legalBundleSha256: metadata.bundleSha256,
+  };
+}
 
 async function database() {
   const pg = new PGlite();
   await pg.waitReady;
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
-    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql",
+    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return {
     pg,
@@ -163,6 +184,7 @@ test("production registration requires delivered email verification before login
   let verificationLink = "";
   const verificationLinks: string[] = [];
   const emailEnv = {
+    ...PRODUCTION_LEGAL_ENV,
     NODE_ENV: "production",
     RELAY_PUBLIC_URL: "https://relay.example.test",
     RELAY_EMAIL_WEBHOOK_URL: "https://mail.example.test/send",
@@ -175,13 +197,18 @@ test("production registration requires delivered email verification before login
     return Response.json({ ok: true });
   };
   const registered = await registerSaasOwner(
-    { tenantName: "Verify Co", ownerName: "Owner", email: "verify@example.test", password: "verify-password-123" },
+    { tenantName: "Verify Co", ownerName: "Owner", email: "verify@example.test", password: "verify-password-123", ...acceptedLegal(emailEnv) },
     request("/api/saas/session", { method: "POST" }),
     db,
     { env: emailEnv, fetcher: emailFetcher as typeof fetch },
   );
   assert.equal(registered.verificationRequired, true);
   assert.equal(registered.cookies.length, 0);
+  const legalRows = await pg.query<Record<string, unknown>>("select * from relay_legal_acceptances");
+  assert.equal(legalRows.rows.length, 1);
+  assert.equal(legalRows.rows[0]?.acceptance_method, "registration");
+  assert.equal(legalRows.rows[0]?.bundle_sha256, legalDocumentMetadata(emailEnv).bundleSha256);
+  assert.ok(!JSON.stringify(legalRows.rows).includes("verify@example.test"));
   await assert.rejects(
     () => loginSaas({ email: "verify@example.test", password: "verify-password-123" }, request("/api/saas/session", { method: "POST" }), db),
     /INVALID_CREDENTIALS/,
@@ -216,32 +243,35 @@ test("production registration rolls back user, tenant and verification when its 
   const { pg, db } = await database();
   await pg.exec("alter table relay_email_deliveries add constraint test_reject_registration_email check (kind <> 'verify-email')");
   let networkCalls = 0;
+  const atomicEnv = {
+    ...PRODUCTION_LEGAL_ENV,
+    NODE_ENV: "production", RELAY_PUBLIC_URL: "https://relay.example.test",
+    RELAY_EMAIL_WEBHOOK_URL: "https://mail.example.test/send",
+    RELAY_EMAIL_WEBHOOK_SECRET: "atomic-email-secret-0123456789abcdef",
+    RELAY_SECRETS_KEY: "atomic-encryption-key-0123456789abcdef",
+  } as NodeJS.ProcessEnv;
   await assert.rejects(
     () => registerSaasOwner(
-      { tenantName: "Atomic Registration", ownerName: "Owner", email: "atomic-register@example.test", password: "atomic-register-password-123" },
+      { tenantName: "Atomic Registration", ownerName: "Owner", email: "atomic-register@example.test", password: "atomic-register-password-123", ...acceptedLegal(atomicEnv) },
       request("/api/saas/session", { method: "POST", headers: { "x-forwarded-for": "192.0.2.81" } }),
       db,
       {
-        env: {
-          NODE_ENV: "production", RELAY_PUBLIC_URL: "https://relay.example.test",
-          RELAY_EMAIL_WEBHOOK_URL: "https://mail.example.test/send",
-          RELAY_EMAIL_WEBHOOK_SECRET: "atomic-email-secret-0123456789abcdef",
-          RELAY_SECRETS_KEY: "atomic-encryption-key-0123456789abcdef",
-        } as NodeJS.ProcessEnv,
+        env: atomicEnv,
         fetcher: (async () => { networkCalls += 1; return Response.json({ ok: true }); }) as typeof fetch,
       },
     ),
     /test_reject_registration_email|constraint/i,
   );
-  const counts = await pg.query<{ users: number; tenants: number; memberships: number; verifications: number; deliveries: number }>(
+  const counts = await pg.query<{ users: number; tenants: number; memberships: number; verifications: number; deliveries: number; acceptances: number }>(
     `select
        (select count(*)::int from relay_saas_users) as users,
        (select count(*)::int from relay_tenants) as tenants,
        (select count(*)::int from relay_tenant_memberships) as memberships,
        (select count(*)::int from relay_saas_verifications) as verifications,
-       (select count(*)::int from relay_email_deliveries) as deliveries`,
+       (select count(*)::int from relay_email_deliveries) as deliveries,
+       (select count(*)::int from relay_legal_acceptances) as acceptances`,
   );
-  assert.deepEqual(counts.rows[0], { users: 0, tenants: 0, memberships: 0, verifications: 0, deliveries: 0 });
+  assert.deepEqual(counts.rows[0], { users: 0, tenants: 0, memberships: 0, verifications: 0, deliveries: 0, acceptances: 0 });
   assert.equal(networkCalls, 0);
   await pg.close();
 });

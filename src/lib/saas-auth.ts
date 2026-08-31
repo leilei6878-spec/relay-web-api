@@ -4,6 +4,7 @@ import { effectiveCommercialEnv } from "./commercial-config";
 import { deliverEmailDeliveryNow, prepareEmailDelivery, type PreparedEmailDelivery } from "./email-outbox";
 import { createTenantOwner } from "./saas-billing";
 import { trustedClientIp as clientIp } from "./client-network";
+import { prepareLegalAcceptance } from "./legal-documents";
 import {
   generateTotpSecret,
   normalizeEmail,
@@ -155,7 +156,10 @@ export async function createSaasSession(userId: string, tenantId: string, reques
 }
 
 export async function registerSaasOwner(
-  input: { tenantName: string; ownerName: string; email: string; password: string; currency?: string },
+  input: {
+    tenantName: string; ownerName: string; email: string; password: string; currency?: string;
+    legalAccepted?: boolean; termsVersion?: string; privacyVersion?: string; legalBundleSha256?: string;
+  },
   request: Request,
   db?: DbLike,
   opts: { fetcher?: typeof fetch; env?: NodeJS.ProcessEnv } = {},
@@ -169,6 +173,17 @@ export async function registerSaasOwner(
   const verificationRequired = env.NODE_ENV === "production"
     ? env.RELAY_SAAS_EMAIL_VERIFICATION_REQUIRED !== "0"
     : env.RELAY_SAAS_EMAIL_VERIFICATION_REQUIRED === "1";
+  const legalAcceptance = prepareLegalAcceptance({
+    accepted: input.legalAccepted,
+    termsVersion: input.termsVersion,
+    privacyVersion: input.privacyVersion,
+    bundleSha256: input.legalBundleSha256,
+    method: "registration",
+  }, request, env);
+  const ownerInput = {
+    tenantName: input.tenantName, ownerName: input.ownerName, email: input.email,
+    password: input.password, currency: input.currency,
+  };
   if (verificationRequired) {
     const ids = { tenantId: uid(), userId: uid() };
     const token = secureToken(32);
@@ -185,12 +200,13 @@ export async function registerSaasOwner(
       payload: { template: "verify-email", to: email, tenant: input.tenantName.trim().slice(0, 120), link: `${publicUrl}/saas/verify?token=${encodeURIComponent(token)}` },
     }, env);
     const created = await createTenantOwner({
-      ...input,
+      ...ownerInput,
       userStatus: "pending_verification",
       emailVerified: false,
     }, sql, {
       ids,
       verification: { id: verificationId, tokenHash: sha256(token), expiresAt, delivery },
+      legalAcceptance,
     });
     await deliverEmailDeliveryNow(delivery.id, sql, { env, fetcher: opts.fetcher });
     return {
@@ -202,7 +218,7 @@ export async function registerSaasOwner(
       cookies: [] as string[],
     };
   }
-  const created = await createTenantOwner({ ...input, userStatus: "active", emailVerified: true }, sql);
+  const created = await createTenantOwner({ ...ownerInput, userStatus: "active", emailVerified: true }, sql, { legalAcceptance });
   const session = await createSaasSession(created.userId, created.tenantId, request, sql);
   return { ...created, verificationRequired: false as const, ...session };
 }

@@ -59,6 +59,7 @@ import { Route as ApiSaasAuditRouteImport } from './routes/api/saas/audit'
 import { Route as ApiSaasBillingRouteImport } from './routes/api/saas/billing'
 import { Route as ApiSaasInviteRouteImport } from './routes/api/saas/invite'
 import { Route as ApiSaasKeysRouteImport } from './routes/api/saas/keys'
+import { Route as ApiSaasLegalRouteImport } from './routes/api/saas/legal'
 import { Route as ApiSaasMembersRouteImport } from './routes/api/saas/members'
 import { Route as ApiSaasReadinessRouteImport } from './routes/api/saas/readiness'
 import { Route as ApiSaasSessionRouteImport } from './routes/api/saas/session'
@@ -329,6 +330,11 @@ const ApiSaasKeysRoute = ApiSaasKeysRouteImport.update({
   path: '/api/saas/keys',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSaasLegalRoute = ApiSaasLegalRouteImport.update({
+  id: '/api/saas/legal',
+  path: '/api/saas/legal',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSaasMembersRoute = ApiSaasMembersRouteImport.update({
   id: '/api/saas/members',
   path: '/api/saas/members',
@@ -452,6 +458,7 @@ export interface FileRoutesByFullPath {
   '/api/saas/billing': typeof ApiSaasBillingRoute
   '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
+  '/api/saas/legal': typeof ApiSaasLegalRoute
   '/api/saas/members': typeof ApiSaasMembersRoute
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
@@ -518,6 +525,7 @@ export interface FileRoutesByTo {
   '/api/saas/billing': typeof ApiSaasBillingRoute
   '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
+  '/api/saas/legal': typeof ApiSaasLegalRoute
   '/api/saas/members': typeof ApiSaasMembersRoute
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
@@ -585,6 +593,7 @@ export interface FileRoutesById {
   '/api/saas/billing': typeof ApiSaasBillingRoute
   '/api/saas/invite': typeof ApiSaasInviteRoute
   '/api/saas/keys': typeof ApiSaasKeysRoute
+  '/api/saas/legal': typeof ApiSaasLegalRoute
   '/api/saas/members': typeof ApiSaasMembersRoute
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
@@ -653,6 +662,7 @@ export interface FileRouteTypes {
     | '/api/saas/billing'
     | '/api/saas/invite'
     | '/api/saas/keys'
+    | '/api/saas/legal'
     | '/api/saas/members'
     | '/api/saas/readiness'
     | '/api/saas/session'
@@ -719,6 +729,7 @@ export interface FileRouteTypes {
     | '/api/saas/billing'
     | '/api/saas/invite'
     | '/api/saas/keys'
+    | '/api/saas/legal'
     | '/api/saas/members'
     | '/api/saas/readiness'
     | '/api/saas/session'
@@ -785,6 +796,7 @@ export interface FileRouteTypes {
     | '/api/saas/billing'
     | '/api/saas/invite'
     | '/api/saas/keys'
+    | '/api/saas/legal'
     | '/api/saas/members'
     | '/api/saas/readiness'
     | '/api/saas/session'
@@ -852,6 +864,7 @@ export interface RootRouteChildren {
   ApiSaasBillingRoute: typeof ApiSaasBillingRoute
   ApiSaasInviteRoute: typeof ApiSaasInviteRoute
   ApiSaasKeysRoute: typeof ApiSaasKeysRoute
+  ApiSaasLegalRoute: typeof ApiSaasLegalRoute
   ApiSaasMembersRoute: typeof ApiSaasMembersRoute
   ApiSaasReadinessRoute: typeof ApiSaasReadinessRoute
   ApiSaasSessionRoute: typeof ApiSaasSessionRoute
@@ -1220,6 +1233,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSaasKeysRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/saas/legal': {
+      id: '/api/saas/legal'
+      path: '/api/saas/legal'
+      fullPath: '/api/saas/legal'
+      preLoaderRoute: typeof ApiSaasLegalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/saas/members': {
       id: '/api/saas/members'
       path: '/api/saas/members'
@@ -1372,6 +1392,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSaasBillingRoute: ApiSaasBillingRoute,
   ApiSaasInviteRoute: ApiSaasInviteRoute,
   ApiSaasKeysRoute: ApiSaasKeysRoute,
+  ApiSaasLegalRoute: ApiSaasLegalRoute,
   ApiSaasMembersRoute: ApiSaasMembersRoute,
   ApiSaasReadinessRoute: ApiSaasReadinessRoute,
   ApiSaasSessionRoute: ApiSaasSessionRoute,

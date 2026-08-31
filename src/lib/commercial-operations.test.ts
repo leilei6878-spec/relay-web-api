@@ -8,7 +8,7 @@ import { commercialReadiness } from "./commercial-readiness.ts";
 
 async function database() {
   const pg = new PGlite(); await pg.waitReady;
-  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql","0017_email_delivery_outbox.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
+  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql","0017_email_delivery_outbox.sql","0018_legal_acceptance.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
 
@@ -34,8 +34,9 @@ test("retention policy is bounded and never offers billing-ledger deletion", asy
   assert.equal(policy.billingYears, 7);
   const source = await readFile("src/lib/data-retention.ts", "utf8");
   assert.doesNotMatch(source, /delete from relay_billing_(transactions|entries)/i);
-  assert.match(source, /Billing transactions\/entries are intentionally never deleted/);
+  assert.match(source, /Billing transactions\/entries[\s\S]*intentionally never deleted/);
   assert.doesNotMatch(source, /delete from relay_tenant_audit_events/i);
+  assert.doesNotMatch(source, /delete from relay_legal_acceptances/i);
 });
 
 test("resolved alert delivery history follows bounded operational retention", async () => {
@@ -94,6 +95,8 @@ test("commercial readiness fails closed on credentials, prices, replicas, backup
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("gateway")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("offsite")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("legal")));
+  assert.equal(enabled.legalDocumentsConfigured, false);
+  assert.ok(enabled.blockers.some((blocker) => blocker.includes("versioned legal")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("Stripe")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("tax mode")));
   assert.ok(enabled.blockers.some((blocker) => blocker.includes("audit HMAC")));

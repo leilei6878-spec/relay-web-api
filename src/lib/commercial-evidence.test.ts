@@ -18,7 +18,7 @@ async function database() {
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
     "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql",
     "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql",
-    "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql",
+    "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
@@ -127,6 +127,8 @@ test("commercial readiness cannot be enabled by environment flags until every re
     NODE_ENV: "test", RELAY_COMMERCIAL_ENABLED: "1", RELAY_PUBLIC_URL: "https://relay.example.test", REDIS_URL: "redis://unused",
     OPENAI_API_KEY: "configured", RELAY_GATEWAY_REPLICA_COUNT: "2", RELAY_COMMERCIAL_MIN_WORKERS: "1",
     RELAY_BACKUP_S3_ENDPOINT: "https://backup.example.test", RELAY_BACKUP_S3_BUCKET: "offsite", RELAY_LEGAL_APPROVED: "1",
+    RELAY_LEGAL_OPERATOR_NAME: "Relay Evidence Test Ltd.", RELAY_LEGAL_CONTACT_EMAIL: "privacy@relay.example.test",
+    RELAY_TERMS_VERSION: "evidence-terms-v1", RELAY_PRIVACY_VERSION: "evidence-privacy-v1", RELAY_LEGAL_EFFECTIVE_DATE: "2026-08-31",
     RELAY_PAYMENT_PROVIDER: "stripe", STRIPE_SECRET_KEY: "unit", STRIPE_WEBHOOK_SECRET: "unit", RELAY_TAX_MODE: "approved_exempt",
     RELAY_REQUIRE_ADMIN_MFA: "1", RELAY_ADMIN_TOTP_SECRET: "JBSWY3DPEHPK3PXP", RELAY_REQUIRE_PRIVILEGED_SAAS_MFA: "1",
     RELAY_SECRETS_KEY: "evidence-test-secret-key-0123456789abcdef",

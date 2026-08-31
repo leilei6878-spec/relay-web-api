@@ -47,7 +47,12 @@
     templates. Exercise 5xx recovery, supersession, expiry and secret rotation.
     See `EMAIL_DELIVERY.md`. Commercial mode is blocked until this signed
     channel is configured; public registration remains a separate final gate.
-11. Complete counsel review of terms/privacy/DPA; set `RELAY_LEGAL_APPROVED=1`.
+11. Complete counsel review of terms/privacy/DPA. Configure versioned operator,
+    contact, Terms/Privacy versions and effective date; verify the public
+    content-bundle SHA-256 and both registration/invite explicit-acceptance
+    records following `LEGAL_ACCEPTANCE.md`. Then set the separately controlled
+    `RELAY_LEGAL_APPROVED=1` hard gate and record reviewed `legal_documents`
+    evidence.
 12. Inspect `/api/saas/readiness` and resolve every infrastructure/configuration
     blocker. `ready` must remain false until the evidence in step 15 is valid.
 13. Complete a test-mode Checkout/payment/refund/reconciliation drill, then a

@@ -5,10 +5,11 @@ import { PGlite } from "@electric-sql/pglite";
 import { createTenantOwner } from "./saas-billing.ts";
 import { acceptTenantInvite, inviteTenantMember, listTenantMembers, updateTenantMemberRole } from "./saas-members.ts";
 import type { SaasSession } from "./saas-auth.ts";
+import { legalDocumentMetadata } from "./legal-documents.ts";
 
 async function database() {
   const pg = new PGlite(); await pg.waitReady;
-  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql","0017_email_delivery_outbox.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
+  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql","0017_email_delivery_outbox.sql","0018_legal_acceptance.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
 
@@ -30,8 +31,28 @@ test("tenant invitations are hash-only, email-delivered and atomically accepted"
   const token = new URL(link).searchParams.get("token") || "";
   assert.ok(token);
   assert.ok(!JSON.stringify(stored.rows).includes(token));
-  const accepted = await acceptTenantInvite({ token, name: "Developer", password: "developer-password-123" }, db);
+  const acceptEnv = {
+    NODE_ENV: "production", RELAY_LEGAL_APPROVED: "1", RELAY_LEGAL_OPERATOR_NAME: "Relay Members Test Ltd.",
+    RELAY_LEGAL_CONTACT_EMAIL: "privacy@members.test", RELAY_TERMS_VERSION: "members-terms-v1",
+    RELAY_PRIVACY_VERSION: "members-privacy-v1", RELAY_LEGAL_EFFECTIVE_DATE: "2026-08-31",
+    RELAY_AUDIT_HASH_KEY: "members-legal-hmac-key-0123456789abcdef",
+    RELAY_TRUST_PROXY_HEADERS: "1", RELAY_CLIENT_IP_HEADER: "x-real-ip",
+  } as NodeJS.ProcessEnv;
+  const legal = legalDocumentMetadata(acceptEnv);
+  const acceptRequest = new Request("https://relay.test/api/saas/invite", { headers: { "x-real-ip": "203.0.113.88", "user-agent": "InviteAcceptanceTest" } });
+  await assert.rejects(
+    () => acceptTenantInvite({ token, name: "Developer", password: "developer-password-123" }, acceptRequest, { db, env: acceptEnv }),
+    /LEGAL_ACCEPTANCE_REQUIRED/,
+  );
+  const accepted = await acceptTenantInvite({
+    token, name: "Developer", password: "developer-password-123", legalAccepted: true,
+    termsVersion: legal.termsVersion, privacyVersion: legal.privacyVersion, legalBundleSha256: legal.bundleSha256,
+  }, acceptRequest, { db, env: acceptEnv });
   assert.equal(accepted.tenantId, owner.tenantId);
+  const acceptance = await pg.query<Record<string, unknown>>("select * from relay_legal_acceptances");
+  assert.equal(acceptance.rows.length, 1);
+  assert.equal(acceptance.rows[0]?.acceptance_method, "invite");
+  assert.equal(acceptance.rows[0]?.bundle_sha256, legal.bundleSha256);
   const members = await listTenantMembers(owner.tenantId, db);
   assert.equal(members.length, 2);
   assert.ok(members.some((member) => member.role === "developer"));

@@ -5,6 +5,7 @@ import type { SaasSession } from "./saas-auth";
 import { uid } from "./utils";
 import { effectiveCommercialEnv } from "./commercial-config";
 import { deliverEmailDeliveryNow, emailRecipientHmac, prepareEmailDelivery } from "./email-outbox";
+import { prepareLegalAcceptance } from "./legal-documents";
 
 type DbLike = Pick<Sql, "query">;
 async function database(db?: DbLike) { return db || getSql(); }
@@ -78,16 +79,26 @@ export async function inviteTenantMember(
 }
 
 export async function acceptTenantInvite(
-  input: { token: string; name: string; password: string },
-  db?: DbLike,
+  input: {
+    token: string; name: string; password: string; legalAccepted?: boolean;
+    termsVersion?: string; privacyVersion?: string; legalBundleSha256?: string;
+  },
+  request: Request,
+  opts: { db?: DbLike; env?: NodeJS.ProcessEnv } = {},
 ) {
-  const sql = await database(db);
+  const sql = await database(opts.db);
   const invites = await sql.query<Record<string, unknown>>(
     "select * from relay_tenant_invites where token_hash=$1 and accepted_at is null and expires_at > now()",
     [sha256(input.token)],
   );
   const invite = invites[0];
   if (!invite) throw new Error("INVITE_INVALID_OR_EXPIRED");
+  const env = opts.env || await effectiveCommercialEnv(process.env, sql);
+  const legalAcceptance = prepareLegalAcceptance({
+    accepted: input.legalAccepted, termsVersion: input.termsVersion,
+    privacyVersion: input.privacyVersion, bundleSha256: input.legalBundleSha256,
+    method: "invite",
+  }, request, env);
   const userId = uid();
   const rows = await sql.query<{ tenant_id: string; user_id: string }>(
     `with valid_invite as (
@@ -103,17 +114,35 @@ export async function acceptTenantInvite(
        union all
        select u.id,u.status from relay_saas_users u join valid_invite i on i.email_normalized=u.email_normalized
         where not exists (select 1 from inserted_user)
+     ), legal_acceptance as (
+       insert into relay_legal_acceptances
+        (id,user_id,tenant_id,terms_version,privacy_version,bundle_sha256,ip_hmac,user_agent_hmac,acceptance_method,accepted_at)
+       select $5,u.id,i.tenant_id,$6,$7,$8,$9,$10,$11,now()
+         from valid_invite i join selected_user u on u.status='active' where $5::text is not null
+       returning user_id,tenant_id
+     ), legal_gate as (
+       select u.id as user_id,i.tenant_id from valid_invite i join selected_user u on u.status='active'
+        where $5::text is null
+       union all
+       select user_id,tenant_id from legal_acceptance
      ), membership as (
        insert into relay_tenant_memberships(tenant_id,user_id,role,status,created_at,updated_at)
        select i.tenant_id,u.id,i.role,'active',now(),now()
          from valid_invite i join selected_user u on u.status='active'
+         join legal_gate g on g.user_id=u.id and g.tenant_id=i.tenant_id
        on conflict (tenant_id,user_id) do update set role=excluded.role,status='active',updated_at=now()
        returning tenant_id,user_id
      ), consumed as (
        update relay_tenant_invites i set accepted_at=now()
          from membership m where i.id=$1 returning m.tenant_id,m.user_id
      ) select tenant_id,user_id from consumed`,
-    [invite.id, userId, input.name.trim().slice(0, 120), hashSaasPassword(input.password)],
+    [
+      invite.id, userId, input.name.trim().slice(0, 120), hashSaasPassword(input.password),
+      legalAcceptance?.id || null, legalAcceptance?.termsVersion || null,
+      legalAcceptance?.privacyVersion || null, legalAcceptance?.bundleSha256 || null,
+      legalAcceptance?.ipHmac || null, legalAcceptance?.userAgentHmac || null,
+      legalAcceptance?.method || null,
+    ],
   );
   if (!rows[0]) throw new Error("INVITE_ACCEPT_FAILED_OR_USER_NOT_ACTIVE");
   return { ok: true as const, tenantId: String(rows[0].tenant_id), userId: String(rows[0].user_id) };

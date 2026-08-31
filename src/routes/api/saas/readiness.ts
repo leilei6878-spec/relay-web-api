@@ -22,6 +22,7 @@ export const Route = createFileRoute("/api/saas/readiness")({
             gatewayReplicas: readiness.gatewayReplicas,
             offsiteBackupConfigured: readiness.offsiteBackupConfigured,
             legalApproved: readiness.legalApproved,
+            legalDocumentsConfigured: readiness.legalDocumentsConfigured,
             adminMfaRequired: readiness.adminMfaRequired,
             adminMfaConfigured: readiness.adminMfaConfigured,
             customerPrivilegedMfaRequired: readiness.customerPrivilegedMfaRequired,

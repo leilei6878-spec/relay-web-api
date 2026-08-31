@@ -31,6 +31,11 @@ export const COMMERCIAL_CONFIG_CATALOG: readonly CommercialConfigDefinition[] = 
   { key: "commercial.enabled", label: "商业流量", group: "launch", kind: "boolean", envName: "RELAY_COMMERCIAL_ENABLED", hardGate: true, description: "数据库配置只能在部署环境硬门禁允许时开启商业流量。" },
   { key: "registration.enabled", label: "客户注册", group: "launch", kind: "boolean", envName: "RELAY_SAAS_REGISTRATION_ENABLED", hardGate: true, description: "数据库配置和部署硬门禁必须同时开启。" },
   { key: "legal.approved", label: "法务批准", group: "launch", kind: "boolean", envName: "RELAY_LEGAL_APPROVED", hardGate: true, description: "仅记录经过外部法务批准的期望状态，不能替代真实批准。" },
+  { key: "legal.operatorName", label: "运营主体法定名称", group: "launch", kind: "string", envName: "RELAY_LEGAL_OPERATOR_NAME", description: "展示在条款与隐私政策中；必须与法务批准主体一致。" },
+  { key: "legal.contactEmail", label: "法律/隐私联系邮箱", group: "launch", kind: "string", envName: "RELAY_LEGAL_CONTACT_EMAIL", description: "接收法律与数据主体请求的公开邮箱。" },
+  { key: "legal.termsVersion", label: "服务条款版本", group: "launch", kind: "string", envName: "RELAY_TERMS_VERSION", description: "1-80 位版本标识；用户接受记录绑定该版本和内容哈希。" },
+  { key: "legal.privacyVersion", label: "隐私政策版本", group: "launch", kind: "string", envName: "RELAY_PRIVACY_VERSION", description: "1-80 位版本标识；用户接受记录绑定该版本和内容哈希。" },
+  { key: "legal.effectiveDate", label: "法律文件生效日期", group: "launch", kind: "string", envName: "RELAY_LEGAL_EFFECTIVE_DATE", description: "UTC 日期，格式 YYYY-MM-DD。" },
   { key: "security.adminMfaRequired", label: "管理员 MFA 强制", group: "security", kind: "boolean", envName: "RELAY_REQUIRE_ADMIN_MFA", hardGate: true, description: "商业上线必须由部署硬门禁和配置版本共同开启；开启后高风险管理操作要求 TOTP 会话。" },
   { key: "security.adminTotpSecret", label: "管理员 TOTP Secret", group: "security", kind: "secret", envName: "RELAY_ADMIN_TOTP_SECRET", secret: true, description: "Base32 TOTP Secret；AES-256-GCM 加密且只显示提示。" },
   { key: "security.adminSessionHours", label: "管理员会话小时", group: "security", kind: "integer", envName: "RELAY_ADMIN_SESSION_HOURS", min: 1, max: 24, description: "管理员浏览器会话固定有效期，不滑动续期。" },
@@ -143,6 +148,13 @@ function normalizeValue(definition: CommercialConfigDefinition, value: unknown) 
   }
   if (definition.kind === "string") {
     const text = String(value || "").trim();
+    if (definition.key === "legal.operatorName" && (text.length < 2 || text.length > 200)) throw new Error("CONFIG_LEGAL_OPERATOR_INVALID");
+    if (definition.key === "legal.contactEmail" && (text.length > 320 || !/^\S+@\S+\.\S+$/.test(text))) throw new Error("CONFIG_LEGAL_CONTACT_INVALID");
+    if (["legal.termsVersion", "legal.privacyVersion"].includes(definition.key) && !/^[A-Za-z0-9._-]{1,80}$/.test(text)) throw new Error("CONFIG_LEGAL_VERSION_INVALID");
+    if (definition.key === "legal.effectiveDate") {
+      const parsed = new Date(`${text}T00:00:00Z`);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(text) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text) throw new Error("CONFIG_LEGAL_DATE_INVALID");
+    }
     if (definition.key === "providers.vertex.projectId") validateVertexProjectLocation(text, "global");
     if (definition.key === "providers.vertex.location") validateVertexProjectLocation("valid-project", text);
     return text;

@@ -3,6 +3,7 @@ import { hashSaasPassword, normalizeEmail } from "./saas-crypto";
 import type { CommercialCapability, PriceBookRow, Tenant, UsageReservation } from "./commercial-types";
 import { uid } from "./utils";
 import type { PreparedEmailDelivery } from "./email-outbox";
+import type { PreparedLegalAcceptance } from "./legal-documents";
 import { decryptSecretValue, encryptSecretValue } from "./secrets";
 
 type DbLike = Pick<Sql, "query">;
@@ -72,6 +73,7 @@ export async function createTenantOwner(
   opts: {
     ids?: { tenantId: string; userId: string };
     verification?: { id: string; tokenHash: string; expiresAt: string; delivery: PreparedEmailDelivery };
+    legalAcceptance?: PreparedLegalAcceptance | null;
   } = {},
 ) {
   const sql = await database(db);
@@ -115,9 +117,16 @@ export async function createTenantOwner(
         (id,dedupe_key,kind,status,attempts,recipient_hmac,payload_ciphertext,payload_sha256,next_attempt_at,expires_at,created_at,updated_at)
        select $15,$16,$17,'pending',0,$18,$19,$20,now(),$21,now(),now() from verification
        returning id
+     ), legal_acceptance as (
+       insert into relay_legal_acceptances
+        (id,user_id,tenant_id,terms_version,privacy_version,bundle_sha256,ip_hmac,user_agent_hmac,acceptance_method,accepted_at)
+       select $22,inserted_user.id,inserted_tenant.id,$23,$24,$25,$26,$27,$28,now()
+         from inserted_user cross join inserted_tenant where $22::text is not null
+       returning id
      )
-     select inserted_membership.tenant_id,inserted_membership.user_id,queued_delivery.id as delivery_id
-       from inserted_membership left join queued_delivery on true`,
+     select inserted_membership.tenant_id,inserted_membership.user_id,queued_delivery.id as delivery_id,
+            legal_acceptance.id as legal_acceptance_id
+       from inserted_membership left join queued_delivery on true left join legal_acceptance on true`,
     [
       userId, input.email.trim(), email, ownerName, passwordHash, tenantId, slug, tenantName, currency,
       input.userStatus || "active", input.emailVerified !== false,
@@ -125,10 +134,15 @@ export async function createTenantOwner(
       verification?.delivery.id || null, verification?.delivery.dedupeKey || null, verification?.delivery.kind || null,
       verification?.delivery.recipientHmac || null, verification?.delivery.payloadCiphertext || null,
       verification?.delivery.payloadSha256 || null, verification?.delivery.expiresAt || null,
+      opts.legalAcceptance?.id || null, opts.legalAcceptance?.termsVersion || null,
+      opts.legalAcceptance?.privacyVersion || null, opts.legalAcceptance?.bundleSha256 || null,
+      opts.legalAcceptance?.ipHmac || null, opts.legalAcceptance?.userAgentHmac || null,
+      opts.legalAcceptance?.method || null,
     ],
   );
   if (!rows[0]) throw new Error("租户创建失败");
   if (verification && rows[0].delivery_id !== verification.delivery.id) throw new Error("EMAIL_OUTBOX_ENQUEUE_FAILED");
+  if (opts.legalAcceptance && rows[0].legal_acceptance_id !== opts.legalAcceptance.id) throw new Error("LEGAL_ACCEPTANCE_RECORD_FAILED");
   return { tenantId, userId, slug, email };
 }
 
@@ -757,7 +771,7 @@ export async function publishPrice(
 
 export async function commercialAdminSnapshot(db?: DbLike) {
   const sql = await database(db);
-  const [tenants, plans, planPeriods, prices, orders, transactions, alerts, paymentEvents, refunds, disputes, tenantAudits, emailDeliveries] = await Promise.all([
+  const [tenants, plans, planPeriods, prices, orders, transactions, alerts, paymentEvents, refunds, disputes, tenantAudits, emailDeliveries, legalAcceptances] = await Promise.all([
     sql.query<Record<string, unknown>>("select * from relay_tenants order by created_at desc limit 500"),
     sql.query<Record<string, unknown>>("select * from relay_plans order by created_at asc"),
     sql.query<Record<string, unknown>>("select * from relay_plan_periods order by period_start desc limit 500"),
@@ -795,6 +809,11 @@ export async function commercialAdminSnapshot(db?: DbLike) {
               delivered_at,expires_at,http_status,error_code,created_at,updated_at
          from relay_email_deliveries order by created_at desc limit 300`,
     ),
+    sql.query<Record<string, unknown>>(
+      `select id,user_id,tenant_id,terms_version,privacy_version,bundle_sha256,
+              ip_hmac,user_agent_hmac,acceptance_method,accepted_at
+         from relay_legal_acceptances order by accepted_at desc,id desc limit 500`,
+    ),
   ]);
-  return { tenants, plans, planPeriods, prices, orders, transactions, alerts, paymentEvents, refunds, disputes, tenantAudits, emailDeliveries };
+  return { tenants, plans, planPeriods, prices, orders, transactions, alerts, paymentEvents, refunds, disputes, tenantAudits, emailDeliveries, legalAcceptances };
 }
