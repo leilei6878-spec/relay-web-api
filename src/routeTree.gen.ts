@@ -38,6 +38,7 @@ import { Route as SaasInviteRouteImport } from './routes/saas/invite'
 import { Route as SaasLoginRouteImport } from './routes/saas/login'
 import { Route as SaasPrivacyCenterRouteImport } from './routes/saas/privacy-center'
 import { Route as SaasResetRouteImport } from './routes/saas/reset'
+import { Route as SaasSecurityCenterRouteImport } from './routes/saas/security-center'
 import { Route as SaasVerifyRouteImport } from './routes/saas/verify'
 import { Route as V1ModelsRouteImport } from './routes/v1/models'
 import { Route as V1ResponsesRouteImport } from './routes/v1/responses'
@@ -66,6 +67,7 @@ import { Route as ApiSaasLegalRouteImport } from './routes/api/saas/legal'
 import { Route as ApiSaasMembersRouteImport } from './routes/api/saas/members'
 import { Route as ApiSaasPrivacyRouteImport } from './routes/api/saas/privacy'
 import { Route as ApiSaasReadinessRouteImport } from './routes/api/saas/readiness'
+import { Route as ApiSaasSecurityRouteImport } from './routes/api/saas/security'
 import { Route as ApiSaasSessionRouteImport } from './routes/api/saas/session'
 import { Route as ApiWebhooksStripeRouteImport } from './routes/api/webhooks/stripe'
 import { Route as ApiWorkerAccountInspectionsRouteImport } from './routes/api/worker/account-inspections'
@@ -224,6 +226,11 @@ const SaasResetRoute = SaasResetRouteImport.update({
   path: '/saas/reset',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SaasSecurityCenterRoute = SaasSecurityCenterRouteImport.update({
+  id: '/saas/security-center',
+  path: '/saas/security-center',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SaasVerifyRoute = SaasVerifyRouteImport.update({
   id: '/saas/verify',
   path: '/saas/verify',
@@ -369,6 +376,11 @@ const ApiSaasReadinessRoute = ApiSaasReadinessRouteImport.update({
   path: '/api/saas/readiness',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSaasSecurityRoute = ApiSaasSecurityRouteImport.update({
+  id: '/api/saas/security',
+  path: '/api/saas/security',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSaasSessionRoute = ApiSaasSessionRouteImport.update({
   id: '/api/saas/session',
   path: '/api/saas/session',
@@ -461,6 +473,7 @@ export interface FileRoutesByFullPath {
   '/saas/login': typeof SaasLoginRoute
   '/saas/privacy-center': typeof SaasPrivacyCenterRoute
   '/saas/reset': typeof SaasResetRoute
+  '/saas/security-center': typeof SaasSecurityCenterRoute
   '/saas/verify': typeof SaasVerifyRoute
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
@@ -489,6 +502,7 @@ export interface FileRoutesByFullPath {
   '/api/saas/members': typeof ApiSaasMembersRoute
   '/api/saas/privacy': typeof ApiSaasPrivacyRoute
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
+  '/api/saas/security': typeof ApiSaasSecurityRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/webhooks/stripe': typeof ApiWebhooksStripeRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
@@ -532,6 +546,7 @@ export interface FileRoutesByTo {
   '/saas/login': typeof SaasLoginRoute
   '/saas/privacy-center': typeof SaasPrivacyCenterRoute
   '/saas/reset': typeof SaasResetRoute
+  '/saas/security-center': typeof SaasSecurityCenterRoute
   '/saas/verify': typeof SaasVerifyRoute
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
@@ -560,6 +575,7 @@ export interface FileRoutesByTo {
   '/api/saas/members': typeof ApiSaasMembersRoute
   '/api/saas/privacy': typeof ApiSaasPrivacyRoute
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
+  '/api/saas/security': typeof ApiSaasSecurityRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/webhooks/stripe': typeof ApiWebhooksStripeRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
@@ -604,6 +620,7 @@ export interface FileRoutesById {
   '/saas/login': typeof SaasLoginRoute
   '/saas/privacy-center': typeof SaasPrivacyCenterRoute
   '/saas/reset': typeof SaasResetRoute
+  '/saas/security-center': typeof SaasSecurityCenterRoute
   '/saas/verify': typeof SaasVerifyRoute
   '/v1/models': typeof V1ModelsRoute
   '/v1/responses': typeof V1ResponsesRoute
@@ -632,6 +649,7 @@ export interface FileRoutesById {
   '/api/saas/members': typeof ApiSaasMembersRoute
   '/api/saas/privacy': typeof ApiSaasPrivacyRoute
   '/api/saas/readiness': typeof ApiSaasReadinessRoute
+  '/api/saas/security': typeof ApiSaasSecurityRoute
   '/api/saas/session': typeof ApiSaasSessionRoute
   '/api/webhooks/stripe': typeof ApiWebhooksStripeRoute
   '/api/worker/account-inspections': typeof ApiWorkerAccountInspectionsRoute
@@ -677,6 +695,7 @@ export interface FileRouteTypes {
     | '/saas/login'
     | '/saas/privacy-center'
     | '/saas/reset'
+    | '/saas/security-center'
     | '/saas/verify'
     | '/v1/models'
     | '/v1/responses'
@@ -705,6 +724,7 @@ export interface FileRouteTypes {
     | '/api/saas/members'
     | '/api/saas/privacy'
     | '/api/saas/readiness'
+    | '/api/saas/security'
     | '/api/saas/session'
     | '/api/webhooks/stripe'
     | '/api/worker/account-inspections'
@@ -748,6 +768,7 @@ export interface FileRouteTypes {
     | '/saas/login'
     | '/saas/privacy-center'
     | '/saas/reset'
+    | '/saas/security-center'
     | '/saas/verify'
     | '/v1/models'
     | '/v1/responses'
@@ -776,6 +797,7 @@ export interface FileRouteTypes {
     | '/api/saas/members'
     | '/api/saas/privacy'
     | '/api/saas/readiness'
+    | '/api/saas/security'
     | '/api/saas/session'
     | '/api/webhooks/stripe'
     | '/api/worker/account-inspections'
@@ -819,6 +841,7 @@ export interface FileRouteTypes {
     | '/saas/login'
     | '/saas/privacy-center'
     | '/saas/reset'
+    | '/saas/security-center'
     | '/saas/verify'
     | '/v1/models'
     | '/v1/responses'
@@ -847,6 +870,7 @@ export interface FileRouteTypes {
     | '/api/saas/members'
     | '/api/saas/privacy'
     | '/api/saas/readiness'
+    | '/api/saas/security'
     | '/api/saas/session'
     | '/api/webhooks/stripe'
     | '/api/worker/account-inspections'
@@ -891,6 +915,7 @@ export interface RootRouteChildren {
   SaasLoginRoute: typeof SaasLoginRoute
   SaasPrivacyCenterRoute: typeof SaasPrivacyCenterRoute
   SaasResetRoute: typeof SaasResetRoute
+  SaasSecurityCenterRoute: typeof SaasSecurityCenterRoute
   SaasVerifyRoute: typeof SaasVerifyRoute
   V1ModelsRoute: typeof V1ModelsRoute
   V1ResponsesRoute: typeof V1ResponsesRoute
@@ -919,6 +944,7 @@ export interface RootRouteChildren {
   ApiSaasMembersRoute: typeof ApiSaasMembersRoute
   ApiSaasPrivacyRoute: typeof ApiSaasPrivacyRoute
   ApiSaasReadinessRoute: typeof ApiSaasReadinessRoute
+  ApiSaasSecurityRoute: typeof ApiSaasSecurityRoute
   ApiSaasSessionRoute: typeof ApiSaasSessionRoute
   ApiWebhooksStripeRoute: typeof ApiWebhooksStripeRoute
   ApiWorkerAccountInspectionsRoute: typeof ApiWorkerAccountInspectionsRoute
@@ -1138,6 +1164,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SaasResetRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/saas/security-center': {
+      id: '/saas/security-center'
+      path: '/saas/security-center'
+      fullPath: '/saas/security-center'
+      preLoaderRoute: typeof SaasSecurityCenterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/saas/verify': {
       id: '/saas/verify'
       path: '/saas/verify'
@@ -1334,6 +1367,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSaasReadinessRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/saas/security': {
+      id: '/api/saas/security'
+      path: '/api/saas/security'
+      fullPath: '/api/saas/security'
+      preLoaderRoute: typeof ApiSaasSecurityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/saas/session': {
       id: '/api/saas/session'
       path: '/api/saas/session'
@@ -1451,6 +1491,7 @@ const rootRouteChildren: RootRouteChildren = {
   SaasLoginRoute: SaasLoginRoute,
   SaasPrivacyCenterRoute: SaasPrivacyCenterRoute,
   SaasResetRoute: SaasResetRoute,
+  SaasSecurityCenterRoute: SaasSecurityCenterRoute,
   SaasVerifyRoute: SaasVerifyRoute,
   V1ModelsRoute: V1ModelsRoute,
   V1ResponsesRoute: V1ResponsesRoute,
@@ -1479,6 +1520,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSaasMembersRoute: ApiSaasMembersRoute,
   ApiSaasPrivacyRoute: ApiSaasPrivacyRoute,
   ApiSaasReadinessRoute: ApiSaasReadinessRoute,
+  ApiSaasSecurityRoute: ApiSaasSecurityRoute,
   ApiSaasSessionRoute: ApiSaasSessionRoute,
   ApiWebhooksStripeRoute: ApiWebhooksStripeRoute,
   ApiWorkerAccountInspectionsRoute: ApiWorkerAccountInspectionsRoute,

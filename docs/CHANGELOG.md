@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0-rc21 — customer session security (2026-08-31)
+
+- Personal device/session inventory with IP, bounded User-Agent, current-device
+  marker, activity, expiry, MFA and revocation metadata—never token/CSRF hashes.
+- User-scoped single-device and all-other-device revocation with durable reason
+  and tenant audit evidence.
+- MFA recovery-code rotation replaces the hash set, displays new codes once and
+  revokes every other active session.
+- Independent security center remains reachable during legal re-consent and
+  tenant suspension while ordinary SaaS APIs remain denied.
+- Privacy export now includes non-secret session metadata required for data
+  portability.
+
 ## 0.10.0-rc20 — tenant privacy rights (2026-08-31)
 
 - Owner-only, tenant-scoped JSON export with exact response SHA-256 and no

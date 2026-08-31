@@ -26,7 +26,8 @@ not already hold.
   bounded 1–168). An older session receives `MFA_STEP_UP_REQUIRED` and must log
   in again.
 - The customer Portal shows whether the current privileged session requires
-  step-up and exposes TOTP enrollment.
+  step-up and exposes TOTP enrollment. `/saas/security-center` remains
+  available when legal re-consent is pending or the tenant is suspended.
 
 ## Recovery codes
 
@@ -38,6 +39,12 @@ exactly one successful session. A consumed or unknown code returns the same
 
 Recovery codes must be stored offline. Password reset revokes all existing
 sessions but does not silently disable MFA.
+
+An MFA-verified user can rotate all eight recovery codes. Rotation replaces the
+hash set atomically, returns plaintext only once and revokes every other active
+session. The current verified session remains active so the user can safely
+store the new codes. Session inventory and revocation never return token or
+CSRF hashes.
 
 ## Activation
 

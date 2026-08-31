@@ -24,9 +24,10 @@ SHA-256 in `X-Relay-Export-SHA256`; the same digest, payload size and immutable
 event are recorded without retaining a second copy of the export.
 
 The archive contains the requesting user, tenant/member directory, non-secret
-API-key metadata, orders, balanced ledger rows, usage charges, plan periods,
-legal acceptances, tenant audits and prior privacy requests/events. Every query
-is bound to the authenticated tenant. It deliberately excludes:
+session IP/device/activity/revocation metadata, non-secret API-key metadata,
+orders, balanced ledger rows, usage charges, plan periods, legal acceptances,
+tenant audits and prior privacy requests/events. Every query is bound to the
+authenticated tenant. It deliberately excludes:
 
 - password, session, verification and API-key hashes;
 - MFA secrets and recovery-code hashes;

@@ -36,7 +36,7 @@ export function SaasShell({
           <nav className="flex items-center gap-1 text-xs text-muted">
             <a href="/portal#overview" className="rounded px-3 py-2 hover:bg-elevated"><CreditCard className="mr-1 inline size-3.5" />账务</a>
             <a href="/portal#keys" className="rounded px-3 py-2 hover:bg-elevated"><KeyRound className="mr-1 inline size-3.5" />密钥</a>
-            <a href="/portal#security" className="rounded px-3 py-2 hover:bg-elevated"><ShieldCheck className="mr-1 inline size-3.5" />安全</a>
+            <a href="/saas/security-center" className="rounded px-3 py-2 hover:bg-elevated"><ShieldCheck className="mr-1 inline size-3.5" />安全</a>
             <a href="/saas/privacy-center" className="rounded px-3 py-2 hover:bg-elevated"><Download className="mr-1 inline size-3.5" />数据权利</a>
           </nav>
           <div className="flex items-center gap-3">

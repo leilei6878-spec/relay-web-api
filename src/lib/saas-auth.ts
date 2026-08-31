@@ -341,7 +341,8 @@ export async function resetSaasPassword(token: string, password: string, request
        update relay_saas_users u set password_hash=$2,status='active',email_verified_at=coalesce(email_verified_at,now()),updated_at=now()
         from consumed c where u.id=c.user_id returning u.id
      ), revoked as (
-       update relay_saas_sessions s set revoked_at=now() from updated u where s.user_id=u.id and s.revoked_at is null
+       update relay_saas_sessions s set revoked_at=now(),revoked_reason='password_reset'
+        from updated u where s.user_id=u.id and s.revoked_at is null
      ) select id as user_id from updated`,
     [sha256(token), hashSaasPassword(password)],
   );
@@ -442,6 +443,10 @@ export async function getSaasSession(request: Request, db?: DbLike, opts: { allo
   );
   const row = rows[0];
   if (!row) return null;
+  await sql.query(
+    "update relay_saas_sessions set last_seen_at=now() where id=$1 and last_seen_at<now()-interval '5 minutes'",
+    [row.session_id],
+  );
   const legalAcceptanceRequired = !await userHasCurrentLegalAcceptance(String(row.user_id), String(row.tenant_id), process.env, sql);
   return {
     sessionId: String(row.session_id),
@@ -495,7 +500,10 @@ export async function logoutSaas(request: Request, db?: DbLike) {
   const token = cookie(request, SAAS_SESSION_COOKIE);
   if (token) {
     const sql = await database(db);
-    await sql.query("update relay_saas_sessions set revoked_at=now() where token_hash=$1 and revoked_at is null", [sha256(token)]);
+    await sql.query(
+      "update relay_saas_sessions set revoked_at=now(),revoked_reason='logout' where token_hash=$1 and revoked_at is null",
+      [sha256(token)],
+    );
   }
   return clearSaasCookies(request);
 }

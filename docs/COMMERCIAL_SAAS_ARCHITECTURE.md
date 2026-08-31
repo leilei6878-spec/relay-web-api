@@ -45,6 +45,11 @@ official-provider usage/asset settlement paths are authoritative.
   a fresh session-level proof when commercial mode is enabled; enabling MFA on
   one session does not upgrade older sessions. See
   [`TENANT_PRIVILEGED_MFA.md`](./TENANT_PRIVILEGED_MFA.md).
+- Every user can inspect their own recent session device/IP/activity metadata,
+  revoke one or all other devices, and rotate hash-only recovery codes. Session
+  inventory never returns token/CSRF hashes; all mutations are CSRF/Origin
+  protected and tenant-audited. Security access remains available during legal
+  re-consent or tenant suspension while service APIs remain closed.
 - Tenant API keys are 256-bit `sk-saas-*` secrets, shown once and hash-only at
   rest. Listing returns hints only.
 - Administrator browsers receive short-lived random `as-relay-*` sessions;

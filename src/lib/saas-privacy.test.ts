@@ -56,12 +56,20 @@ test("tenant export is complete, tenant-scoped, hash-bound and omits credential/
      values ('privacy-charge-a',$1,'privacy-request-a','openai','gpt-test','chat','settled',$2::jsonb)`,
     [a.tenantId, JSON.stringify({ providerResultCiphertext: "encrypted-provider-secret", safe: "not exported either" })],
   );
+  await pg.query(
+    `insert into relay_saas_sessions
+      (id,user_id,tenant_id,token_hash,csrf_hash,ip_address,user_agent,expires_at,mfa_verified_at)
+     values ('privacy-export-session',$1,$2,$3,$4,'203.0.113.44','Export Browser',now()+interval '1 day',now())`,
+    [a.userId, a.tenantId, sha256("export-session-token-secret"), sha256("export-session-csrf-secret")],
+  );
   const exported = await createTenantDataExport(a.tenantId, a.userId, { RELAY_PRIVACY_EXPORT_MAX_MIB: "5" } as NodeJS.ProcessEnv, db);
   const text = exported.bytes.toString("utf8");
   assert.equal(sha256(text), exported.sha256);
   assert.match(text, new RegExp(a.email));
+  assert.match(text, /203\.0\.113\.44/);
+  assert.match(text, /Export Browser/);
   assert.doesNotMatch(text, new RegExp(b.email));
-  assert.doesNotMatch(text, /secret-password-hash|sk-saas-secret-value|encrypted-provider-secret|key_hash|password_hash|ip_hmac|user_agent_hmac/);
+  assert.doesNotMatch(text, /secret-password-hash|sk-saas-secret-value|encrypted-provider-secret|export-session-token-secret|export-session-csrf-secret|key_hash|password_hash|token_hash|csrf_hash|ip_hmac|user_agent_hmac/);
   assert.equal(exported.payload.schema, "relay-tenant-export-v1");
   const stored = await pg.query<{ status: string; snapshot_sha256: string }>("select status,snapshot_sha256 from relay_privacy_requests where id=$1", [exported.request?.id]);
   assert.deepEqual(stored.rows, [{ status: "completed", snapshot_sha256: exported.sha256 }]);

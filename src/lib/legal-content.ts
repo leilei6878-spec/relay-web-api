@@ -1,4 +1,4 @@
-export const LEGAL_CONTENT_REVISION = "relay-legal-2026-08-31-2";
+export const LEGAL_CONTENT_REVISION = "relay-legal-2026-08-31-3";
 
 export type LegalPublicMetadata = {
   configured: boolean;
@@ -26,6 +26,6 @@ export const LEGAL_PRIVACY_SECTIONS = [
   ["处理目的", "用于身份验证、租户隔离、提供官方 AI API、计量计费、反滥用、故障排查、客户支持和履行法律义务。"],
   ["第三方处理方", "请求内容会按客户选择发送至 OpenAI、Google 或 Leonardo 的官方商业接口。各供应商按其商业条款与隐私政策处理数据。平台不会把商业客户请求发送到内部网页账号池。"],
   ["保留期限", "请求内容默认 30 天后脱敏；失效 Session 默认保留 30 天；运营检查默认 90 天；商业审计默认 365 天；账务流水默认保留 7 年或法律要求的更长期限。对象存储采用相匹配的生命周期规则。"],
-  ["安全", "采用 HTTPS、HttpOnly Session、CSRF/Origin 校验、角色权限、TOTP MFA、租户级哈希密钥、加密密钥存储、追加式账本、告警和异地备份。"],
+  ["安全", "采用 HTTPS、HttpOnly Session、CSRF/Origin 校验、角色权限、TOTP MFA、租户级哈希密钥、加密密钥存储、追加式账本、告警和异地备份。客户可查看自身会话的 IP/设备/活动时间、撤销其他设备并轮换一次性恢复码。"],
   ["数据主体权利", "租户 Owner 可在通过近期 MFA 后自助导出可校验的数据档案，或申请关停租户。关停具有可撤销冷静期，余额、预授权、退款或拒付未清时保持阻塞；执行后撤销访问并最小化适用个人信息。依法必须保存的账务、法律接受、风控和安全审计记录按规定期限继续保留。"],
 ] as const;
