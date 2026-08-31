@@ -22,7 +22,7 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
   if (env === process.env) env = await effectiveCommercialEnv(env, db);
   const policy = retentionPolicy(env);
   const sql = db || await getSql();
-  const [chargeResults, jobs, sessions, pendingMfa, checks, usage, checkoutUrls, audit, alerts, invitations, emails] = await Promise.all([
+  const [chargeResults, jobs, sessions, pendingMfa, expiredKeyCredentials, checks, usage, checkoutUrls, audit, alerts, invitations, emails] = await Promise.all([
     sql.query<{ count: number }>(
       `with updated as (
          update relay_usage_charges set extra=extra-'providerResultCiphertext'
@@ -53,6 +53,13 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
       `with updated as (
          update relay_saas_users set mfa_pending_secret_ciphertext=null,mfa_pending_expires_at=null,updated_at=now()
           where mfa_pending_secret_ciphertext is not null and mfa_pending_expires_at<now() returning id
+       ) select count(*)::int as count from updated`,
+    ),
+    sql.query<{ count: number }>(
+      `with updated as (
+         update relay_tenant_api_keys set previous_key_hash=null,previous_key_expires_at=null,updated_at=now()
+          where previous_key_hash is not null
+            and (previous_key_expires_at<=now() or revoked_at is not null or enabled=false) returning id
        ) select count(*)::int as count from updated`,
     ),
     sql.query<{ count: number }>(
@@ -117,6 +124,7 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
     redactedJobs: Number(jobs[0]?.count || 0),
     deletedSessions: Number(sessions[0]?.count || 0),
     clearedExpiredMfaEnrollments: Number(pendingMfa[0]?.count || 0),
+    clearedExpiredApiKeyCredentials: Number(expiredKeyCredentials[0]?.count || 0),
     deletedChecks: Number(checks[0]?.count || 0),
     redactedUsage: Number(usage[0]?.count || 0),
     redactedChargeResults: Number(chargeResults[0]?.count || 0),

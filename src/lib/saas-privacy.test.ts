@@ -108,6 +108,10 @@ test("due closure blocks on money, then atomically revokes access and pseudonymi
     [a.tenantId, sha256("close-key"), a.userId],
   );
   await pg.query(
+    "update relay_tenant_api_keys set previous_key_hash=$1,previous_key_expires_at=now()+interval '1 day',rotated_at=now(),rotation_count=1 where id='privacy-close-key'",
+    [sha256("close-previous-key")],
+  );
+  await pg.query(
     `insert into relay_saas_sessions(id,user_id,tenant_id,token_hash,csrf_hash,expires_at,mfa_verified_at)
      values ('privacy-close-session',$1,$2,$3,$4,now()+interval '1 day',now())`,
     [a.userId, a.tenantId, sha256("session"), sha256("csrf")],
@@ -136,8 +140,8 @@ test("due closure blocks on money, then atomically revokes access and pseudonymi
   await pg.query("update relay_tenants set balance_minor=0 where id=$1", [a.tenantId]);
   const completed = await processDueTenantClosures(db);
   assert.deepEqual(completed, { examined: 1, completed: 1, blocked: 0 });
-  const state = await pg.query<{ tenant_status: string; user_status: string; email: string; membership_status: string; key_enabled: boolean; revoked_at: string | null }>(
-    `select t.status as tenant_status,u.status as user_status,u.email,m.status as membership_status,k.enabled as key_enabled,s.revoked_at
+  const state = await pg.query<{ tenant_status: string; user_status: string; email: string; membership_status: string; key_enabled: boolean; previous_key_hash: string | null; revoked_at: string | null }>(
+    `select t.status as tenant_status,u.status as user_status,u.email,m.status as membership_status,k.enabled as key_enabled,k.previous_key_hash,s.revoked_at
        from relay_tenants t join relay_tenant_memberships m on m.tenant_id=t.id
        join relay_saas_users u on u.id=m.user_id join relay_tenant_api_keys k on k.tenant_id=t.id
        join relay_saas_sessions s on s.tenant_id=t.id where t.id=$1`,
@@ -148,6 +152,7 @@ test("due closure blocks on money, then atomically revokes access and pseudonymi
   assert.match(state.rows[0]?.email || "", /^closed\+/);
   assert.equal(state.rows[0]?.membership_status, "disabled");
   assert.equal(state.rows[0]?.key_enabled, false);
+  assert.equal(state.rows[0]?.previous_key_hash, null);
   assert.ok(state.rows[0]?.revoked_at);
   const scrubbed = await pg.query<{ invite_email: string; payload_ciphertext: string }>(
     `select i.email as invite_email,d.payload_ciphertext from relay_tenant_invites i

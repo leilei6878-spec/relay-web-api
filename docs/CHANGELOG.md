@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.0-rc27 — tenant API-key rotation (2026-08-31)
+
+- MFA-forced atomic rotation returns a fresh key once while retaining one
+  previous hash for a bounded 5-minute–7-day overlap window.
+- Current-hash CAS and a 60-second database cooldown give concurrent rotation
+  one winner; HTTP 429 includes `Retry-After: 60`.
+- Effective overlap cannot exceed the key's own expiry; expired keys cannot
+  rotate, and later rotation evicts the older previous credential.
+- Revoke, tenant closure and retention clear previous credential hashes.
+- Portal exposes role-correct create/rotate controls for scope, model allowlist,
+  expiry, RPM, concurrency, daily requests and monthly spend; the server bounds
+  every value independently.
+
 ## 0.10.0-rc26 — tenant invitation lifecycle (2026-08-31)
 
 - Owner/Admin can list tenant-scoped invitation state without token hashes,

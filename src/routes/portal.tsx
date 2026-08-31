@@ -38,6 +38,16 @@ function date(value: unknown) {
   return new Date(String(value)).toLocaleString("zh-CN", { hour12: false });
 }
 
+function keyIsActive(key: Record<string, unknown>) {
+  return Boolean(key.enabled) && !key.revoked_at && (!key.expires_at || Date.parse(String(key.expires_at)) > Date.now());
+}
+
+function keyState(key: Record<string, unknown>) {
+  if (key.revoked_at) return "撤销";
+  if (key.expires_at && Date.parse(String(key.expires_at)) <= Date.now()) return "过期";
+  return key.enabled ? "启用" : "停用";
+}
+
 function Portal() {
   const [session, setSession] = useState<SessionBody | null>(null);
   const [billing, setBilling] = useState<BillingBody | null>(null);
@@ -101,7 +111,7 @@ function Portal() {
           <Stat icon={<CreditCard className="size-4" />} label="预授权中" value={money(billing.tenant.reservedMinor, billing.tenant.currency)} />
           <Stat icon={<WalletCards className="size-4" />} label="套餐额度" value={money(billing.tenant.includedBalanceMinor - billing.tenant.includedReservedMinor, billing.tenant.currency)} />
           <Stat icon={<CheckCircle2 className="size-4" />} label="当前套餐" value={billing.tenant.planId} />
-          <Stat icon={<KeyRound className="size-4" />} label="有效密钥" value={String(keys.filter((key) => key.enabled && !key.revoked_at).length)} />
+          <Stat icon={<KeyRound className="size-4" />} label="有效密钥" value={String(keys.filter(keyIsActive).length)} />
         </section>
 
         <section className="rounded-xl border border-border bg-surface">
@@ -113,9 +123,9 @@ function Portal() {
         <section className="rounded-xl border border-border bg-surface"><div className="border-b border-border px-5 py-4"><h2 className="font-medium">套餐账期历史</h2><p className="mt-1 text-xs text-subtle">每个账期只有一条不可修改记录；未使用的包含额度在续费时到期。</p></div><Rows rows={billing.planPeriods} empty="尚未结算套餐账期" render={(row) => <><div><p className="text-sm font-medium">{String(row.plan_id)} · {date(row.period_start)} – {date(row.period_end)}</p><p className="text-xs text-subtle">月费 {money(row.monthly_fee_minor, String(row.currency))} · 发放 {money(row.included_credit_minor, String(row.currency))} · 到期 {money(row.expired_credit_minor, String(row.currency))}</p></div><Badge tone="ok">{String(row.status)}</Badge></>} /></section>
 
         <section id="keys" className="rounded-xl border border-border bg-surface">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4"><div><h2 className="font-medium">API 密钥</h2><p className="mt-1 text-xs text-subtle">完整密钥只显示一次，服务器只保存 SHA-256 哈希。</p></div><CreateKeyDialog onCreated={load} /></div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4"><div><h2 className="font-medium">API 密钥</h2><p className="mt-1 text-xs text-subtle">完整密钥只显示一次，服务器只保存 SHA-256 哈希；轮换可保留短期旧凭证窗口。</p></div>{["owner", "admin", "developer"].includes(session.tenant.role) ? <CreateKeyDialog currency={billing.tenant.currency} onCreated={load} /> : null}</div>
           <div className="divide-y divide-border">
-            {keys.map((key) => <div key={String(key.id)} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 text-sm"><div><p className="font-medium">{String(key.name)}</p><p className="mt-1 font-mono text-xs text-muted">{String(key.key_hint)}</p><p className="mt-1 text-[11px] text-subtle">权限 {(key.scopes as string[] || []).join(" · ")} · 最近使用 {date(key.last_used_at)}</p></div><div className="flex items-center gap-2"><Badge tone={key.enabled && !key.revoked_at ? "ok" : "default"}>{key.enabled && !key.revoked_at ? "启用" : "停用"}</Badge>{key.enabled && !key.revoked_at ? <Button variant="destructive" size="sm" onClick={() => void revokeKey(String(key.id), load)}>撤销</Button> : null}</div></div>)}
+            {keys.map((key) => <div key={String(key.id)} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 text-sm"><div><p className="font-medium">{String(key.name)}</p><p className="mt-1 font-mono text-xs text-muted">{String(key.key_hint)}</p><p className="mt-1 text-[11px] text-subtle">权限 {(key.scopes as string[] || []).join(" · ")} · 到期 {date(key.expires_at)} · 最近使用 {date(key.last_used_at)}</p><p className="mt-1 text-[11px] text-subtle">RPM {Number(key.requests_per_minute || 0) || "套餐"} · 并发 {Number(key.concurrency_limit || 0) || "套餐"} · 日请求 {Number(key.daily_request_limit || 0) || "套餐"} · 月预算 {Number(key.monthly_spend_limit_minor || 0) ? money(key.monthly_spend_limit_minor, billing.tenant.currency) : "套餐"}{key.previous_key_expires_at ? ` · 旧凭证到 ${date(key.previous_key_expires_at)}` : ""}</p></div><div className="flex items-center gap-2"><Badge tone={keyIsActive(key) ? "ok" : "default"}>{keyState(key)}</Badge>{keyIsActive(key) && ["owner", "admin", "developer"].includes(session.tenant.role) ? <><RotateKeyDialog apiKey={key} onRotated={load} /><Button variant="destructive" size="sm" onClick={() => void revokeKey(String(key.id), load)}>撤销</Button></> : null}</div></div>)}
             {!keys.length ? <p className="px-5 py-8 text-center text-sm text-subtle">尚未创建 API 密钥</p> : null}
           </div>
         </section>
@@ -166,18 +176,42 @@ async function schedulePlan(planId: string, reload: () => Promise<void>) {
   toast.success("套餐变更已安排在下一账期生效"); await reload();
 }
 
-function CreateKeyDialog({ onCreated }: { onCreated: () => Promise<void> }) {
+function CreateKeyDialog({ currency, onCreated }: { currency: string; onCreated: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("Production");
   const [models, setModels] = useState("");
+  const [scopeMode, setScopeMode] = useState("both");
+  const [expiresDays, setExpiresDays] = useState("90");
+  const [rpm, setRpm] = useState("0");
+  const [concurrency, setConcurrency] = useState("0");
+  const [daily, setDaily] = useState("0");
+  const [monthlySpend, setMonthlySpend] = useState("0");
   const [secret, setSecret] = useState("");
   async function create() {
-    const response = await fetch("/api/saas/keys", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ name, scopes: ["chat", "image"], modelAllowlist: models.split(",").map((item) => item.trim()).filter(Boolean) }) });
+    const days = Number(expiresDays);
+    const scopes = scopeMode === "chat" ? ["chat"] : scopeMode === "image" ? ["image"] : ["chat", "image"];
+    const response = await fetch("/api/saas/keys", { method: "POST", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({
+      name, scopes, modelAllowlist: models.split(",").map((item) => item.trim()).filter(Boolean),
+      expiresAt: days > 0 ? new Date(Date.now() + days * 86_400_000).toISOString() : null,
+      requestsPerMinute: Number(rpm), concurrencyLimit: Number(concurrency), dailyRequestLimit: Number(daily),
+      monthlySpendLimitMinor: Math.round(Number(monthlySpend) * 100),
+    }) });
     const body = await response.json() as { secret?: string; error?: string };
     if (!response.ok || !body.secret) { toast.error(body.error || "创建失败"); return; }
     setSecret(body.secret); await onCreated();
   }
-  return <Dialog open={open} onOpenChange={(value) => { setOpen(value); if (!value) setSecret(""); }}><DialogTrigger asChild><Button size="sm"><Plus className="size-3.5" />新建密钥</Button></DialogTrigger><DialogContent title="新建租户 API 密钥">{secret ? <div><p className="text-sm text-warn">完整密钥只显示这一次，请立即保存。</p><p className="mt-3 break-all rounded-md bg-elevated p-3 font-mono text-xs">{secret}</p><Button className="mt-3 w-full" onClick={() => { void navigator.clipboard.writeText(secret); toast.success("已复制"); }}><Copy className="size-4" />复制密钥</Button></div> : <div className="space-y-3"><Field label="名称"><Input value={name} onChange={(event) => setName(event.target.value)} /></Field><Field label="模型白名单（逗号分隔，留空允许套餐模型）"><Input value={models} onChange={(event) => setModels(event.target.value)} placeholder="openai:gpt-5-mini, google:gemini-3.7-flash" /></Field><Button className="w-full" onClick={() => void create()}>创建</Button></div>}</DialogContent></Dialog>;
+  return <Dialog open={open} onOpenChange={(value) => { setOpen(value); if (!value) setSecret(""); }}><DialogTrigger asChild><Button size="sm"><Plus className="size-3.5" />新建密钥</Button></DialogTrigger><DialogContent title="新建租户 API 密钥">{secret ? <div><p className="text-sm text-warn">完整密钥只显示这一次，请立即保存。</p><p className="mt-3 break-all rounded-md bg-elevated p-3 font-mono text-xs">{secret}</p><Button className="mt-3 w-full" onClick={() => { void navigator.clipboard.writeText(secret); toast.success("已复制"); }}><Copy className="size-4" />复制密钥</Button></div> : <div className="space-y-3"><Field label="名称"><Input value={name} onChange={(event) => setName(event.target.value)} /></Field><Field label="权限"><select className="h-11 w-full rounded-sm border border-border bg-elevated px-3 text-sm" value={scopeMode} onChange={(event) => setScopeMode(event.target.value)}><option value="both">Chat + Image</option><option value="chat">仅 Chat</option><option value="image">仅 Image</option></select></Field><Field label="模型白名单（逗号分隔，留空允许套餐模型）"><Input value={models} onChange={(event) => setModels(event.target.value)} placeholder="openai:gpt-5-mini, google:gemini-3.7-flash" /></Field><div className="grid grid-cols-2 gap-3"><Field label="有效天数（0=长期）"><Input type="number" min="0" max="730" value={expiresDays} onChange={(event) => setExpiresDays(event.target.value)} /></Field><Field label="RPM（0=套餐）"><Input type="number" min="0" value={rpm} onChange={(event) => setRpm(event.target.value)} /></Field><Field label="并发（0=套餐）"><Input type="number" min="0" value={concurrency} onChange={(event) => setConcurrency(event.target.value)} /></Field><Field label="日请求（0=套餐）"><Input type="number" min="0" value={daily} onChange={(event) => setDaily(event.target.value)} /></Field></div><Field label={`月预算（${currency}，0=套餐）`}><Input type="number" min="0" step="0.01" value={monthlySpend} onChange={(event) => setMonthlySpend(event.target.value)} /></Field><Button className="w-full" onClick={() => void create()}>创建</Button></div>}</DialogContent></Dialog>;
+}
+
+function RotateKeyDialog({ apiKey, onRotated }: { apiKey: Record<string, unknown>; onRotated: () => Promise<void> }) {
+  const [open, setOpen] = useState(false); const [hours, setHours] = useState("24"); const [secret, setSecret] = useState(""); const [previousValidUntil, setPreviousValidUntil] = useState("");
+  async function rotate() {
+    const response = await fetch("/api/saas/keys", { method: "PATCH", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ id: apiKey.id, graceSeconds: Math.round(Number(hours) * 3600) }) });
+    const body = await response.json() as { secret?: string; error?: string; key?: { previousValidUntil?: string } };
+    if (!response.ok || !body.secret) { toast.error(response.status === 429 ? "轮换过于频繁，请 60 秒后重试" : body.error || "轮换失败"); return; }
+    setSecret(body.secret); setPreviousValidUntil(body.key?.previousValidUntil || ""); await onRotated();
+  }
+  return <Dialog open={open} onOpenChange={(value) => { setOpen(value); if (!value) { setSecret(""); setPreviousValidUntil(""); } }}><DialogTrigger asChild><Button variant="secondary" size="sm">轮换</Button></DialogTrigger><DialogContent title={`轮换 ${String(apiKey.name)}`}>{secret ? <div><p className="text-sm text-warn">新密钥只显示一次。旧密钥可用到 {date(previousValidUntil)}，请在此前完成替换。</p><p className="mt-3 break-all rounded-md bg-elevated p-3 font-mono text-xs">{secret}</p><Button className="mt-3 w-full" onClick={() => { void navigator.clipboard.writeText(secret); toast.success("已复制"); }}><Copy className="size-4" />复制新密钥</Button></div> : <div className="space-y-3"><p className="text-sm text-muted">新密钥立即生效；旧密钥仅在重叠窗口内继续可用。再次轮换会立即淘汰更早的旧密钥。</p><Field label="旧密钥重叠小时数（5 分钟–7 天）"><Input type="number" min="0.0834" max="168" step="0.5" value={hours} onChange={(event) => setHours(event.target.value)} /></Field><Button className="w-full" variant="destructive" onClick={() => void rotate()}>生成并轮换</Button></div>}</DialogContent></Dialog>;
 }
 
 function RechargeDialog({ currency, onCreated }: { currency: string; onCreated: () => Promise<void> }) {

@@ -7,6 +7,9 @@ import { cachedCommercialReadiness } from "./commercial-readiness";
 import { tenantHasCurrentLegalAcceptance } from "./legal-documents";
 
 type DbLike = Pick<Sql, "query">;
+const KEY_ROTATION_COOLDOWN_MS = 60_000;
+const MIN_ROTATION_GRACE_SECONDS = 5 * 60;
+const MAX_ROTATION_GRACE_SECONDS = 7 * 24 * 60 * 60;
 
 async function database(db?: DbLike) {
   return db || getSql();
@@ -41,6 +44,22 @@ function mapKey(row: Record<string, unknown>): CommercialApiKey {
     monthlySpendLimitMinor: Number(row.monthly_spend_limit_minor || row.plan_monthly_spend || 0),
     expiresAt: row.expires_at instanceof Date ? row.expires_at.toISOString() : typeof row.expires_at === "string" ? row.expires_at : null,
   };
+}
+
+function boundedLimit(value: number | undefined, maximum: number, label: string) {
+  const number = Number(value ?? 0);
+  if (!Number.isFinite(number) || number < 0 || number > maximum) throw new Error(`${label}_INVALID`);
+  return Math.floor(number);
+}
+
+function boundedExpiry(value: string | null | undefined) {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  const now = Date.now();
+  if (!Number.isFinite(timestamp) || timestamp < now + 5 * 60_000 || timestamp > now + 2 * 365 * 24 * 60 * 60_000) {
+    throw new Error("API_KEY_EXPIRY_INVALID");
+  }
+  return new Date(timestamp).toISOString();
 }
 
 export async function createTenantApiKey(
@@ -88,11 +107,11 @@ export async function createTenantApiKey(
       hint,
       scopes,
       allowlist,
-      Math.max(0, Math.floor(input.requestsPerMinute || 0)),
-      Math.max(0, Math.floor(input.concurrencyLimit || 0)),
-      Math.max(0, Math.floor(input.dailyRequestLimit || 0)),
-      Math.max(0, Math.floor(input.monthlySpendLimitMinor || 0)),
-      input.expiresAt || null,
+      boundedLimit(input.requestsPerMinute, 1_000_000, "API_KEY_RPM"),
+      boundedLimit(input.concurrencyLimit, 10_000, "API_KEY_CONCURRENCY"),
+      boundedLimit(input.dailyRequestLimit, 1_000_000_000, "API_KEY_DAILY_LIMIT"),
+      boundedLimit(input.monthlySpendLimitMinor, 1_000_000_000_000, "API_KEY_SPEND_LIMIT"),
+      boundedExpiry(input.expiresAt),
       input.createdBy || null,
       input.tenantId,
     ],
@@ -121,7 +140,8 @@ export async function findTenantApiKey(
        from relay_tenant_api_keys k
        join relay_tenants t on t.id=k.tenant_id
        join relay_plans p on p.id=t.plan_id
-      where k.key_hash=$1 and k.enabled=true and k.revoked_at is null
+      where (k.key_hash=$1 or (k.previous_key_hash=$1 and k.previous_key_expires_at>now()))
+        and k.enabled=true and k.revoked_at is null
         and (k.expires_at is null or k.expires_at > now())
       limit 1`,
     [sha256(token)],
@@ -135,7 +155,8 @@ export async function listTenantApiKeys(tenantId: string, db?: DbLike) {
   const sql = await database(db);
   return sql.query<Record<string, unknown>>(
     `select id,name,key_prefix,key_hint,enabled,scopes,model_allowlist,requests_per_minute,
-            concurrency_limit,daily_request_limit,monthly_spend_limit_minor,expires_at,last_used_at,created_at,revoked_at
+            concurrency_limit,daily_request_limit,monthly_spend_limit_minor,expires_at,last_used_at,created_at,revoked_at,
+            previous_key_expires_at,rotated_at,rotation_count,updated_at
        from relay_tenant_api_keys where tenant_id=$1 order by created_at desc`,
     [tenantId],
   );
@@ -144,10 +165,57 @@ export async function listTenantApiKeys(tenantId: string, db?: DbLike) {
 export async function revokeTenantApiKey(tenantId: string, keyId: string, db?: DbLike) {
   const sql = await database(db);
   const rows = await sql.query<{ id: string }>(
-    "update relay_tenant_api_keys set enabled=false,revoked_at=now() where id=$1 and tenant_id=$2 and revoked_at is null returning id",
+    `update relay_tenant_api_keys set enabled=false,revoked_at=now(),previous_key_hash=null,
+       previous_key_expires_at=null,updated_at=now()
+      where id=$1 and tenant_id=$2 and revoked_at is null returning id`,
     [keyId, tenantId],
   );
   return Boolean(rows[0]);
+}
+
+export async function rotateTenantApiKey(
+  tenantId: string,
+  keyId: string,
+  graceSeconds = 24 * 60 * 60,
+  db?: DbLike,
+) {
+  const grace = Math.floor(Number(graceSeconds));
+  if (!Number.isFinite(grace) || grace < MIN_ROTATION_GRACE_SECONDS || grace > MAX_ROTATION_GRACE_SECONDS) {
+    throw new Error("API_KEY_ROTATION_GRACE_INVALID");
+  }
+  const sql = await database(db);
+  const current = (await sql.query<{ key_hash: string; rotated_at: string | Date | null }>(
+    `select key_hash,rotated_at from relay_tenant_api_keys
+      where id=$1 and tenant_id=$2 and enabled=true and revoked_at is null
+        and (expires_at is null or expires_at>now())`,
+    [keyId, tenantId],
+  ))[0];
+  if (!current) throw new Error("API_KEY_NOT_ROTATABLE");
+  if (current.rotated_at && Date.now() - new Date(current.rotated_at).getTime() < KEY_ROTATION_COOLDOWN_MS) {
+    throw new Error("API_KEY_ROTATION_COOLDOWN");
+  }
+  const token = `sk-saas-${secureToken(32)}`;
+  const prefix = token.slice(0, 16);
+  const hint = `${prefix}…${token.slice(-4)}`;
+  const rows = await sql.query<{ id: string; previous_key_expires_at: string | Date }>(
+    `update relay_tenant_api_keys set previous_key_hash=key_hash,
+       previous_key_expires_at=least(now()+($5::text||' seconds')::interval,coalesce(expires_at,'infinity'::timestamptz)),
+       key_hash=$3,key_prefix=$4,key_hint=$6,rotated_at=now(),rotation_count=rotation_count+1,updated_at=now()
+      where id=$1 and tenant_id=$2 and key_hash=$7 and enabled=true and revoked_at is null
+        and (expires_at is null or expires_at>now())
+        and (rotated_at is null or rotated_at<=now()-interval '60 seconds')
+      returning id,previous_key_expires_at`,
+    [keyId, tenantId, sha256(token), prefix, grace, hint, current.key_hash],
+  );
+  if (!rows[0]) throw new Error("API_KEY_CONCURRENTLY_CHANGED");
+  return {
+    id: keyId,
+    token,
+    hint,
+    previousValidUntil: rows[0].previous_key_expires_at instanceof Date
+      ? rows[0].previous_key_expires_at.toISOString()
+      : String(rows[0].previous_key_expires_at),
+  };
 }
 
 export async function enforceCommercialKeyLimits(

@@ -7,7 +7,9 @@ import {
   createTenantApiKey,
   enforceCommercialKeyLimits,
   findTenantApiKey,
+  listTenantApiKeys,
   revokeTenantApiKey,
+  rotateTenantApiKey,
 } from "./saas-api-keys.ts";
 import { legalDocumentMetadata } from "./legal-documents.ts";
 
@@ -16,7 +18,7 @@ async function database() {
   await pg.waitReady;
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
-    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql", "0019_legal_reconsent.sql", "0020_tenant_privacy_rights.sql", "0021_customer_session_security.sql", "0022_staged_mfa_enrollment.sql", "0023_customer_password_change.sql", "0024_tenant_switching.sql", "0025_tenant_ownership.sql", "0026_tenant_invitation_lifecycle.sql",
+    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql", "0019_legal_reconsent.sql", "0020_tenant_privacy_rights.sql", "0021_customer_session_security.sql", "0022_staged_mfa_enrollment.sql", "0023_customer_password_change.sql", "0024_tenant_switching.sql", "0025_tenant_ownership.sql", "0026_tenant_invitation_lifecycle.sql", "0027_tenant_api_key_rotation.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return {
     pg,
@@ -56,6 +58,75 @@ test("commercial API keys are hash-only, tenant-scoped and revocable", async () 
   if (!spent.ok) assert.equal(spent.error, "MONTHLY_SPEND_LIMIT_REACHED");
   assert.equal(await revokeTenantApiKey(owner.tenantId, created.id, db), true);
   assert.equal(await findTenantApiKey(created.token, db), null);
+  await pg.close();
+});
+
+test("tenant API-key rotation has bounded overlap, one concurrent winner and no secret listing", async () => {
+  const { pg, db } = await database();
+  const owner = await createTenantOwner(
+    { tenantName: "Key Rotation Co", ownerName: "Owner", email: "rotation-owner@example.test", password: "rotation-password-123" },
+    db,
+  );
+  await assert.rejects(
+    () => createTenantApiKey({ tenantId: owner.tenantId, createdBy: owner.userId, name: "Expired", expiresAt: new Date(Date.now() - 60_000).toISOString() }, db),
+    /API_KEY_EXPIRY_INVALID/,
+  );
+  await assert.rejects(
+    () => createTenantApiKey({ tenantId: owner.tenantId, createdBy: owner.userId, name: "Unbounded", concurrencyLimit: 10_001 }, db),
+    /API_KEY_CONCURRENCY_INVALID/,
+  );
+  await assert.rejects(
+    () => createTenantApiKey({ tenantId: owner.tenantId, createdBy: owner.userId, name: "Not a number", requestsPerMinute: Number.NaN }, db),
+    /API_KEY_RPM_INVALID/,
+  );
+  const created = await createTenantApiKey({ tenantId: owner.tenantId, createdBy: owner.userId, name: "Rotating", expiresAt: new Date(Date.now() + 86_400_000).toISOString() }, db);
+  const first = await rotateTenantApiKey(owner.tenantId, created.id, 300, db);
+  assert.notEqual(first.token, created.token);
+  assert.equal((await findTenantApiKey(created.token, db))?.id, created.id);
+  assert.equal((await findTenantApiKey(first.token, db))?.id, created.id);
+  await assert.rejects(() => rotateTenantApiKey(owner.tenantId, created.id, 300, db), /API_KEY_ROTATION_COOLDOWN/);
+  await assert.rejects(() => rotateTenantApiKey(owner.tenantId, created.id, 0, db), /API_KEY_ROTATION_GRACE_INVALID/);
+
+  const listed = (await listTenantApiKeys(owner.tenantId, db))[0]!;
+  assert.equal(Number(listed.rotation_count), 1);
+  assert.ok(listed.previous_key_expires_at);
+  assert.equal("key_hash" in listed, false);
+  assert.equal("previous_key_hash" in listed, false);
+  assert.ok(!JSON.stringify(listed).includes(first.token));
+
+  await pg.query("update relay_tenant_api_keys set rotated_at=now()-interval '2 minutes' where id=$1", [created.id]);
+  const concurrent = await Promise.allSettled([
+    rotateTenantApiKey(owner.tenantId, created.id, 300, db),
+    rotateTenantApiKey(owner.tenantId, created.id, 300, db),
+  ]);
+  assert.equal(concurrent.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(concurrent.filter((result) => result.status === "rejected").length, 1);
+  const winner = concurrent.find((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof rotateTenantApiKey>>> => result.status === "fulfilled")!.value;
+  assert.equal(await findTenantApiKey(created.token, db), null);
+  assert.equal((await findTenantApiKey(first.token, db))?.id, created.id);
+  assert.equal((await findTenantApiKey(winner.token, db))?.id, created.id);
+  await pg.query("update relay_tenant_api_keys set previous_key_expires_at=now()-interval '1 second' where id=$1", [created.id]);
+  assert.equal(await findTenantApiKey(first.token, db), null);
+  assert.equal(await revokeTenantApiKey(owner.tenantId, created.id, db), true);
+  assert.equal(await findTenantApiKey(winner.token, db), null);
+  const revoked = await pg.query<{ previous_key_hash: string | null; previous_key_expires_at: string | null }>(
+    "select previous_key_hash,previous_key_expires_at from relay_tenant_api_keys where id=$1",
+    [created.id],
+  );
+  assert.deepEqual(revoked.rows[0], { previous_key_hash: null, previous_key_expires_at: null });
+
+  const shortExpiry = new Date(Date.now() + 10 * 60_000).toISOString();
+  const short = await createTenantApiKey({ tenantId: owner.tenantId, createdBy: owner.userId, name: "Short", expiresAt: shortExpiry }, db);
+  const shortRotation = await rotateTenantApiKey(owner.tenantId, short.id, 24 * 60 * 60, db);
+  assert.ok(Date.parse(shortRotation.previousValidUntil) <= Date.parse(shortExpiry));
+  await pg.query("update relay_tenant_api_keys set expires_at=now()-interval '1 second',rotated_at=now()-interval '2 minutes' where id=$1", [short.id]);
+  await assert.rejects(() => rotateTenantApiKey(owner.tenantId, short.id, 300, db), /API_KEY_NOT_ROTATABLE/);
+
+  const route = await readFile("src/routes/api/saas/keys.ts", "utf8");
+  assert.match(route, /api_key\.rotate/);
+  assert.match(route, /forceMfa: true/);
+  assert.match(route, /API_KEY_ROTATION_COOLDOWN[\s\S]*429/);
+  assert.match(route, /"Retry-After": "60"/);
   await pg.close();
 });
 

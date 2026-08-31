@@ -74,7 +74,11 @@ official-provider usage/asset settlement paths are authoritative.
   revokes all other user sessions. Distributed rate-limit failure is
   fail-closed and audit detail never contains password material.
 - Tenant API keys are 256-bit `sk-saas-*` secrets, shown once and hash-only at
-  rest. Listing returns hints only.
+  rest. Listing returns hints only. Rotation uses current-hash CAS, unconditional
+  MFA and one bounded previous-credential overlap slot; revoke/closure/retention
+  clear that slot. Per-key scope, model, expiry, rate, concurrency, daily and
+  spend controls are independently server-bounded. See
+  [`TENANT_API_KEY_ROTATION.md`](./TENANT_API_KEY_ROTATION.md).
 - Administrator browsers receive short-lived random `as-relay-*` sessions;
   PostgreSQL stores only their hashes. The `ad-relay-*` root token is
   loopback-only recovery/machine authentication in production. Commercial

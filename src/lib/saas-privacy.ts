@@ -60,7 +60,8 @@ async function tenantExportSections(tenantId: string, userId: string, sql: DbLik
       ) x),'[]'::jsonb),
       'apiKeys',coalesce((select jsonb_agg(to_jsonb(x) order by x.created_at,x.id) from (
         select id,name,key_prefix,key_hint,enabled,scopes,model_allowlist,requests_per_minute,concurrency_limit,
-               daily_request_limit,monthly_spend_limit_minor,expires_at,last_used_at,created_by,created_at,revoked_at
+               daily_request_limit,monthly_spend_limit_minor,expires_at,last_used_at,created_by,created_at,revoked_at,
+               previous_key_expires_at,rotated_at,rotation_count,updated_at
           from relay_tenant_api_keys where tenant_id=$1
       ) x),'[]'::jsonb),
       'orders',coalesce((select jsonb_agg(to_jsonb(x) order by x.created_at,x.id) from (
@@ -275,7 +276,8 @@ async function completeTenantClosure(requestId: string, db?: DbLike) {
         from candidate c where t.id=c.tenant_id and c.effective_blocker is null
        returning t.id
      ), revoked_keys as (
-       update relay_tenant_api_keys k set enabled=false,revoked_at=coalesce(revoked_at,now())
+       update relay_tenant_api_keys k set enabled=false,revoked_at=coalesce(revoked_at,now()),
+         previous_key_hash=null,previous_key_expires_at=null,updated_at=now()
         from closed_tenant t where k.tenant_id=t.id and (k.enabled or k.revoked_at is null) returning k.id
      ), revoked_sessions as (
        update relay_saas_sessions s set revoked_at=coalesce(revoked_at,now()),

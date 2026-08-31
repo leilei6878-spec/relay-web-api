@@ -1,6 +1,6 @@
 # Upgrade
 
-Schema is the ordered set of `migrations/*.sql`. Current `SCHEMA_VERSION` is **26**
+Schema is the ordered set of `migrations/*.sql`. Current `SCHEMA_VERSION` is **27**
 (`src/lib/release.ts`, row `relay_meta.schema_version`).
 
 ## Procedure (release N → N+1)

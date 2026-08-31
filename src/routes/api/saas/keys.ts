@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertSaasSession } from "@/lib/saas-auth";
-import { createTenantApiKey, listTenantApiKeys, revokeTenantApiKey } from "@/lib/saas-api-keys";
+import { createTenantApiKey, listTenantApiKeys, revokeTenantApiKey, rotateTenantApiKey } from "@/lib/saas-api-keys";
 import { auditedTenantMutation } from "@/lib/tenant-audit";
 import type { CommercialCapability } from "@/lib/commercial-types";
 
@@ -42,6 +42,23 @@ export const Route = createFileRoute("/api/saas/keys")({
           return Response.json({ ok: false, error: message }, { status: message === "TENANT_AUDIT_UNAVAILABLE" ? 503 : 400 });
         }
       },
+      PATCH: async ({ request }) => {
+        const auth = await assertSaasSession(request, ["owner", "admin", "developer"], { requireCsrf: true, requireMfa: true });
+        if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
+        const body = (await request.json().catch(() => ({}))) as { id?: string; graceSeconds?: number };
+        const rotationAuth = await assertSaasSession(request, ["owner", "admin", "developer"], { requireCsrf: true, forceMfa: true });
+        if (!rotationAuth.ok) return Response.json({ error: rotationAuth.error }, { status: rotationAuth.status });
+        try {
+          const graceSeconds = Number(body.graceSeconds ?? 24 * 60 * 60);
+          const rotated = await auditedTenantMutation(request, rotationAuth.session, {
+            action: "api_key.rotate", targetType: "api_key", targetId: body.id || null,
+            detail: { overlapSeconds: graceSeconds },
+          }, () => rotateTenantApiKey(rotationAuth.session.tenantId, body.id || "", graceSeconds));
+          return Response.json({ ok: true, key: { id: rotated.id, hint: rotated.hint, previousValidUntil: rotated.previousValidUntil }, secret: rotated.token });
+        } catch (error) {
+          return keyErrorResponse(error instanceof Error ? error.message : "KEY_ROTATE_FAILED");
+        }
+      },
       DELETE: async ({ request }) => {
         const auth = await assertSaasSession(request, ["owner", "admin", "developer"], { requireCsrf: true, requireMfa: true });
         if (!auth.ok) return Response.json({ error: auth.error }, { status: auth.status });
@@ -59,3 +76,11 @@ export const Route = createFileRoute("/api/saas/keys")({
     },
   },
 });
+
+function keyErrorResponse(message: string) {
+  const status = message === "TENANT_AUDIT_UNAVAILABLE" ? 503 : message === "API_KEY_ROTATION_COOLDOWN" ? 429 : 400;
+  return Response.json({ ok: false, error: message }, {
+    status,
+    headers: status === 429 ? { "Retry-After": "60" } : undefined,
+  });
+}
