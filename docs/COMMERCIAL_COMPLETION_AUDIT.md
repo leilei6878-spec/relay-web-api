@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc23`
-- schema: `23`
-- runtime commit: `d38e5d51ea57d1fad914bbba74ada3207640215b`
+- production version: `0.10.0-rc24`
+- schema: `24`
+- runtime commit: `e676f7cb6d15766e10fbdff72150dad71c593df1`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -20,14 +20,14 @@ complete when only design intent or a narrow test exists.
 |---|---|---|
 | Commercial traffic uses only official/authorized upstreams | `commercial-gateway.ts` resolves only `openai:`, `google:`, `vertex:` and `leonardo:` official models; route-order tests prove the branch executes before web-account selection | Code complete; real upstream production calls blocked by missing contracts/credentials |
 | Existing web pool remains internal | Separate `sk-relay-*` and `sk-saas-*` principals; commercial gateway has no Worker/account selector import | Complete |
-| Tenants, users, RBAC, MFA and legal re-consent | Five roles and privileged step-up; legal/suspension-safe session inventory/revocation/recovery rotation; staged non-downgrading MFA replacement; self-service password change verifies old scrypt secret/fresh MFA, rate-limits, compare-swaps, clears pending MFA and revokes other sessions | Complete in code/dark launch; real privileged-user multi-device/credential and reviewed re-consent drill pending |
+| Tenants, users, RBAC, MFA and legal re-consent | Five roles and privileged step-up; session/credential/MFA lifecycle; users list only their memberships and switch tenants via atomic session rotation; foreign target leaves source intact, concurrent switch has one winner, original MFA timestamp is preserved and target legal state recomputed | Complete in code/dark launch; real multi-tenant/credential/re-consent drill pending |
 | Hash-only tenant API keys | 256-bit one-time secret, SHA-256 lookup, hints-only listing, revocation and tenant scoping; paid keys fail until an active Owner/Admin accepts the exact current legal bundle | Complete |
 | Plans and limits | Plan features intersect key scopes/models; disjoint model sets deny all; plan/key RPM, concurrency, daily and monthly limits; customer/admin next-period changes; hash-bound plan-review evidence | Complete |
 | Monthly billing periods | Unique append-only UTC periods atomically debit monthly fee, expire old credit, grant new credit, snapshot plan and append balanced ledger; hourly retry/monitoring and concurrent replay tests | Complete |
 | Prepaid balance and idempotent orders | Refundable cash and non-refundable included credit use separate balances/holds; included-first usage split; row locks, manual/Stripe orders and provider/request/period idempotency | Complete |
 | Immutable usage/funds ledger | Append-only transaction/entry triggers, equal-and-opposite entries, tax/cash/wallet settlement and replay tests | Complete |
 | Token/image/model pricing | Versioned price book, integer minor-unit calculation, authoritative provider usage/count settlement | Complete in code; live provider pricing still absent |
-| Customer self-service and commercial admin UI | Login/register/reset/verification, keys, balance, usage, members, Checkout; tenant/price/order/refund/dispute/admin controls; browser QA | Complete |
+| Customer self-service and commercial admin UI | Login/register/reset/verification, multi-tenant selector, session/security/privacy centers, keys, balance, usage, members and Checkout; tenant/price/order/refund/dispute/admin controls | Complete in code/dark launch; real multi-tenant selector QA pending |
 | Official provider adapters and sandbox | OpenAI, Gemini API, Vertex AI and Leonardo request/usage adapters; every active provider requires its own current credential; cost-capped sandbox; append-only content-minimising provider/model/capability/currency Live evidence | Code and dark-launch acceptance complete; live Canary acceptance still requires contracts, credentials and reviewed prices |
 | Tenant data isolation | Tenant-bound sessions/keys, tenant-filtered history/usage and no commercial exposure of account/Worker/proxy topology | Complete |
 | CSRF/Origin, network identity and session security | Customer HttpOnly/Secure cookies, CSRF double submit and session-level fresh MFA for high-risk mutations; trusted Origin checks; one explicit edge-overwritten client-IP header with competing-header rejection and production fail-closed readiness; administrator SHA-256-only short sessions, Strict cookies, revoke/logout, distributed login throttle and loopback-only root recovery | Complete |
@@ -40,12 +40,12 @@ complete when only design intent or a narrow test exists.
 | CI/CD release gates | Full-history workflow runs tests/type/lint/build/audit; pinned Actions/images; contiguous schema/migration and exact-commit contract; production CycloneDX SBOM; commit/tree/file hashes and root release-manifest digest; commit-named retained artifact | Gate passed locally and on production; authoritative GitHub execution still unavailable while push is denied |
 | HA production topology | Versioned contract requires 2 Gateways, 2 Workers, managed multi-AZ PostgreSQL/Redis and replicated object storage | Not deployed; current host is one Gateway, one Worker and one VPS data plane |
 | Offsite backup and recovery | Opt-in PostgreSQL-16/Node/Git/`mc` runner; complete Git check; S3 object path/size/SHA-256 manifest; upload then remote re-download/byte verification; root manifest digest; standalone downloaded-snapshot verifier; same-host isolated full restore drill below | Tooling and same-host recovery proven; distinct-account/region target and genuine offsite restore evidence missing |
-| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema23, dedicated Scheduler, privacy closure, security center, staged MFA/password change, alert/email Outboxes and immutable legal/privacy evidence; public legal metadata remains unconfigured/unapproved; hard gates and zero unintended tenant/session/pending-MFA/financial/email/legal/privacy rows verified | Dark launch complete; public charging deliberately disabled |
+| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema24, Scheduler, privacy/security/credential/multi-tenant session lifecycle, alert/email Outboxes and immutable legal/privacy evidence; public legal metadata remains unconfigured/unapproved; hard gates and zero unintended tenant/membership/session/financial/legal/privacy rows verified | Dark launch complete; public charging deliberately disabled |
 
 ## Final recovery drill
 
 Latest accepted backup:
-`/opt/backups/relay-password-change-final-20260831142156`
+`/opt/backups/relay-tenant-switch-final-20260831145016`
 
 The first rc10 environment update contained an incorrect full commit suffix.
 Independent Git-bundle validation detected it; the Gateway was rebuilt from
@@ -70,10 +70,10 @@ The corrected backup then passed the complete drill:
 - all SHA-256 checks: pass;
 - PostgreSQL custom dump restored into an isolated database: pass;
 - live/restored database signature comparison: pass;
-- restored schema: 23;
+- restored schema: 24;
 - restored public tables: 49;
 - restored accounts: 5;
-- restored administrator/customer sessions and pending MFA candidates: 0 / 0 / 0;
+- restored administrator/customer sessions, memberships and pending MFA candidates: 0 / 0 / 0 / 0;
 - restored plans: 2; plan periods: 0;
 - `information_schema` trigger rows: 21;
 - restored evidence/sandbox/configuration/tenant/order/ledger/tenant-audit/legal-acceptance/privacy rows: 0;
