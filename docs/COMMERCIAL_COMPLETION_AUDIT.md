@@ -8,9 +8,9 @@ complete when only design intent or a narrow test exists.
 
 ## Current release
 
-- production version: `0.10.0-rc18`
-- schema: `18`
-- runtime commit: `9146eccd33036752e1a53bf4d4029c0f7809fa27`
+- production version: `0.10.0-rc19`
+- schema: `19`
+- runtime commit: `ae8392b2e48ae6af674d8b767fee5b87b8025347`
 - deployment mode: dark launch; registration, commercial traffic, payment and
   tax modes are disabled
 
@@ -20,8 +20,8 @@ complete when only design intent or a narrow test exists.
 |---|---|---|
 | Commercial traffic uses only official/authorized upstreams | `commercial-gateway.ts` resolves only `openai:`, `google:`, `vertex:` and `leonardo:` official models; route-order tests prove the branch executes before web-account selection | Code complete; real upstream production calls blocked by missing contracts/credentials |
 | Existing web pool remains internal | Separate `sk-relay-*` and `sk-saas-*` principals; commercial gateway has no Worker/account selector import | Complete |
-| Tenants, users, RBAC and MFA | SQL tenant/user/membership/session/invite schema; owner/admin/billing/developer/viewer gates; session-level TOTP proof, bounded freshness, atomic one-time recovery and privileged mutation step-up | Complete in code/dark launch; real privileged-user enrollment pending |
-| Hash-only tenant API keys | 256-bit one-time secret, SHA-256 lookup, hints-only listing, revocation and tenant scoping tests | Complete |
+| Tenants, users, RBAC, MFA and legal re-consent | SQL tenant/user/membership/session/invite schema; owner/admin/billing/developer/viewer gates; TOTP proof and privileged step-up; stale legal bundles restrict normal session APIs while consent/logout remain reachable; Login/Portal redirect to explicit re-consent | Complete in code/dark launch; real privileged-user enrollment and reviewed re-consent drill pending |
+| Hash-only tenant API keys | 256-bit one-time secret, SHA-256 lookup, hints-only listing, revocation and tenant scoping; paid keys fail until an active Owner/Admin accepts the exact current legal bundle | Complete |
 | Plans and limits | Plan features intersect key scopes/models; disjoint model sets deny all; plan/key RPM, concurrency, daily and monthly limits; customer/admin next-period changes; hash-bound plan-review evidence | Complete |
 | Monthly billing periods | Unique append-only UTC periods atomically debit monthly fee, expire old credit, grant new credit, snapshot plan and append balanced ledger; hourly retry/monitoring and concurrent replay tests | Complete |
 | Prepaid balance and idempotent orders | Refundable cash and non-refundable included credit use separate balances/holds; included-first usage split; row locks, manual/Stripe orders and provider/request/period idempotency | Complete |
@@ -40,12 +40,12 @@ complete when only design intent or a narrow test exists.
 | CI/CD release gates | Full-history workflow runs tests/type/lint/build/audit; pinned Actions/images; schema/17-migration and exact-commit contract; production CycloneDX SBOM; commit/tree/file hashes and root release-manifest digest; commit-named retained artifact | Gate passed locally and on production; authoritative GitHub execution still unavailable while push is denied |
 | HA production topology | Versioned contract requires 2 Gateways, 2 Workers, managed multi-AZ PostgreSQL/Redis and replicated object storage | Not deployed; current host is one Gateway, one Worker and one VPS data plane |
 | Offsite backup and recovery | Opt-in PostgreSQL-16/Node/Git/`mc` runner; complete Git check; S3 object path/size/SHA-256 manifest; upload then remote re-download/byte verification; root manifest digest; standalone downloaded-snapshot verifier; same-host isolated full restore drill below | Tooling and same-host recovery proven; distinct-account/region target and genuine offsite restore evidence missing |
-| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema18, dedicated scheduler, alert/email Outboxes and immutable legal acceptance ledger; public legal metadata remains explicitly unconfigured/unapproved; remote-root denial, MFA, plan-period, provider and tenant-audit probes, hard gates and zero unintended tenant/financial/email/legal rows verified | Dark launch complete; public charging deliberately disabled |
+| Production deployment and acceptance | HTTPS runtime reports exact release/schema; schema19, dedicated scheduler, alert/email Outboxes, immutable legal ledger and re-consent/session/paid-key gates; public legal metadata remains unconfigured/unapproved; hard gates and zero unintended tenant/financial/email/legal rows verified | Dark launch complete; public charging deliberately disabled |
 
 ## Final recovery drill
 
 Latest accepted backup:
-`/opt/backups/relay-legal-acceptance-final-20260831025159`
+`/opt/backups/relay-legal-reconsent-final-20260831032656`
 
 The first rc10 environment update contained an incorrect full commit suffix.
 Independent Git-bundle validation detected it; the Gateway was rebuilt from
@@ -70,7 +70,7 @@ The corrected backup then passed the complete drill:
 - all SHA-256 checks: pass;
 - PostgreSQL custom dump restored into an isolated database: pass;
 - live/restored database signature comparison: pass;
-- restored schema: 18;
+- restored schema: 19;
 - restored public tables: 47;
 - restored accounts: 5;
 - restored administrator sessions: 0;
@@ -79,7 +79,7 @@ The corrected backup then passed the complete drill:
 - restored evidence/sandbox/configuration/tenant/order/ledger/tenant-audit/legal-acceptance rows: 0;
 - restored alert/delivery/email/scheduler rows: 1 / 1 / 0 / 1;
 - required filesystem storage manifest: 231 files;
-- MinIO S3 API export: 102 objects / 46,172,450 bytes, restored with an exact
+- MinIO S3 API export: 104 objects / 48,523,532 bytes, restored with an exact
   per-object SHA-256 manifest;
 - independent Git clone/fsck and exact HEAD comparison: pass;
 - temporary database and restore directories removed after the drill.
