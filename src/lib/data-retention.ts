@@ -22,7 +22,7 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
   if (env === process.env) env = await effectiveCommercialEnv(env, db);
   const policy = retentionPolicy(env);
   const sql = db || await getSql();
-  const [chargeResults, jobs, sessions, checks, usage, checkoutUrls, audit, alerts, emails] = await Promise.all([
+  const [chargeResults, jobs, sessions, pendingMfa, checks, usage, checkoutUrls, audit, alerts, emails] = await Promise.all([
     sql.query<{ count: number }>(
       `with updated as (
          update relay_usage_charges set extra=extra-'providerResultCiphertext'
@@ -48,6 +48,12 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
           returning id
        ) select count(*)::int as count from deleted`,
       [policy.sessionDays],
+    ),
+    sql.query<{ count: number }>(
+      `with updated as (
+         update relay_saas_users set mfa_pending_secret_ciphertext=null,mfa_pending_expires_at=null,updated_at=now()
+          where mfa_pending_secret_ciphertext is not null and mfa_pending_expires_at<now() returning id
+       ) select count(*)::int as count from updated`,
     ),
     sql.query<{ count: number }>(
       `with deleted as (
@@ -100,6 +106,7 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
     policy,
     redactedJobs: Number(jobs[0]?.count || 0),
     deletedSessions: Number(sessions[0]?.count || 0),
+    clearedExpiredMfaEnrollments: Number(pendingMfa[0]?.count || 0),
     deletedChecks: Number(checks[0]?.count || 0),
     redactedUsage: Number(usage[0]?.count || 0),
     redactedChargeResults: Number(chargeResults[0]?.count || 0),

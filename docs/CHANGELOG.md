@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0-rc22 — staged MFA replacement (2026-08-31)
+
+- TOTP candidates are encrypted separately with a ten-minute expiry; starting
+  replacement never disables the active factor or recovery codes.
+- Existing-factor replacement requires a recent MFA session at both start and
+  confirmation.
+- Confirmation atomically promotes the candidate, rotates recovery hashes,
+  refreshes the current proof and revokes all other sessions.
+- Wrong/expired/abandoned candidates keep the old factor active; retention,
+  password reset and tenant closure clear expired/pending Secrets.
+
 ## 0.10.0-rc21 — customer session security (2026-08-31)
 
 - Personal device/session inventory with IP, bounded User-Agent, current-device

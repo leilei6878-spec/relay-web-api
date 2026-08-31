@@ -20,8 +20,9 @@ not already hold.
 
 - Password-only sessions store no MFA timestamp.
 - TOTP and one-time recovery-code logins create a verified session.
-- Confirming MFA marks only the enrollment session as verified; sessions
-  created before enrollment remain unverified.
+- Confirming MFA marks the enrollment session as verified and revokes every
+  other active session, so pre-enrollment browsers cannot survive a factor
+  change.
 - Verification is accepted for `RELAY_SAAS_MFA_MAX_AGE_HOURS` (default 24,
   bounded 1–168). An older session receives `MFA_STEP_UP_REQUIRED` and must log
   in again.
@@ -45,6 +46,16 @@ hash set atomically, returns plaintext only once and revokes every other active
 session. The current verified session remains active so the user can safely
 store the new codes. Session inventory and revocation never return token or
 CSRF hashes.
+
+## Safe authenticator replacement
+
+Starting enrollment writes a separate encrypted candidate with a ten-minute
+expiry. It never changes the active Secret, `mfa_enabled` or existing recovery
+codes. Replacing an existing authenticator requires a recently MFA-verified
+session for both start and confirmation. Successful confirmation atomically
+promotes the exact candidate, rotates recovery hashes and revokes all other
+sessions; expiry or abandonment leaves the old factor active. See
+[`STAGED_MFA_ENROLLMENT.md`](./STAGED_MFA_ENROLLMENT.md).
 
 ## Activation
 

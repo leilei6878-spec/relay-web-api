@@ -44,7 +44,7 @@ async function database() {
   await pg.waitReady;
   for (const name of [
     "0001_relay.sql", "0002_relay_ops.sql", "0003_relay_production.sql", "0004_schema_meta.sql",
-    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql", "0019_legal_reconsent.sql", "0020_tenant_privacy_rights.sql", "0021_customer_session_security.sql",
+    "0005_account_operations.sql", "0006_account_availability_samples.sql", "0007_commercial_saas.sql", "0008_commercial_payments.sql", "0009_commercial_config.sql", "0010_provider_sandbox.sql", "0011_commercial_launch_evidence.sql", "0012_admin_sessions.sql", "0013_plan_periods.sql", "0014_saas_session_mfa.sql", "0015_tenant_audit.sql", "0016_alert_delivery_outbox.sql", "0017_email_delivery_outbox.sql", "0018_legal_acceptance.sql", "0019_legal_reconsent.sql", "0020_tenant_privacy_rights.sql", "0021_customer_session_security.sql", "0022_staged_mfa_enrollment.sql",
   ]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return {
     pg,
@@ -184,18 +184,27 @@ test("MFA enrollment requires a current code and returns one-time recovery codes
   assert.ok(session);
   assert.equal(session?.mfaVerified, false);
   const legacySession = await createSaasSession(registered.userId, registered.tenantId, request("/api/saas/session", { method: "POST" }), db, false);
-  const enrollment = await startSaasMfa(session!, db);
-  const confirmed = await confirmSaasMfa(session!, totpCode(enrollment.secret), db);
-  assert.equal(confirmed.ok, true);
-  if (confirmed.ok) assert.equal(confirmed.recoveryCodes.length, 8);
-  const refreshed = await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(registered.cookies) } }), db);
-  assert.equal(refreshed?.mfaVerified, true);
-  const legacy = await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(legacySession.cookies) } }), db);
-  assert.equal(legacy?.mfaVerified, false);
   const forcedPrivacyMutation = request("/api/saas/privacy", { method: "POST", headers: { cookie: cookieHeader(legacySession.cookies), "x-csrf-token": csrfFrom(legacySession.cookies) } });
   const forcedPrivacyMfa = await assertSaasSession(forcedPrivacyMutation, ["owner"], { requireCsrf: true, forceMfa: true }, db);
   assert.equal(forcedPrivacyMfa.ok, false);
   if (!forcedPrivacyMfa.ok) assert.equal(forcedPrivacyMfa.error, "MFA_STEP_UP_REQUIRED");
+  const enrollment = await startSaasMfa(session!, db);
+  const pending = await pg.query<{ mfa_enabled: boolean; active_secret: string | null; pending_secret: string | null }>(
+    "select mfa_enabled,mfa_secret_ciphertext as active_secret,mfa_pending_secret_ciphertext as pending_secret from relay_saas_users where id=$1",
+    [registered.userId],
+  );
+  assert.equal(pending.rows[0]?.mfa_enabled, false);
+  assert.equal(pending.rows[0]?.active_secret, null);
+  assert.ok(pending.rows[0]?.pending_secret);
+  const confirmed = await confirmSaasMfa(session!, totpCode(enrollment.secret), db);
+  assert.equal(confirmed.ok, true);
+  if (confirmed.ok) { assert.equal(confirmed.recoveryCodes.length, 8); assert.equal(confirmed.revokedSessions, 1); }
+  const refreshed = await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(registered.cookies) } }), db);
+  assert.equal(refreshed?.mfaVerified, true);
+  const legacy = await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(legacySession.cookies) } }), db);
+  assert.equal(legacy, null);
+  const legacyReason = await pg.query<{ revoked_reason: string }>("select revoked_reason from relay_saas_sessions where id=$1", [legacySession.sessionId]);
+  assert.equal(legacyReason.rows[0]?.revoked_reason, "mfa_reenrollment");
   const previousMfaGate = process.env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA;
   process.env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA = "1";
   const currentMutation = request("/api/saas/keys", { method: "POST", headers: { cookie: cookieHeader(registered.cookies), "x-csrf-token": csrfFrom(registered.cookies) } });
@@ -205,10 +214,6 @@ test("MFA enrollment requires a current code and returns one-time recovery codes
   assert.equal(expiredStepUp.ok, false);
   if (!expiredStepUp.ok) assert.equal(expiredStepUp.error, "MFA_STEP_UP_REQUIRED");
   await pg.query("update relay_saas_sessions set mfa_verified_at=now() where id=$1", [session!.sessionId]);
-  const legacyMutation = request("/api/saas/keys", { method: "POST", headers: { cookie: cookieHeader(legacySession.cookies), "x-csrf-token": csrfFrom(legacySession.cookies) } });
-  const blockedLegacy = await assertSaasSession(legacyMutation, ["owner"], { requireCsrf: true, requireMfa: true }, db);
-  assert.equal(blockedLegacy.ok, false);
-  if (!blockedLegacy.ok) assert.equal(blockedLegacy.error, "MFA_STEP_UP_REQUIRED");
   await assert.rejects(
     () => loginSaas({ email: "mfa@example.test", password: "mfa-password-12345" }, request("/api/saas/session", { method: "POST" }), db),
     /MFA_REQUIRED/,
@@ -237,6 +242,68 @@ test("MFA enrollment requires a current code and returns one-time recovery codes
   else process.env.RELAY_REQUIRE_PRIVILEGED_SAAS_MFA = previousMfaGate;
   if (previous === undefined) delete process.env.RELAY_PUBLIC_URL;
   else process.env.RELAY_PUBLIC_URL = previous;
+  await pg.close();
+});
+
+test("MFA re-enrollment keeps the old factor live until atomic confirmation", async () => {
+  const { pg, db } = await database();
+  const registered = await registerSaasOwner(
+    { tenantName: "MFA Replace Co", ownerName: "Owner", email: "mfa-replace@example.test", password: "mfa-replace-password-12345" },
+    request("/api/saas/session", { method: "POST" }), db,
+  );
+  const initial = await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(registered.cookies) } }), db);
+  const first = await startSaasMfa(initial!, db);
+  assert.equal((await confirmSaasMfa(initial!, totpCode(first.secret), db)).ok, true);
+  const current = await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(registered.cookies) } }), db);
+  assert.equal(current?.mfaEnabled, true);
+  const before = await pg.query<{ active: string; recovery: string[] }>(
+    "select mfa_secret_ciphertext as active,recovery_codes_hash as recovery from relay_saas_users where id=$1",
+    [registered.userId],
+  );
+  const abandoned = await startSaasMfa(current!, db);
+  assert.equal(abandoned.replacingExisting, true);
+  const staged = await pg.query<{ enabled: boolean; active: string; pending: string; recovery: string[] }>(
+    `select mfa_enabled as enabled,mfa_secret_ciphertext as active,
+            mfa_pending_secret_ciphertext as pending,recovery_codes_hash as recovery
+       from relay_saas_users where id=$1`,
+    [registered.userId],
+  );
+  assert.equal(staged.rows[0]?.enabled, true);
+  assert.equal(staged.rows[0]?.active, before.rows[0]?.active);
+  assert.deepEqual(staged.rows[0]?.recovery, before.rows[0]?.recovery);
+  assert.notEqual(staged.rows[0]?.pending, before.rows[0]?.active);
+  assert.deepEqual(await confirmSaasMfa(current!, "not-a-code", db), { ok: false, error: "MFA_CODE_INVALID" });
+  await pg.query("update relay_saas_users set mfa_pending_expires_at=now()-interval '1 second' where id=$1", [registered.userId]);
+  assert.deepEqual(await confirmSaasMfa(current!, totpCode(abandoned.secret), db), { ok: false, error: "MFA_ENROLLMENT_EXPIRED" });
+  const afterExpiry = await pg.query<{ enabled: boolean; active: string; pending: string | null }>(
+    "select mfa_enabled as enabled,mfa_secret_ciphertext as active,mfa_pending_secret_ciphertext as pending from relay_saas_users where id=$1",
+    [registered.userId],
+  );
+  assert.equal(afterExpiry.rows[0]?.enabled, true);
+  assert.equal(afterExpiry.rows[0]?.active, before.rows[0]?.active);
+  assert.equal(afterExpiry.rows[0]?.pending, null);
+  const oldFactorLogin = await loginSaas(
+    { email: "mfa-replace@example.test", password: "mfa-replace-password-12345", totp: totpCode(first.secret) },
+    request("/api/saas/session", { method: "POST" }), db,
+  );
+  const extra = await createSaasSession(registered.userId, registered.tenantId, request("/api/saas/session", { method: "POST" }), db, true);
+  const replacement = await startSaasMfa(current!, db);
+  const switched = await confirmSaasMfa(current!, totpCode(replacement.secret), db);
+  assert.equal(switched.ok, true);
+  if (switched.ok) assert.equal(switched.revokedSessions, 2);
+  assert.equal(await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(oldFactorLogin.cookies) } }), db), null);
+  assert.equal(await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(extra.cookies) } }), db), null);
+  await assert.rejects(
+    () => loginSaas({ email: "mfa-replace@example.test", password: "mfa-replace-password-12345", totp: totpCode(first.secret) }, request("/api/saas/session", { method: "POST" }), db),
+    /MFA_REQUIRED/,
+  );
+  assert.equal((await loginSaas(
+    { email: "mfa-replace@example.test", password: "mfa-replace-password-12345", totp: totpCode(replacement.secret) },
+    request("/api/saas/session", { method: "POST" }), db,
+  )).mfaVerified, true);
+  const sessionRoute = await readFile("src/routes/api/saas/session.ts", "utf8");
+  assert.match(sessionRoute, /auth\.session\.mfaEnabled/);
+  assert.match(sessionRoute, /forceMfa: true/);
   await pg.close();
 });
 
@@ -399,6 +466,8 @@ test("password reset is non-enumerating, one-time and revokes existing sessions"
     { tenantName: "Reset Co", ownerName: "Owner", email: "reset@example.test", password: "old-password-12345" },
     request("/api/saas/session", { method: "POST" }), db,
   );
+  const resetSession = await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(registered.cookies) } }), db);
+  await startSaasMfa(resetSession!, db);
   const links: string[] = [];
   const resetEnv = {
     RELAY_PUBLIC_URL: "https://relay.example.test", RELAY_EMAIL_WEBHOOK_URL: "https://mail.test",
@@ -420,6 +489,8 @@ test("password reset is non-enumerating, one-time and revokes existing sessions"
   assert.ok(firstToken && token && firstToken !== token);
   await assert.rejects(() => resetSaasPassword(firstToken, "discarded-password-123", request("/api/saas/session", { method: "POST" }), db), /RESET_INVALID/);
   assert.equal((await resetSaasPassword(token, "new-password-12345", request("/api/saas/session", { method: "POST" }), db)).ok, true);
+  const clearedPending = await pg.query<{ count: number }>("select count(*)::int as count from relay_saas_users where id=$1 and mfa_pending_secret_ciphertext is not null", [registered.userId]);
+  assert.equal(clearedPending.rows[0]?.count, 0);
   await assert.rejects(() => resetSaasPassword(token, "another-password-123", request("/api/saas/session", { method: "POST" }), db), /RESET_INVALID/);
   assert.equal(await getSaasSession(request("/api/saas/session", { headers: { cookie: cookieHeader(registered.cookies) } }), db), null);
   const logged = await loginSaas({ email: "reset@example.test", password: "new-password-12345" }, request("/api/saas/session", { method: "POST" }), db);

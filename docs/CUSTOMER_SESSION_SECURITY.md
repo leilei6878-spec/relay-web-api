@@ -40,6 +40,12 @@ replaces the stored SHA-256 set and revokes every other active session with the
 `mfa_recovery_rotation` reason. Plaintext codes are returned once and are not
 written to audit detail or durable logs.
 
+Changing the authenticator uses a separate encrypted pending Secret. The old
+factor remains active until the pending code is confirmed; confirmation then
+revokes other sessions with `mfa_reenrollment`. Starting a replacement from an
+already protected account requires a recent MFA proof. See
+[`STAGED_MFA_ENROLLMENT.md`](./STAGED_MFA_ENROLLMENT.md).
+
 ## Privacy export
 
 `relay-tenant-export-v1` includes non-secret session IP/device/activity and

@@ -338,7 +338,8 @@ export async function resetSaasPassword(token: string, password: string, request
         where token_hash=$1 and kind='password_reset' and consumed_at is null and expires_at > now()
        returning user_id
      ), updated as (
-       update relay_saas_users u set password_hash=$2,status='active',email_verified_at=coalesce(email_verified_at,now()),updated_at=now()
+       update relay_saas_users u set password_hash=$2,status='active',email_verified_at=coalesce(email_verified_at,now()),
+         mfa_pending_secret_ciphertext=null,mfa_pending_expires_at=null,updated_at=now()
         from consumed c where u.id=c.user_id returning u.id
      ), revoked as (
        update relay_saas_sessions s set revoked_at=now(),revoked_reason='password_reset'
@@ -511,30 +512,51 @@ export async function logoutSaas(request: Request, db?: DbLike) {
 export async function startSaasMfa(session: SaasSession, db?: DbLike) {
   const sql = await database(db);
   const secret = generateTotpSecret();
-  await sql.query(
-    "update relay_saas_users set mfa_secret_ciphertext=$1,mfa_enabled=false,updated_at=now() where id=$2",
-    [encryptSecretValue(secret), session.userId],
+  const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString();
+  const rows = await sql.query<{ id: string }>(
+    `update relay_saas_users set mfa_pending_secret_ciphertext=$1,mfa_pending_expires_at=$2,updated_at=now()
+      where id=$3 and status='active' returning id`,
+    [encryptSecretValue(secret), expiresAt, session.userId],
   );
+  if (!rows[0]) throw new Error("MFA_ENROLLMENT_UNAVAILABLE");
   const issuer = encodeURIComponent("Relay SaaS");
   const label = encodeURIComponent(`${session.tenantName}:${session.email}`);
-  return { secret, otpauth: `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&digits=6&period=30` };
+  return { secret, expiresAt, replacingExisting: session.mfaEnabled, otpauth: `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}&digits=6&period=30` };
 }
 
 export async function confirmSaasMfa(session: SaasSession, code: string, db?: DbLike) {
   const sql = await database(db);
-  const rows = await sql.query<{ mfa_secret_ciphertext: string }>(
-    "select mfa_secret_ciphertext from relay_saas_users where id=$1",
+  const rows = await sql.query<{ mfa_pending_secret_ciphertext: string; mfa_pending_expires_at: string | Date }>(
+    "select mfa_pending_secret_ciphertext,mfa_pending_expires_at from relay_saas_users where id=$1",
     [session.userId],
   );
-  const encrypted = rows[0]?.mfa_secret_ciphertext || "";
-  if (!encrypted || !verifyTotp(decryptSecretValue(encrypted), code)) return { ok: false as const, error: "MFA_CODE_INVALID" };
+  const encrypted = rows[0]?.mfa_pending_secret_ciphertext || "";
+  const expiresAt = rows[0]?.mfa_pending_expires_at ? Date.parse(String(rows[0].mfa_pending_expires_at)) : Number.NaN;
+  if (!encrypted || !Number.isFinite(expiresAt)) return { ok: false as const, error: "MFA_ENROLLMENT_NOT_STARTED" };
+  if (expiresAt <= Date.now()) {
+    await sql.query(
+      "update relay_saas_users set mfa_pending_secret_ciphertext=null,mfa_pending_expires_at=null,updated_at=now() where id=$1",
+      [session.userId],
+    );
+    return { ok: false as const, error: "MFA_ENROLLMENT_EXPIRED" };
+  }
+  if (!verifyTotp(decryptSecretValue(encrypted), code)) return { ok: false as const, error: "MFA_CODE_INVALID" };
   const recoveryCodes = Array.from({ length: 8 }, () => secureToken(9));
-  await sql.query(
+  const confirmed = await sql.query<{ revoked: number }>(
     `with enabled as (
-       update relay_saas_users set mfa_enabled=true,recovery_codes_hash=$1::jsonb,updated_at=now() where id=$2 returning id
-     ) update relay_saas_sessions s set mfa_verified_at=now(),last_seen_at=now()
-        from enabled u where s.id=$3 and s.user_id=u.id and s.revoked_at is null`,
-    [JSON.stringify(recoveryCodes.map(sha256)), session.userId, session.sessionId],
+       update relay_saas_users set mfa_secret_ciphertext=mfa_pending_secret_ciphertext,mfa_enabled=true,
+         recovery_codes_hash=$1::jsonb,mfa_pending_secret_ciphertext=null,mfa_pending_expires_at=null,updated_at=now()
+        where id=$2 and mfa_pending_secret_ciphertext=$3 and mfa_pending_expires_at>now() returning id
+     ), revoked as (
+       update relay_saas_sessions s set revoked_at=now(),revoked_reason='mfa_reenrollment',revoked_by_session_id=$4
+        from enabled u where s.user_id=u.id and s.id<>$4 and s.revoked_at is null and s.expires_at>now()
+       returning s.id
+     ), current_session as (
+       update relay_saas_sessions s set mfa_verified_at=now(),last_seen_at=now()
+        from enabled u where s.id=$4 and s.user_id=u.id and s.revoked_at is null returning s.id
+     ) select (select count(*)::int from revoked) as revoked from enabled join current_session on true`,
+    [JSON.stringify(recoveryCodes.map(sha256)), session.userId, encrypted, session.sessionId],
   );
-  return { ok: true as const, recoveryCodes };
+  if (!confirmed[0]) return { ok: false as const, error: "MFA_ENROLLMENT_EXPIRED" };
+  return { ok: true as const, recoveryCodes, revokedSessions: Number(confirmed[0].revoked || 0) };
 }

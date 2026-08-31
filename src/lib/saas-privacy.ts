@@ -291,7 +291,8 @@ async function completeTenantClosure(requestId: string, db?: DbLike) {
      ), closed_users as (
        update relay_saas_users u set email='closed+'||u.id||'@invalid.local',
          email_normalized='closed+'||u.id||'@invalid.local',name='[CLOSED]',password_hash='!closed:'||u.id,
-         status='closed',mfa_enabled=false,mfa_secret_ciphertext=null,recovery_codes_hash=null,updated_at=now()
+         status='closed',mfa_enabled=false,mfa_secret_ciphertext=null,recovery_codes_hash=null,
+         mfa_pending_secret_ciphertext=null,mfa_pending_expires_at=null,updated_at=now()
         from exclusive_users e where u.id=e.user_id returning u.id
      ), consumed_verifications as (
        update relay_saas_verifications v set consumed_at=coalesce(consumed_at,now())

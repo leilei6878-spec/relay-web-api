@@ -86,17 +86,25 @@ export const Route = createFileRoute("/api/saas/session")({
           }
           const auth = await assertSaasSession(request, ["owner", "admin"], { requireCsrf: true, requireLegal: false, allowSuspended: true });
           if (!auth.ok) return Response.json({ ok: false, error: auth.error }, { status: auth.status });
+          let mutationAuth = auth;
+          if (["mfa-start", "mfa-confirm"].includes(action) && auth.session.mfaEnabled) {
+            const stepped = await assertSaasSession(request, ["owner", "admin"], {
+              requireCsrf: true, forceMfa: true, requireLegal: false, allowSuspended: true,
+            });
+            if (!stepped.ok) return Response.json({ ok: false, error: stepped.error }, { status: stepped.status });
+            mutationAuth = stepped;
+          }
           if (action === "mfa-start") {
-            const result = await auditedTenantMutation(request, auth.session, {
-              action: "mfa.enroll.start", targetType: "saas_user", targetId: auth.session.userId,
-            }, () => startSaasMfa(auth.session));
+            const result = await auditedTenantMutation(request, mutationAuth.session, {
+              action: "mfa.enroll.start", targetType: "saas_user", targetId: mutationAuth.session.userId,
+            }, () => startSaasMfa(mutationAuth.session));
             return Response.json({ ok: true, ...result });
           }
           if (action === "mfa-confirm") {
-            const result = await auditedTenantMutation(request, auth.session, {
-              action: "mfa.enroll.confirm", targetType: "saas_user", targetId: auth.session.userId,
+            const result = await auditedTenantMutation(request, mutationAuth.session, {
+              action: "mfa.enroll.confirm", targetType: "saas_user", targetId: mutationAuth.session.userId,
             }, async () => {
-              const confirmed = await confirmSaasMfa(auth.session, String(body.code || ""));
+              const confirmed = await confirmSaasMfa(mutationAuth.session, String(body.code || ""));
               if (!confirmed.ok) throw new Error(confirmed.error);
               return confirmed;
             });

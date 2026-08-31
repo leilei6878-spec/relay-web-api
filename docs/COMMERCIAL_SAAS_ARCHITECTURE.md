@@ -50,6 +50,10 @@ official-provider usage/asset settlement paths are authoritative.
   inventory never returns token/CSRF hashes; all mutations are CSRF/Origin
   protected and tenant-audited. Security access remains available during legal
   re-consent or tenant suspension while service APIs remain closed.
+- TOTP enrollment/replacement is staged in a separate encrypted candidate with
+  a ten-minute expiry. Existing protection stays active until atomic promotion;
+  confirmation rotates recovery hashes and revokes other sessions. Expiry,
+  password reset and privacy closure clear only the pending candidate.
 - Tenant API keys are 256-bit `sk-saas-*` secrets, shown once and hash-only at
   rest. Listing returns hints only.
 - Administrator browsers receive short-lived random `as-relay-*` sessions;
