@@ -43,6 +43,7 @@ function Portal() {
   const [billing, setBilling] = useState<BillingBody | null>(null);
   const [keys, setKeys] = useState<Record<string, unknown>[]>([]);
   const [members, setMembers] = useState<Record<string, unknown>[]>([]);
+  const [invitations, setInvitations] = useState<Record<string, unknown>[]>([]);
   const [audits, setAudits] = useState<Record<string, unknown>[]>([]);
   const [privacyRequests, setPrivacyRequests] = useState<PrivacyRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,7 +66,7 @@ function Portal() {
     const [billingBody, keyBody, memberBody, auditBody, privacyBody] = await Promise.all([
       fetch("/api/saas/billing", { credentials: "include" }).then((response) => response.json() as Promise<BillingBody>),
       fetch("/api/saas/keys", { credentials: "include" }).then((response) => response.json() as Promise<{ keys?: Record<string, unknown>[] }>),
-      fetch("/api/saas/members", { credentials: "include" }).then((response) => response.json() as Promise<{ members?: Record<string, unknown>[] }>),
+      fetch("/api/saas/members", { credentials: "include" }).then((response) => response.json() as Promise<{ members?: Record<string, unknown>[]; invites?: Record<string, unknown>[] }>),
       ["owner", "admin"].includes(sessionBody.tenant.role)
         ? fetch("/api/saas/audit?limit=100", { credentials: "include" }).then((response) => response.json() as Promise<{ events?: Record<string, unknown>[] }>)
         : Promise.resolve({ events: [] as Record<string, unknown>[] }),
@@ -77,6 +78,7 @@ function Portal() {
     setBilling(billingBody);
     setKeys(keyBody.keys || []);
     setMembers(memberBody.members || []);
+    setInvitations(memberBody.invites || []);
     setAudits(auditBody.events || []);
     setPrivacyRequests(privacyBody.requests || []);
     setLoading(false);
@@ -138,7 +140,7 @@ function Portal() {
         <section id="security" className="rounded-xl border border-border bg-surface p-5"><div className="flex items-center gap-2"><ShieldCheck className="size-4" /><h2 className="font-medium">账户安全</h2></div><p className="mt-2 text-sm text-muted">建议所有 Owner 和 Admin 启用 TOTP 多因素认证。</p><SaasMfaDialog mfaEnabled={session.user.mfaEnabled} /></section>
         <SaasSessionSecurity mfaEnabled={session.user.mfaEnabled} />
         {session.tenant.role === "owner" ? <PrivacyCenter tenantName={session.tenant.name} requests={privacyRequests} reload={load} /> : null}
-        <section className="rounded-xl border border-border bg-surface"><div className="flex items-center justify-between border-b border-border px-5 py-4"><div><h2 className="font-medium">企业成员</h2><p className="mt-1 text-xs text-subtle">Owner、Admin、Billing、Developer、Viewer 权限分离；唯一指定 Owner 只能通过原子交接变更。</p></div>{["owner", "admin"].includes(session.tenant.role) ? <InviteMemberDialog onSaved={load} /> : null}</div><div className="divide-y divide-border">{members.map((member) => <div key={String(member.id)} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"><div><p className="text-sm font-medium">{String(member.name)}</p><p className="text-xs text-subtle">{String(member.email)} · MFA {member.mfa_enabled ? "on" : "off"}</p></div><div className="flex items-center gap-2">{member.is_designated_owner ? <Badge tone="warn">指定 Owner</Badge> : <Badge tone={member.membership_status === "active" ? "ok" : "default"}>{String(member.role)}</Badge>}{session.tenant.role === "owner" && member.id !== session.user.id && member.membership_status === "active" ? <TransferOwnershipDialog member={member} /> : null}{session.tenant.role === "owner" && member.id !== session.user.id && !member.is_designated_owner ? <Button variant="ghost" size="sm" onClick={() => void toggleMember(member, load)}>{member.membership_status === "active" ? "停用" : "启用"}</Button> : null}</div></div>)}</div></section>
+        <section className="rounded-xl border border-border bg-surface"><div className="flex items-center justify-between border-b border-border px-5 py-4"><div><h2 className="font-medium">企业成员</h2><p className="mt-1 text-xs text-subtle">Owner、Admin、Billing、Developer、Viewer 权限分离；唯一指定 Owner 只能通过原子交接变更。</p></div>{["owner", "admin"].includes(session.tenant.role) ? <InviteMemberDialog onSaved={load} /> : null}</div><div className="divide-y divide-border">{members.map((member) => <div key={String(member.id)} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"><div><p className="text-sm font-medium">{String(member.name)}</p><p className="text-xs text-subtle">{String(member.email)} · MFA {member.mfa_enabled ? "on" : "off"}</p></div><div className="flex items-center gap-2">{member.is_designated_owner ? <Badge tone="warn">指定 Owner</Badge> : <Badge tone={member.membership_status === "active" ? "ok" : "default"}>{String(member.role)}</Badge>}{session.tenant.role === "owner" && member.id !== session.user.id && member.membership_status === "active" ? <TransferOwnershipDialog member={member} /> : null}{session.tenant.role === "owner" && member.id !== session.user.id && !member.is_designated_owner ? <Button variant="ghost" size="sm" onClick={() => void toggleMember(member, load)}>{member.membership_status === "active" ? "停用" : "启用"}</Button> : null}</div></div>)}</div>{["owner", "admin"].includes(session.tenant.role) ? <div className="border-t border-border"><div className="px-5 py-3"><p className="text-xs font-medium text-muted">邀请记录（不显示令牌）</p></div><div className="divide-y divide-border">{invitations.map((invite) => <div key={String(invite.id)} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3"><div><p className="text-sm font-medium">{String(invite.email)}</p><p className="text-xs text-subtle">{String(invite.role)} · 最近发送 {date(invite.last_sent_at)} · {String(invite.send_count)} 次</p></div><div className="flex items-center gap-2"><Badge tone={invite.status === "pending" ? "warn" : invite.status === "accepted" ? "ok" : "default"}>{String(invite.status)}</Badge>{["pending", "expired"].includes(String(invite.status)) ? <><Button size="sm" variant="secondary" onClick={() => void resendInvite(String(invite.id), load)}>重新发送</Button><Button size="sm" variant="ghost" onClick={() => void revokeInvite(String(invite.id), load)}>撤销</Button></> : null}</div></div>)}{!invitations.length ? <p className="px-5 py-6 text-center text-sm text-subtle">暂无邀请记录</p> : null}</div></div> : null}</section>
       </div>
     </SaasShell>
   );
@@ -218,6 +220,20 @@ async function toggleMember(member: Record<string, unknown>, reload: () => Promi
   const body = await response.json() as { error?: string };
   if (!response.ok) { toast.error(body.error || "成员更新失败"); return; }
   toast.success("成员状态已更新"); await reload();
+}
+
+async function resendInvite(inviteId: string, reload: () => Promise<void>) {
+  const response = await fetch("/api/saas/members", { method: "PATCH", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ action: "resend-invite", inviteId }) });
+  const body = await response.json() as { error?: string };
+  if (!response.ok) { toast.error(body.error || "重新发送失败"); return; }
+  toast.success("新邀请已发送，旧链接已失效"); await reload();
+}
+
+async function revokeInvite(inviteId: string, reload: () => Promise<void>) {
+  const response = await fetch("/api/saas/members", { method: "DELETE", credentials: "include", headers: saasMutationHeaders(), body: JSON.stringify({ inviteId }) });
+  const body = await response.json() as { error?: string };
+  if (!response.ok) { toast.error(body.error || "撤销失败"); return; }
+  toast.success("邀请已撤销，链接和待发送邮件均已失效"); await reload();
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <div className="space-y-2"><Label>{label}</Label>{children}</div>; }

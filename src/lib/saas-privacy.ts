@@ -48,6 +48,11 @@ async function tenantExportSections(tenantId: string, userId: string, sql: DbLik
         select u.id,u.email,u.name,u.status as user_status,m.role,m.status as membership_status,m.created_at,m.updated_at
           from relay_tenant_memberships m join relay_saas_users u on u.id=m.user_id where m.tenant_id=$1
       ) x),'[]'::jsonb),
+      'invitations',coalesce((select jsonb_agg(to_jsonb(x) order by x.created_at,x.id) from (
+        select id,email,role,invited_by,expires_at,accepted_at,revoked_at,revoked_by,
+               last_sent_at,send_count,created_at,updated_at
+          from relay_tenant_invites where tenant_id=$1
+      ) x),'[]'::jsonb),
       'sessions',coalesce((select jsonb_agg(to_jsonb(x) order by x.created_at,x.id) from (
         select id,tenant_id,ip_address,user_agent,expires_at,last_seen_at,mfa_verified_at,
                revoked_at,revoked_reason,revoked_by_session_id,created_at
@@ -310,7 +315,9 @@ async function completeTenantClosure(requestId: string, db?: DbLike) {
         from closed_tenant t where d.dedupe_key like 'tenant-invite:'||t.id||':%' returning d.id
      ), scrubbed_invites as (
        update relay_tenant_invites i set email='closed+'||i.id||'@invalid.local',
-         email_normalized='closed+'||i.id||'@invalid.local',accepted_at=coalesce(accepted_at,now())
+         email_normalized='closed+'||i.id||'@invalid.local',token_hash='closed:'||i.id,
+         accepted_at=case when revoked_at is null then coalesce(accepted_at,now()) else accepted_at end,
+         updated_at=now()
         from closed_tenant t where i.tenant_id=t.id returning i.id
      ), scrubbed_usage as (
        update relay_usage_charges c set extra=coalesce(c.extra,'{}'::jsonb)-'providerResultCiphertext'

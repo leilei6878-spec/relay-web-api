@@ -3,13 +3,13 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { createTenantOwner } from "./saas-billing.ts";
-import { acceptTenantInvite, inviteTenantMember, listTenantMembers, transferTenantOwnership, updateTenantMemberRole } from "./saas-members.ts";
+import { acceptTenantInvite, inviteTenantMember, listTenantInvites, listTenantMembers, resendTenantInvite, revokeTenantInvite, transferTenantOwnership, updateTenantMemberRole } from "./saas-members.ts";
 import type { SaasSession } from "./saas-auth.ts";
 import { legalDocumentMetadata } from "./legal-documents.ts";
 
 async function database() {
   const pg = new PGlite(); await pg.waitReady;
-  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql","0017_email_delivery_outbox.sql","0018_legal_acceptance.sql","0019_legal_reconsent.sql","0020_tenant_privacy_rights.sql","0021_customer_session_security.sql","0022_staged_mfa_enrollment.sql","0023_customer_password_change.sql","0024_tenant_switching.sql","0025_tenant_ownership.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
+  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql","0017_email_delivery_outbox.sql","0018_legal_acceptance.sql","0019_legal_reconsent.sql","0020_tenant_privacy_rights.sql","0021_customer_session_security.sql","0022_staged_mfa_enrollment.sql","0023_customer_password_change.sql","0024_tenant_switching.sql","0025_tenant_ownership.sql","0026_tenant_invitation_lifecycle.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
 
@@ -107,6 +107,64 @@ test("ownership transfer route always requires the designated owner's MFA", asyn
   assert.match(source, /action === "transfer-ownership"[\s\S]*assertSaasSession\(request, \["owner"\], \{ requireCsrf: true, forceMfa: true \}\)/);
   assert.match(source, /auditedTenantMutation\(request, transferAuth\.session/);
   assert.match(source, /transferTenantOwnership\(transferAuth\.session/);
+  assert.match(source, /INVITE_RESEND_COOLDOWN[\s\S]*429/);
+  assert.match(source, /"Retry-After": "60"/);
+});
+
+test("tenant invitation lifecycle is tenant-scoped, token-rotating and concurrency-safe", async () => {
+  const { pg, db } = await database();
+  const owner = await createTenantOwner({ tenantName: "Invite Lifecycle Co", ownerName: "Owner", email: "owner@invite-lifecycle.test", password: "invite-lifecycle-password-123" }, db);
+  const session = { userId: owner.userId, tenantId: owner.tenantId, email: owner.email, name: "Owner", tenantName: "Invite Lifecycle Co", tenantStatus: "active", role: "owner", sessionId: "invite-session", csrfHash: "x", expiresAt: "", mfaVerified: true, mfaVerifiedAt: new Date().toISOString(), mfaEnabled: true, legalAcceptanceRequired: false } satisfies SaasSession;
+  const env = {
+    RELAY_EMAIL_WEBHOOK_URL: "https://mail.test", RELAY_PUBLIC_URL: "https://relay.test",
+    RELAY_EMAIL_WEBHOOK_SECRET: "invite-lifecycle-email-secret-0123456789",
+    RELAY_SECRETS_KEY: "invite-lifecycle-encryption-key-0123456789",
+  } as NodeJS.ProcessEnv;
+  const links: string[] = [];
+  const fetcher = async (_url: string | URL | Request, init?: RequestInit) => {
+    links.push(String(JSON.parse(String(init?.body)).link));
+    return Response.json({ ok: true });
+  };
+  const created = await inviteTenantMember(session, { email: "new.member@invite-lifecycle.test", role: "developer" }, { db, env, fetcher });
+  const firstToken = new URL(links.at(-1)!).searchParams.get("token")!;
+  const initial = await listTenantInvites(session, db);
+  assert.equal(initial.length, 1);
+  assert.equal(initial[0]?.status, "pending");
+  assert.equal(Number(initial[0]?.send_count), 1);
+  assert.equal("token_hash" in initial[0]!, false);
+  await assert.rejects(() => resendTenantInvite(session, created.inviteId, { db, env, fetcher }), /INVITE_RESEND_COOLDOWN/);
+
+  await pg.query("update relay_tenant_invites set last_sent_at=now()-interval '2 minutes' where id=$1", [created.inviteId]);
+  await resendTenantInvite(session, created.inviteId, { db, env, fetcher });
+  const secondToken = new URL(links.at(-1)!).searchParams.get("token")!;
+  assert.notEqual(secondToken, firstToken);
+  await assert.rejects(() => acceptTenantInvite({ token: firstToken, name: "Member", password: "member-password-123" }, new Request("https://relay.test/api/saas/invite"), { db, env }), /INVITE_INVALID_OR_EXPIRED/);
+
+  await pg.query("update relay_tenant_invites set last_sent_at=now()-interval '2 minutes' where id=$1", [created.inviteId]);
+  const concurrent = await Promise.allSettled([
+    resendTenantInvite(session, created.inviteId, { db, env, fetcher }),
+    resendTenantInvite(session, created.inviteId, { db, env, fetcher }),
+  ]);
+  assert.equal(concurrent.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(concurrent.filter((result) => result.status === "rejected").length, 1);
+  const currentToken = new URL(links.at(-1)!).searchParams.get("token")!;
+  assert.notEqual(currentToken, secondToken);
+  assert.equal(Number((await listTenantInvites(session, db))[0]?.send_count), 3);
+
+  const foreign = await createTenantOwner({ tenantName: "Foreign Invite Co", ownerName: "Foreign", email: "owner@foreign-invite.test", password: "foreign-invite-password-123" }, db);
+  const foreignSession = { ...session, userId: foreign.userId, tenantId: foreign.tenantId, email: foreign.email, tenantName: "Foreign Invite Co" } satisfies SaasSession;
+  assert.equal((await listTenantInvites(foreignSession, db)).length, 0);
+  await assert.rejects(() => revokeTenantInvite(foreignSession, created.inviteId, { db, env }), /INVITE_NOT_REVOCABLE/);
+
+  await revokeTenantInvite(session, created.inviteId, { db, env });
+  const revoked = (await listTenantInvites(session, db))[0]!;
+  assert.equal(revoked.status, "revoked");
+  await assert.rejects(() => acceptTenantInvite({ token: currentToken, name: "Member", password: "member-password-123" }, new Request("https://relay.test/api/saas/invite"), { db, env }), /INVITE_INVALID_OR_EXPIRED/);
+  const durable = await pg.query<Record<string, unknown>>("select token_hash,revoked_at,revoked_by from relay_tenant_invites where id=$1", [created.inviteId]);
+  assert.ok(durable.rows[0]?.revoked_at);
+  assert.equal(durable.rows[0]?.revoked_by, owner.userId);
+  assert.ok(!JSON.stringify(await pg.query("select * from relay_email_deliveries")).includes(currentToken));
+  await pg.close();
 });
 
 test("tenant invitation rolls back its business row when the Outbox insert fails", async () => {

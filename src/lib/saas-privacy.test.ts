@@ -62,14 +62,20 @@ test("tenant export is complete, tenant-scoped, hash-bound and omits credential/
      values ('privacy-export-session',$1,$2,$3,$4,'203.0.113.44','Export Browser',now()+interval '1 day',now())`,
     [a.userId, a.tenantId, sha256("export-session-token-secret"), sha256("export-session-csrf-secret")],
   );
+  await pg.query(
+    `insert into relay_tenant_invites(id,tenant_id,email,email_normalized,role,token_hash,invited_by,expires_at)
+     values ('privacy-export-invite',$1,'invite-export@example.test','invite-export@example.test','viewer',$2,$3,now()+interval '1 day')`,
+    [a.tenantId, sha256("export-invite-token-secret"), a.userId],
+  );
   const exported = await createTenantDataExport(a.tenantId, a.userId, { RELAY_PRIVACY_EXPORT_MAX_MIB: "5" } as NodeJS.ProcessEnv, db);
   const text = exported.bytes.toString("utf8");
   assert.equal(sha256(text), exported.sha256);
   assert.match(text, new RegExp(a.email));
   assert.match(text, /203\.0\.113\.44/);
   assert.match(text, /Export Browser/);
+  assert.match(text, /invite-export@example\.test/);
   assert.doesNotMatch(text, new RegExp(b.email));
-  assert.doesNotMatch(text, /secret-password-hash|sk-saas-secret-value|encrypted-provider-secret|export-session-token-secret|export-session-csrf-secret|key_hash|password_hash|token_hash|csrf_hash|ip_hmac|user_agent_hmac/);
+  assert.doesNotMatch(text, /secret-password-hash|sk-saas-secret-value|encrypted-provider-secret|export-session-token-secret|export-session-csrf-secret|export-invite-token-secret|key_hash|password_hash|token_hash|csrf_hash|ip_hmac|user_agent_hmac/);
   assert.equal(exported.payload.schema, "relay-tenant-export-v1");
   const stored = await pg.query<{ status: string; snapshot_sha256: string }>("select status,snapshot_sha256 from relay_privacy_requests where id=$1", [exported.request?.id]);
   assert.deepEqual(stored.rows, [{ status: "completed", snapshot_sha256: exported.sha256 }]);
@@ -108,9 +114,11 @@ test("due closure blocks on money, then atomically revokes access and pseudonymi
   );
   await pg.query(
     `insert into relay_tenant_invites(id,tenant_id,email,email_normalized,role,token_hash,invited_by,expires_at)
-     values ('privacy-close-invite',$1,'invitee@example.test','invitee@example.test','viewer',$2,$3,now()+interval '1 day')`,
-    [a.tenantId, sha256("invite-token"), a.userId],
+     values ('privacy-close-invite',$1,'invitee@example.test','invitee@example.test','viewer',$2,$3,now()+interval '1 day'),
+            ('privacy-close-revoked',$1,'revoked@example.test','revoked@example.test','viewer',$4,$3,now()+interval '1 day')`,
+    [a.tenantId, sha256("invite-token"), a.userId, sha256("revoked-token")],
   );
+  await pg.query("update relay_tenant_invites set revoked_at=now(),revoked_by=$1 where id='privacy-close-revoked'", [a.userId]);
   await pg.query(
     `insert into relay_email_deliveries
       (id,dedupe_key,kind,status,attempts,recipient_hmac,payload_ciphertext,payload_sha256,next_attempt_at,expires_at)
@@ -147,6 +155,14 @@ test("due closure blocks on money, then atomically revokes access and pseudonymi
   );
   assert.match(scrubbed.rows[0]?.invite_email || "", /^closed\+/);
   assert.equal(scrubbed.rows[0]?.payload_ciphertext, "[PRIVACY_CLOSED]");
+  const terminalInvites = await pg.query<{ id: string; accepted_at: string | null; revoked_at: string | null; token_hash: string }>(
+    "select id,accepted_at,revoked_at,token_hash from relay_tenant_invites where tenant_id=$1 order by id",
+    [a.tenantId],
+  );
+  assert.ok(terminalInvites.rows.find((row) => row.id === "privacy-close-invite")?.accepted_at);
+  assert.equal(terminalInvites.rows.find((row) => row.id === "privacy-close-revoked")?.accepted_at, null);
+  assert.ok(terminalInvites.rows.find((row) => row.id === "privacy-close-revoked")?.revoked_at);
+  assert.ok(terminalInvites.rows.every((row) => row.token_hash === `closed:${row.id}`));
   const events = await pg.query<{ event_type: string }>("select event_type from relay_privacy_request_events where request_id='privacy-close-request' order by created_at,id");
   assert.deepEqual(events.rows.map((row) => row.event_type).sort(), ["blocked", "completed"]);
   await assert.rejects(() => pg.query("delete from relay_privacy_request_events where request_id='privacy-close-request'"), /append-only/);

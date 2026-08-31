@@ -8,7 +8,7 @@ import { commercialReadiness } from "./commercial-readiness.ts";
 
 async function database() {
   const pg = new PGlite(); await pg.waitReady;
-  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql","0017_email_delivery_outbox.sql","0018_legal_acceptance.sql","0019_legal_reconsent.sql","0020_tenant_privacy_rights.sql","0021_customer_session_security.sql","0022_staged_mfa_enrollment.sql","0023_customer_password_change.sql","0024_tenant_switching.sql","0025_tenant_ownership.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
+  for (const name of ["0001_relay.sql","0002_relay_ops.sql","0003_relay_production.sql","0004_schema_meta.sql","0005_account_operations.sql","0006_account_availability_samples.sql","0007_commercial_saas.sql","0008_commercial_payments.sql","0009_commercial_config.sql","0010_provider_sandbox.sql","0011_commercial_launch_evidence.sql","0012_admin_sessions.sql","0013_plan_periods.sql","0014_saas_session_mfa.sql","0015_tenant_audit.sql","0016_alert_delivery_outbox.sql","0017_email_delivery_outbox.sql","0018_legal_acceptance.sql","0019_legal_reconsent.sql","0020_tenant_privacy_rights.sql","0021_customer_session_security.sql","0022_staged_mfa_enrollment.sql","0023_customer_password_change.sql","0024_tenant_switching.sql","0025_tenant_ownership.sql","0026_tenant_invitation_lifecycle.sql"]) await pg.exec(await readFile(`migrations/${name}`, "utf8"));
   return { pg, db: { query: async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => (await pg.query<T>(text, params)).rows } };
 }
 
@@ -60,12 +60,24 @@ test("resolved alert delivery history follows bounded operational retention", as
   await pg.query(
     `insert into relay_saas_users
       (id,email,email_normalized,name,password_hash,mfa_pending_secret_ciphertext,mfa_pending_expires_at)
-     values ('expired-mfa-user','expired-mfa@example.test','expired-mfa@example.test','Expired MFA','hash','ciphertext',now()-interval '1 hour')`,
+    values ('expired-mfa-user','expired-mfa@example.test','expired-mfa@example.test','Expired MFA','hash','ciphertext',now()-interval '1 hour')`,
+  );
+  await pg.query("insert into relay_tenants(id,slug,name,billing_email) values ('retention-tenant','retention-tenant','Retention Tenant','owner@retention.test')");
+  await pg.query("insert into relay_saas_users(id,email,email_normalized,name,password_hash) values ('retention-owner','owner@retention.test','owner@retention.test','Retention Owner','hash')");
+  await pg.query("insert into relay_tenant_memberships(tenant_id,user_id,role,status) values ('retention-tenant','retention-owner','owner','active')");
+  await pg.query(
+    `insert into relay_tenant_invites(id,tenant_id,email,email_normalized,role,token_hash,invited_by,expires_at,accepted_at,updated_at)
+     values ('old-invite','retention-tenant','old-invite@retention.test','old-invite@retention.test','viewer',$1,'retention-owner',now()-interval '21 days',now()-interval '20 days',now()-interval '20 days')`,
+    ["c".repeat(64)],
   );
   const result = await runDataRetention({ RELAY_OPERATIONAL_RETENTION_DAYS: "7" } as NodeJS.ProcessEnv, db);
   assert.equal(result.deletedAlerts, 1);
   assert.equal(result.deletedEmailDeliveries, 1);
   assert.equal(result.clearedExpiredMfaEnrollments, 1);
+  assert.equal(result.redactedInvitations, 1);
+  const invite = (await pg.query<{ email: string; token_hash: string }>("select email,token_hash from relay_tenant_invites where id='old-invite'")).rows[0];
+  assert.equal(invite?.email, "retained+old-invite@invalid.local");
+  assert.equal(invite?.token_hash, "retained:old-invite");
   assert.equal((await pg.query<{ count: number }>("select count(*)::int as count from relay_saas_users where mfa_pending_secret_ciphertext is not null")).rows[0]?.count, 0);
   assert.equal((await pg.query<{ count: number }>("select count(*)::int as count from relay_alert_deliveries where alert_id='old-alert'")).rows[0]?.count, 0);
   await pg.close();

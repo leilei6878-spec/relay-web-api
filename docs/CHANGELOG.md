@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.0-rc26 — tenant invitation lifecycle (2026-08-31)
+
+- Owner/Admin can list tenant-scoped invitation state without token hashes,
+  re-send with token rotation and revoke with a random token tombstone.
+- Re-send/revoke use old-hash compare-and-swap; concurrent mutations have one
+  winner and cannot queue a stale email; a per-invite database cooldown blocks
+  rapid mail amplification.
+- Acceptance rechecks exact hash plus non-revoked state inside its locked
+  membership transaction.
+- Portal shows pending/expired/accepted/revoked history, send count and actions;
+  create/re-send/revoke remain MFA-policy protected and tenant-audited.
+- Privacy export includes non-secret invitation history; terminal invitation
+  PII follows operational retention and closure preserves state constraints.
+
 ## 0.10.0-rc25 — designated tenant ownership (2026-08-31)
 
 - One composite-FK ownership row designates the active Owner membership for

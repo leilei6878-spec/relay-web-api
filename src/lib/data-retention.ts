@@ -22,7 +22,7 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
   if (env === process.env) env = await effectiveCommercialEnv(env, db);
   const policy = retentionPolicy(env);
   const sql = db || await getSql();
-  const [chargeResults, jobs, sessions, pendingMfa, checks, usage, checkoutUrls, audit, alerts, emails] = await Promise.all([
+  const [chargeResults, jobs, sessions, pendingMfa, checks, usage, checkoutUrls, audit, alerts, invitations, emails] = await Promise.all([
     sql.query<{ count: number }>(
       `with updated as (
          update relay_usage_charges set extra=extra-'providerResultCiphertext'
@@ -90,6 +90,16 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
       [policy.operationalDays],
     ),
     sql.query<{ count: number }>(
+      `with updated as (
+         update relay_tenant_invites set email='retained+'||id||'@invalid.local',
+           email_normalized='retained+'||id||'@invalid.local',token_hash='retained:'||id,updated_at=now()
+          where (accepted_at is not null or revoked_at is not null)
+            and coalesce(revoked_at,accepted_at) < now()-($1::text||' days')::interval
+            and email not like 'retained+%@invalid.local' returning id
+       ) select count(*)::int as count from updated`,
+      [policy.operationalDays],
+    ),
+    sql.query<{ count: number }>(
       `with deleted as (
          delete from relay_email_deliveries
           where status in ('delivered','expired','superseded')
@@ -113,6 +123,7 @@ export async function runDataRetention(env: NodeJS.ProcessEnv = process.env, db?
     redactedCheckoutUrls: Number(checkoutUrls[0]?.count || 0),
     deletedAudit: Number(audit[0]?.count || 0),
     deletedAlerts: Number(alerts[0]?.count || 0),
+    redactedInvitations: Number(invitations[0]?.count || 0),
     deletedEmailDeliveries: Number(emails[0]?.count || 0),
   };
 }

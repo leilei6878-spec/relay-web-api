@@ -41,6 +41,11 @@ official-provider usage/asset settlement paths are authoritative.
   stored function atomically promotes the target and demotes the source while
   triggers reject direct orphaning. See
   [`TENANT_OWNERSHIP.md`](./TENANT_OWNERSHIP.md).
+- Owner/Admin invitation governance exposes lifecycle metadata without token
+  hashes. Re-send/revoke rotate or tombstone the hash via compare-and-swap,
+  supersede encrypted Outbox payloads and make concurrent mutation one-winner;
+  acceptance rechecks the exact hash under row lock. See
+  [`TENANT_INVITATION_LIFECYCLE.md`](./TENANT_INVITATION_LIFECYCLE.md).
 - Users with multiple active memberships can list and switch tenants from the
   shared SaaS Shell. Switching atomically revokes the source session, creates a
   target-bound session, recomputes target legal state and preserves the exact
