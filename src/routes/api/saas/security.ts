@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertSaasSession } from "@/lib/saas-auth";
 import {
+  changeSaasPassword,
   listUserSaasSessions,
   revokeOtherSaasSessions,
   revokeUserSaasSession,
@@ -9,8 +10,9 @@ import {
 import { auditedTenantMutation } from "@/lib/tenant-audit";
 
 function statusFor(error: string) {
-  if (error === "TENANT_AUDIT_UNAVAILABLE" || error === "MFA_RECOVERY_ROTATION_UNAVAILABLE") return 503;
-  if (/NOT_REVOCABLE|CURRENT_REQUIRES_LOGOUT|ROTATION_IN_PROGRESS/.test(error)) return 409;
+  if (/RATE_LIMITED/.test(error)) return 429;
+  if (error === "TENANT_AUDIT_UNAVAILABLE" || /_UNAVAILABLE$/.test(error)) return 503;
+  if (/NOT_REVOCABLE|CURRENT_REQUIRES_LOGOUT|ROTATION_IN_PROGRESS|PASSWORD_CHANGE_CONFLICT/.test(error)) return 409;
   return 400;
 }
 
@@ -35,6 +37,14 @@ export const Route = createFileRoute("/api/saas/security")({
           allowSuspended: true,
         });
         if (!auth.ok) return Response.json({ ok: false, error: auth.error }, { status: auth.status });
+        let mutationAuth = auth;
+        if (action === "change-password" && auth.session.mfaEnabled) {
+          const stepped = await assertSaasSession(request, undefined, {
+            requireCsrf: true, forceMfa: true, requireLegal: false, allowSuspended: true,
+          });
+          if (!stepped.ok) return Response.json({ ok: false, error: stepped.error }, { status: stepped.status });
+          mutationAuth = stepped;
+        }
         try {
           if (action === "revoke-session") {
             const sessionId = String(body.sessionId || "");
@@ -54,6 +64,15 @@ export const Route = createFileRoute("/api/saas/security")({
               action: "mfa.recovery.rotate", targetType: "saas_user", targetId: auth.session.userId,
             }, () => rotateSaasRecoveryCodes(auth.session));
             return Response.json({ ok: true, ...result }, { headers: { "Cache-Control": "no-store" } });
+          }
+          if (action === "change-password") {
+            const result = await auditedTenantMutation(request, mutationAuth.session, {
+              action: "password.change", targetType: "saas_user", targetId: mutationAuth.session.userId,
+            }, () => changeSaasPassword(mutationAuth.session, {
+              currentPassword: String(body.currentPassword || ""),
+              newPassword: String(body.newPassword || ""),
+            }));
+            return Response.json({ ok: true, result }, { headers: { "Cache-Control": "no-store" } });
           }
           return Response.json({ ok: false, error: "UNKNOWN_ACTION" }, { status: 400 });
         } catch (error) {

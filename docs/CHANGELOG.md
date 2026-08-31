@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0-rc23 — authenticated password change (2026-08-31)
+
+- Customer security center verifies the current password and fresh MFA (when
+  enabled) before changing credentials.
+- Distributed per-user rate limit fails closed when coordination is unavailable.
+- Exact old-hash compare-and-swap prevents two concurrent changes from both
+  succeeding; current-password reuse is rejected.
+- Success clears pending MFA, preserves the current session and revokes every
+  other user session with a bounded audit reason.
+
 ## 0.10.0-rc22 — staged MFA replacement (2026-08-31)
 
 - TOTP candidates are encrypted separately with a ten-minute expiry; starting

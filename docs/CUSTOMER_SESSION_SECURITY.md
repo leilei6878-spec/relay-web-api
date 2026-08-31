@@ -46,6 +46,14 @@ revokes other sessions with `mfa_reenrollment`. Starting a replacement from an
 already protected account requires a recent MFA proof. See
 [`STAGED_MFA_ENROLLMENT.md`](./STAGED_MFA_ENROLLMENT.md).
 
+## Password change
+
+The security center verifies the current password, requires a recent MFA proof
+when enabled, prevents current-password reuse, compares the old hash during the
+database update and revokes every other active session. Attempts are
+distributed-rate-limited and coordination failure is fail-closed. See
+[`CUSTOMER_PASSWORD_CHANGE.md`](./CUSTOMER_PASSWORD_CHANGE.md).
+
 ## Privacy export
 
 `relay-tenant-export-v1` includes non-secret session IP/device/activity and

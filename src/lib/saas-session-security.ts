@@ -1,7 +1,7 @@
 import { getSql, type Sql } from "./db";
-import { coordSetNx } from "./coord";
+import { coordIncr, coordSetNx } from "./coord";
 import type { SaasSession } from "./saas-auth";
-import { secureToken, sha256 } from "./saas-crypto";
+import { hashSaasPassword, secureToken, sha256, verifySaasPassword } from "./saas-crypto";
 
 type DbLike = Pick<Sql, "query">;
 
@@ -96,4 +96,43 @@ export async function rotateSaasRecoveryCodes(
   );
   if (!rows[0]) throw new Error("MFA_NOT_ENABLED");
   return { recoveryCodes, revokedSessions: Number(rows[0].revoked || 0) };
+}
+
+export async function changeSaasPassword(
+  session: SaasSession,
+  input: { currentPassword: string; newPassword: string },
+  db?: DbLike,
+  opts: { increment?: (key: string, ttlMs: number) => Promise<number> } = {},
+) {
+  const increment = opts.increment || coordIncr;
+  let attempts: number;
+  try {
+    attempts = await increment(`saas:password-change:${session.userId}:${new Date().toISOString().slice(0, 13)}`, 2 * 60 * 60_000);
+  } catch {
+    throw new Error("PASSWORD_CHANGE_UNAVAILABLE");
+  }
+  if (attempts > 5) throw new Error("PASSWORD_CHANGE_RATE_LIMITED");
+  const sql = await database(db);
+  const users = await sql.query<{ password_hash: string }>(
+    "select password_hash from relay_saas_users where id=$1 and status='active'",
+    [session.userId],
+  );
+  const currentHash = users[0]?.password_hash || "";
+  if (!verifySaasPassword(input.currentPassword, currentHash)) throw new Error("CURRENT_PASSWORD_INVALID");
+  if (verifySaasPassword(input.newPassword, currentHash)) throw new Error("PASSWORD_REUSE_FORBIDDEN");
+  const nextHash = hashSaasPassword(input.newPassword);
+  const rows = await sql.query<{ revoked: number }>(
+    `with changed as (
+       update relay_saas_users set password_hash=$1,mfa_pending_secret_ciphertext=null,
+         mfa_pending_expires_at=null,updated_at=now()
+        where id=$2 and password_hash=$3 and status='active' returning id
+     ), revoked as (
+       update relay_saas_sessions s set revoked_at=now(),revoked_reason='password_change',revoked_by_session_id=$4
+        from changed u where s.user_id=u.id and s.id<>$4 and s.revoked_at is null and s.expires_at>now()
+       returning s.id
+     ) select (select count(*)::int from revoked) as revoked from changed`,
+    [nextHash, session.userId, currentHash, session.sessionId],
+  );
+  if (!rows[0]) throw new Error("PASSWORD_CHANGE_CONFLICT");
+  return { changed: true as const, revokedSessions: Number(rows[0].revoked || 0) };
 }

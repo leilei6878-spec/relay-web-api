@@ -4,12 +4,13 @@ import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { getSaasSession, type SaasSession } from "./saas-auth.ts";
 import {
+  changeSaasPassword,
   listUserSaasSessions,
   revokeOtherSaasSessions,
   revokeUserSaasSession,
   rotateSaasRecoveryCodes,
 } from "./saas-session-security.ts";
-import { sha256 } from "./saas-crypto.ts";
+import { hashSaasPassword, sha256, verifySaasPassword } from "./saas-crypto.ts";
 
 async function database() {
   const pg = new PGlite(); await pg.waitReady;
@@ -23,8 +24,8 @@ async function seed(pg: PGlite) {
   await pg.query("insert into relay_tenants(id,slug,name,billing_email) values ('security-tenant','security-tenant','Security Tenant','security@example.test')");
   for (const id of ["security-user", "other-user"]) {
     await pg.query(
-      "insert into relay_saas_users(id,email,email_normalized,name,password_hash,mfa_enabled) values ($1,$2,$2,$1,'hash',true)",
-      [id, `${id}@example.test`],
+      "insert into relay_saas_users(id,email,email_normalized,name,password_hash,mfa_enabled) values ($1,$2,$2,$1,$3,true)",
+      [id, `${id}@example.test`, hashSaasPassword(id === "security-user" ? "old-password-12345" : "foreign-password-12345")],
     );
     await pg.query("insert into relay_tenant_memberships(tenant_id,user_id,role,status) values ('security-tenant',$1,'owner','active')", [id]);
   }
@@ -108,12 +109,66 @@ test("revoke others and recovery rotation preserve current session and never sto
   await pg.close();
 });
 
+test("password change verifies the old secret, uses CAS and revokes only other user sessions", async () => {
+  const { pg, db } = await database(); await seed(pg);
+  await pg.query(
+    "update relay_saas_users set mfa_pending_secret_ciphertext='pending',mfa_pending_expires_at=now()+interval '10 minutes' where id='security-user'",
+  );
+  await assert.rejects(
+    () => changeSaasPassword(session(), { currentPassword: "wrong-password", newPassword: "next-password-12345" }, db, { increment: async () => 1 }),
+    /CURRENT_PASSWORD_INVALID/,
+  );
+  await assert.rejects(
+    () => changeSaasPassword(session(), { currentPassword: "old-password-12345", newPassword: "old-password-12345" }, db, { increment: async () => 1 }),
+    /PASSWORD_REUSE_FORBIDDEN/,
+  );
+  await assert.rejects(
+    () => changeSaasPassword(session(), { currentPassword: "old-password-12345", newPassword: "next-password-12345" }, db, { increment: async () => 6 }),
+    /PASSWORD_CHANGE_RATE_LIMITED/,
+  );
+  await assert.rejects(
+    () => changeSaasPassword(session(), { currentPassword: "old-password-12345", newPassword: "next-password-12345" }, db, { increment: async () => { throw new Error("redis down"); } }),
+    /PASSWORD_CHANGE_UNAVAILABLE/,
+  );
+  const changed = await changeSaasPassword(
+    session(), { currentPassword: "old-password-12345", newPassword: "next-password-12345" }, db,
+    { increment: async () => 1 },
+  );
+  assert.deepEqual(changed, { changed: true, revokedSessions: 1 });
+  const user = await pg.query<{ password_hash: string; pending: string | null }>(
+    "select password_hash,mfa_pending_secret_ciphertext as pending from relay_saas_users where id='security-user'",
+  );
+  assert.equal(verifySaasPassword("old-password-12345", user.rows[0]?.password_hash || ""), false);
+  assert.equal(verifySaasPassword("next-password-12345", user.rows[0]?.password_hash || ""), true);
+  assert.equal(user.rows[0]?.pending, null);
+  const states = await pg.query<{ id: string; revoked_at: string | null; revoked_reason: string | null }>(
+    "select id,revoked_at,revoked_reason from relay_saas_sessions where user_id='security-user' order by id",
+  );
+  assert.equal(states.rows.find((row) => row.id === "session-current")?.revoked_at, null);
+  assert.equal(states.rows.find((row) => row.id === "session-other")?.revoked_reason, "password_change");
+  assert.equal((await pg.query<{ revoked_at: string | null }>("select revoked_at from relay_saas_sessions where id='session-foreign'")).rows[0]?.revoked_at, null);
+  await pg.close();
+});
+
+test("concurrent password changes have one compare-and-swap winner", async () => {
+  const { pg, db } = await database(); await seed(pg);
+  const results = await Promise.allSettled([
+    changeSaasPassword(session(), { currentPassword: "old-password-12345", newPassword: "winner-one-password" }, db, { increment: async () => 1 }),
+    changeSaasPassword(session(), { currentPassword: "old-password-12345", newPassword: "winner-two-password" }, db, { increment: async () => 1 }),
+  ]);
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  await pg.close();
+});
+
 test("security API and independent UI stay available across legal/suspension gates", async () => {
   const route = await readFile("src/routes/api/saas/security.ts", "utf8");
   const page = await readFile("src/routes/saas/security-center.tsx", "utf8");
   assert.match(route, /requireLegal: false/);
   assert.match(route, /allowSuspended: true/);
   assert.match(route, /forceMfa: action === "rotate-recovery-codes"/);
+  assert.match(route, /action === "change-password" && auth\.session\.mfaEnabled/);
+  assert.match(route, /password\.change/);
   assert.match(route, /auditedTenantMutation/);
   assert.match(page, /独立安全入口/);
 });

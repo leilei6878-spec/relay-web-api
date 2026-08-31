@@ -54,6 +54,10 @@ official-provider usage/asset settlement paths are authoritative.
   a ten-minute expiry. Existing protection stays active until atomic promotion;
   confirmation rotates recovery hashes and revokes other sessions. Expiry,
   password reset and privacy closure clear only the pending candidate.
+- Authenticated password change verifies the old scrypt secret, requires fresh
+  MFA when enabled, uses an exact-hash compare-and-swap, clears pending MFA and
+  revokes all other user sessions. Distributed rate-limit failure is
+  fail-closed and audit detail never contains password material.
 - Tenant API keys are 256-bit `sk-saas-*` secrets, shown once and hash-only at
   rest. Listing returns hints only.
 - Administrator browsers receive short-lived random `as-relay-*` sessions;
