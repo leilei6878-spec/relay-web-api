@@ -10,6 +10,7 @@ import {
   resolutionOptionsFor,
   resolveImageSpec,
   sizeOptionsFor,
+  sizeMatchesSpec,
 } from "./image-size.ts";
 
 test("official GPT sizes map to native aspect + tier", () => {
@@ -135,4 +136,24 @@ test("gemini-image is Gemini web, flash-image is Nano Banana", () => {
   assert.ok(sizeOptionsFor("nano-banana").some((s) => s.label.includes("16:9")));
   assert.ok(ASPECT_PRESETS.some((p) => p.id === "21:9" && p.hint.includes("Ultrawide")));
   assert.ok(ASPECT_PRESETS.some((p) => p.id === "4:5" && p.hint.includes("Instagram")));
+});
+
+test("Nano Banana 2 and GPT Image 2 expose 10 aspects x 3 distinct tiers", () => {
+  for (const model of ["leonardo-gemini", "leonardo-gpt-image-2"]) {
+    for (const preset of ASPECT_PRESETS) {
+      const options = resolutionOptionsFor(model, preset.id);
+      assert.equal(options.length, 3, `${model} ${preset.id}`);
+      assert.deepEqual(options.map((option) => option.tier), ["Small", "Medium", "Large"]);
+      assert.equal(new Set(options.map((option) => option.size)).size, 3, `${model} ${preset.id} tiers must be distinct`);
+      for (const option of options) {
+        const resolved = resolveImageSpec({ model, aspectRatio: preset.id, imageSize: option.k });
+        assert.equal(resolved.ok, true);
+        if (resolved.ok) {
+          assert.equal(resolved.spec.size, option.size);
+          assert.equal(resolved.spec.aspect, preset.id);
+          assert.equal(sizeMatchesSpec(option.w, option.h, resolved.spec), true);
+        }
+      }
+    }
+  }
 });

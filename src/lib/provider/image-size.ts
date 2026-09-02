@@ -38,6 +38,20 @@ export const NATIVE_1K: Record<ImageAspect, readonly [number, number]> = {
   "21:9": [1584, 672],
 };
 
+/** GPT Image 2 Large targets stay inside Leonardo's 8,294,400-pixel envelope. */
+export const GPT_LARGE: Record<ImageAspect, readonly [number, number]> = {
+  "1:1": [2880, 2880],
+  "3:2": [3504, 2336],
+  "2:3": [2336, 3504],
+  "4:3": [3264, 2448],
+  "3:4": [2448, 3264],
+  "16:9": [3840, 2160],
+  "9:16": [2160, 3840],
+  "4:5": [2560, 3200],
+  "5:4": [3200, 2560],
+  "21:9": [3840, 1648],
+};
+
 /** Leonardo Custom panel named presets (fig. 3). */
 export const ASPECT_PRESETS: { id: ImageAspect; label: string; hint: string }[] = [
   { id: "1:1", label: "1:1 方图", hint: "Square" },
@@ -230,10 +244,8 @@ export function pixelsFor(aspect: ImageAspect, k: ImageK, family: ImageFamily): 
     return { w: w1 * 2, h: h1 * 2 };
   }
   if (family === "gpt") {
-    if (aspect === "1:1") return { w: 2880, h: 2880 };
-    if (aspect === "16:9") return { w: 3840, h: 2160 };
-    if (aspect === "9:16") return { w: 2160, h: 3840 };
-    return { w: w1 * 2, h: h1 * 2 };
+    const [w, h] = GPT_LARGE[aspect];
+    return { w, h };
   }
   return { w: w1 * 4, h: h1 * 4 };
 }
@@ -378,9 +390,24 @@ export function compatibleNatives(spec: ImageSpec): { w: number; h: number }[] {
 
 export function sizeMatchesSpec(width: number, height: number, spec: ImageSpec): boolean {
   if (width === spec.width && height === spec.height) return true;
-  return compatibleNatives(spec).some((p) => p.w === width && p.h === height);
+  if (compatibleNatives(spec).some((p) => p.w === width && p.h === height)) return true;
+  if (aspectFromPixels(width, height) !== spec.aspect) return false;
+  const [aw, ah] = spec.aspect.split(":").map(Number);
+  const expectedRatio = aw! / ah!;
+  const ratioError = Math.abs(width / height - expectedRatio) / expectedRatio;
+  if (ratioError > 0.035) return false;
+  return kFromPixels(width, height, spec.family) === spec.imageSize;
 }
 
 export function kFromPixels(width: number, height: number, family: ImageFamily): ImageK {
-  return kFromMax(Math.max(width, height), family === "gemini" ? "nano" : family);
+  const area = width * height;
+  const fam = family === "gemini" ? "nano" : family;
+  if (fam === "gpt") {
+    if (area >= 6_000_000) return "4K";
+    if (area >= 2_000_000) return "2K";
+    return "1K";
+  }
+  if (area >= 10_000_000) return "4K";
+  if (area >= 2_000_000) return "2K";
+  return "1K";
 }

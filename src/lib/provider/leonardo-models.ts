@@ -104,6 +104,7 @@ export const LEONARDO_ASPECTS = [
 export const LEONARDO_MAX_REFS = 6;
 export const LEONARDO_MAX_N = 8;
 export const LEONARDO_BACKEND_DEFAULT = "web_account" as const;
+export const LEONARDO_CAPABILITY_TTL_MS = 30 * 60_000;
 
 export function isGptImageModel(model: string) {
   const m = (model || "").toLowerCase();
@@ -160,16 +161,29 @@ export function labelsForLogical(logical: LeonardoLogicalModel) {
   return logical === "leonardo-gpt-image-2" ? GPT_IMAGE_LABELS : GEMINI_FAMILY_LABELS;
 }
 
-export function accountHasLeonardoModel(account: Pick<Account, "availableModels" | "platform">, model: string) {
+export function accountHasLeonardoModel(
+  account: Pick<Account, "availableModels" | "availableModelsObservedAt" | "platform">,
+  model: string,
+  now = Date.now(),
+) {
   if (account.platform && account.platform !== "leonardo") return true;
   const listed = account.availableModels;
   if (!listed || listed.length === 0) return true;
   const mapped = mapLogicalModel(model);
   const needles = [mapped.logical, mapped.webId, ...mapped.webLabels].map((s) => s.toLowerCase());
-  return listed.some((item) => {
+  const matched = listed.some((item) => {
     const x = item.toLowerCase();
     return needles.some((n) => x.includes(n) || n.includes(x));
   });
+  if (matched) return true;
+
+  // Older workers only captured the currently selected model and stored that
+  // partial list forever. Treat missing or stale observations as unknown so a
+  // real request can re-probe the model drawer. A fresh negative observation
+  // remains authoritative and prevents repeatedly consuming an unsupported account.
+  const observedAt = Date.parse(account.availableModelsObservedAt || "");
+  if (!Number.isFinite(observedAt) || now - observedAt >= LEONARDO_CAPABILITY_TTL_MS) return true;
+  return false;
 }
 
 export function sizeToAspect(size: string): (typeof LEONARDO_ASPECTS)[number] {

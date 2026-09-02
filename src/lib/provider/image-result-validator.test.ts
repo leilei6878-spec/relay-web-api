@@ -174,6 +174,18 @@ test("low confidence is not a 200", () => {
   if (!low.ok) assert.match(low.error, /IMAGE_CONFIDENCE_TOO_LOW/);
 });
 
+test("GPT Image 2 accepts provider-native same-tier dimensions but rejects wrong aspect and tier", () => {
+  const spec = resolveImageSpec({ model: "leonardo-gpt-image-2", aspectRatio: "16:9", imageSize: "1K" });
+  assert.equal(spec.ok, true);
+  if (!spec.ok) return;
+  const providerNative = validateOneImage({ buf: syntheticPng(1344, 768) }, { spec: spec.spec });
+  assert.equal(providerNative.ok, true);
+  const wrongAspect = validateOneImage({ buf: syntheticPng(1024, 1024) }, { spec: spec.spec });
+  assert.equal(wrongAspect.ok, false);
+  const wrongTier = validateOneImage({ buf: syntheticPng(2752, 1536) }, { spec: spec.spec });
+  assert.equal(wrongTier.ok, false);
+});
+
 test("same bytes at a new URL are rejected by historical hash", () => {
   const img = syntheticPng(1024, 1024);
   const spec = resolveImageSpec({ model: "gemini-image", size: "1:1" });

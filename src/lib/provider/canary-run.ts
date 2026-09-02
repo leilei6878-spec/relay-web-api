@@ -13,11 +13,14 @@ import { LEONARDO_JOB_TIMEOUT_MS } from "../image-timeout";
 
 export function canaryModelFor(
   provider: ProviderId,
-  account: Pick<Account, "platform" | "availableModels">,
+  account: Pick<Account, "platform" | "availableModels" | "availableModelsObservedAt">,
   models: string[],
 ) {
   if (provider !== "leonardo") return models[0] || "";
-  return models.find((model) => accountHasLeonardoModel(account, model)) || models[0] || "";
+  const canaryAccount = account.availableModels?.length
+    ? { ...account, availableModelsObservedAt: account.availableModelsObservedAt || new Date().toISOString() }
+    : account;
+  return models.find((model) => accountHasLeonardoModel(canaryAccount, model)) || models[0] || "";
 }
 
 export async function rememberFingerprint(provider: ProviderId, features: DomFeature[], packVersion: string) {

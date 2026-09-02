@@ -1918,6 +1918,8 @@ def score_result_candidate(c):
         return "REJECT"
     if not c.get("isNewSrc") and not c.get("isNewContainer"):
         return "REJECT"
+    if c.get("isNewSrc") and c.get("domainMatch") and c.get("networkCaptured"):
+        return "VERIFIED"
     if c.get("isNewContainer") and c.get("isNewSrc") and c.get("createdAfterSubmit") and c.get("domainMatch"):
         return "VERIFIED"
     if c.get("isNewSrc") and c.get("domainMatch") and (c.get("isNewContainer") or c.get("createdAfterSubmit")):
@@ -3532,16 +3534,16 @@ def parse_size_wh(size):
         return 1024, 1024
 
 def size_tier(w, h, gpt):
-    m = max(w, h)
+    area = max(1, int(w or 0)) * max(1, int(h or 0))
     if gpt:
-        if m >= 2500:
+        if area >= 6000000:
             return "Large", 2880
-        if m >= 1536:
+        if area >= 2000000:
             return "Medium", 2048
         return "Small", 1024
-    if m >= 3072:
+    if area >= 10000000:
         return "Large", 4096
-    if m >= 1536:
+    if area >= 2000000:
         return "Medium", 2048
     return "Small", 1024
 
@@ -3788,6 +3790,9 @@ def confirm_leonardo_image_size(page, want_size, aspect=None, tier=None, gpt=Fal
         apply_image_size(page, want_size, aspect, tier, gpt)
         shown_w, shown_h = read_displayed_size(page)
         if shown_w == want_w and shown_h == want_h and aspect_match(shown_w, shown_h, aspect):
+            return True, shown_w, shown_h, ""
+        shown_tier, _shown_px = size_tier(shown_w, shown_h, gpt)
+        if gpt and aspect_match(shown_w, shown_h, aspect) and str(shown_tier).lower() == str(tier or "").lower():
             return True, shown_w, shown_h, ""
     if shown_w <= 0 or shown_h <= 0:
         error = "LEONARDO_DOM_CHANGED: Image Dimensions unreadable, want %s %s" % (aspect, want_size)
@@ -4052,7 +4057,7 @@ def run_leonardo(body, ctx=None):
         try:
             raw = page.evaluate("""() => {
               const buttons = [...document.querySelectorAll('button, [role=button]')];
-              const n = buttons.find((e) => {
+              const n = document.querySelector('[data-testid="image-generation-sidebar-container"] [data-testid="model-selector-trigger"], [data-testid="model-selector-trigger"]') || buttons.find((e) => {
                 const a = (e.getAttribute('aria-label') || '').trim().toLowerCase();
                 const t = (e.innerText || '').trim().toLowerCase();
                 return a === 'model' || t.indexOf('model') === 0;
@@ -4071,13 +4076,18 @@ def run_leonardo(body, ctx=None):
 
     def open_and_list_models(page):
         names = []
-        for spec in ('button:has-text("Model")', '[aria-label="Model"]', '[aria-label^=Model]', 'button:has-text("Auto")'):
+        for spec in ('[data-testid="image-generation-sidebar-container"] [data-testid="model-selector-trigger"]', '[data-testid="model-selector-trigger"]', 'button:has-text("Model")', '[aria-label="Model"]', '[aria-label^=Model]', 'button:has-text("Auto")'):
             try:
                 loc = page.locator(spec).first
                 if loc.count() == 0:
                     continue
                 loc.click(timeout=1400, force=True)
                 page.wait_for_timeout(700)
+                page.evaluate("""() => {
+                  const el = document.querySelector('[role=listbox], [role=menu], [data-slot=drawer-content], [data-radix-scroll-area-viewport]');
+                  if (el) el.scrollTop = 0;
+                }""")
+                page.wait_for_timeout(250)
             except Exception:
                 continue
             try:
@@ -4087,13 +4097,13 @@ def run_leonardo(body, ctx=None):
             if isinstance(texts, list):
                 for t in texts:
                     line = [ln.strip() for ln in str(t).split("\n") if ln.strip()]
-                    label = line[-1] if line else str(t).strip()
-                    if not label or label.lower() in SKIP_MODEL:
-                        continue
-                    if not re.search(r"nano|banana|gemini|gpt image|flux|lucid|phoenix|kino|seedream|imagen|ideogram|preset", label, re.I):
-                        continue
-                    if label not in names:
-                        names.append(label)
+                    for label in line:
+                        if not label or label.lower() in SKIP_MODEL:
+                            continue
+                        if not re.search(r"nano|banana|gemini|gpt image|flux|lucid|phoenix|kino|seedream|imagen|ideogram|preset", label, re.I):
+                            continue
+                        if label not in names:
+                            names.append(label)
             if names:
                 break
         return names
@@ -4247,9 +4257,12 @@ def run_leonardo(body, ctx=None):
         model_click = click_leonardo_model(page, picked)
         if not model_click:
             return fail_job(ctx, "LEONARDO_DOM_CHANGED: cannot select exact model " + picked, "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": shown or ""})
-        page.wait_for_timeout(400)
+        page.wait_for_timeout(700)
         shown2 = selected_model_label(page)
         print("leonardo picked=%s shown=%s click=%s" % (picked, shown2, model_click), flush=True)
+        if not pick_model_label([shown2], labels):
+            return fail_job(ctx, "LEONARDO_MODEL_MISMATCH: requested %s got %s" % (model, shown2 or "(unreadable)"), "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": shown2 or ""})
+        picked = shown2
         if kind == "canary":
             canary_aspect = body.get("aspect") or size_to_aspect(want_size)
             canary_w, canary_h = parse_size_wh(want_size)
@@ -4350,10 +4363,17 @@ def run_leonardo(body, ctx=None):
             print("leonardo generate ready", ready_gen, flush=True)
             if not ready_gen:
                 return {"ok": False, "error": "LEONARDO_GENERATION_FAILED: generate did not become ready after refs", "fault": "provider", "backendMode": "web_account", "availableModels": available, "modelActual": picked, "pageState": "GENERATION_FAILED"}
-        elif not fill_composer(page, box, prompt):
-            try:
-                box.fill(prompt, timeout=1000)
-            except Exception:
+        else:
+            filled = leonardo_js_fill(page, prompt)
+            if not filled:
+                filled = fill_composer(page, box, prompt)
+            if not filled:
+                try:
+                    box.fill(prompt, timeout=1000)
+                    filled = True
+                except Exception:
+                    filled = False
+            if not filled:
                 return {"ok": False, "error": "LEONARDO_DOM_CHANGED: cannot fill prompt", "fault": "provider", "backendMode": "web_account"}
         try:
             page.wait_for_timeout(400)
@@ -4362,6 +4382,8 @@ def run_leonardo(body, ctx=None):
         size_ok, shown_w, shown_h, size_error = confirm_leonardo_image_size(page, want_size, aspect, tier, gpt)
         if not size_ok:
             return fail_job(ctx, size_error, "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": picked})
+        if not wait_leonardo_generate_ready(page, 20000):
+            return fail_job(ctx, "LEONARDO_GENERATION_FAILED: generate did not become ready", "provider", {"backendMode": "web_account", "availableModels": available, "modelActual": picked})
         boundary = create_generation_boundary(page, ctx, "leonardo", prompt)
         baseline = boundary.get("baseline_asset_urls") or snapshot_image_srcs(page)
         captures = []
@@ -4438,7 +4460,12 @@ def run_leonardo(body, ctx=None):
                     set_submission_state(ctx, "GENERATING")
             except Exception:
                 pass
-            located = pick_accepted_candidates(leonardo_result_locator(page, boundary), max(1, want_n))
+            located_raw = leonardo_result_locator(page, boundary)
+            captured_full = set(upgrade_cdn_url(url) for url in captures_by_url.keys())
+            for cand in located_raw:
+                src = cand.get("src") or ""
+                cand["networkCaptured"] = bool(src in captures_by_url or upgrade_cdn_url(src) in captured_full)
+            located = pick_accepted_candidates(located_raw, max(1, want_n))
             for cand in located:
                 src = cand.get("src") or ""
                 if not src or src in baseline:

@@ -3,6 +3,7 @@ import { handleImage } from "@/routes/v1/images/generations";
 import { MODELS } from "@/routes/v1/models";
 import { handleGenerateContent } from "@/routes/v1beta/models/$";
 import { normalizeInvokePath } from "./invoke-path";
+import { invokeTimeoutMessage } from "./image-timeout";
 
 function innerRequest(path: string, apiKey: string, payload: unknown, method: string, signal?: AbortSignal) {
   return new Request(`http://relay.internal${path}`, {
@@ -32,7 +33,7 @@ function responsesAsChat(payload: unknown) {
   return { model: p.model, messages, stream: p.stream };
 }
 
-async function asInvokeResponse(res: Response) {
+async function asInvokeResponse(res: Response, timeoutMessage = invokeTimeoutMessage("")) {
   const headers = new Headers(res.headers);
   headers.set("x-relay-invoke", "in-process");
   const ctype = headers.get("content-type") || "application/json";
@@ -46,7 +47,7 @@ async function asInvokeResponse(res: Response) {
         error: {
           message:
             res.status === 504
-              ? "TIMEOUT: 图生图超时，网关没有返回内容。请确认参考图已挂上后重试。"
+              ? timeoutMessage
               : `HTTP ${res.status || 0}：空响应`,
         },
       },
@@ -65,29 +66,30 @@ export async function dispatchAdminInvoke(opts: {
   signal?: AbortSignal;
 }): Promise<Response> {
   const path = normalizeInvokePath(opts.path || "");
+  const timeoutMessage = invokeTimeoutMessage(path, opts.payload);
   try {
     if (path === "/v1/models") {
-      return asInvokeResponse(Response.json({ object: "list", data: MODELS }));
+      return asInvokeResponse(Response.json({ object: "list", data: MODELS }), timeoutMessage);
     }
     if (path === "/v1/images/generations") {
       return asInvokeResponse(
-        await handleImage(innerRequest(path, opts.apiKey, opts.payload, "POST", opts.signal), "image"),
+        await handleImage(innerRequest(path, opts.apiKey, opts.payload, "POST", opts.signal), "image"), timeoutMessage,
       );
     }
     if (path === "/v1/images/edits") {
       return asInvokeResponse(
-        await handleImage(innerRequest(path, opts.apiKey, opts.payload, "POST", opts.signal), "edit"),
+        await handleImage(innerRequest(path, opts.apiKey, opts.payload, "POST", opts.signal), "edit"), timeoutMessage,
       );
     }
     if (path.startsWith("/v1beta/models/")) {
       const splat = path.slice("/v1beta/models/".length);
       return asInvokeResponse(
-        await handleGenerateContent(innerRequest(path, opts.apiKey, opts.payload, "POST", opts.signal), splat),
+        await handleGenerateContent(innerRequest(path, opts.apiKey, opts.payload, "POST", opts.signal), splat), timeoutMessage,
       );
     }
     const payload = path === "/v1/responses" ? responsesAsChat(opts.payload) : opts.payload;
     return asInvokeResponse(
-      await handleChat(innerRequest("/v1/chat/completions", opts.apiKey, payload, "POST", opts.signal)),
+      await handleChat(innerRequest("/v1/chat/completions", opts.apiKey, payload, "POST", opts.signal)), timeoutMessage,
     );
   } catch (err) {
     const timedOut = (err as { name?: string }).name === "AbortError" || opts.signal?.aborted;
@@ -95,7 +97,7 @@ export async function dispatchAdminInvoke(opts: {
       {
         error: {
           message: timedOut
-            ? "TIMEOUT: 图生图/对话在时限内没有返回。参考图任务请确认图片已挂上后再试。"
+            ? timeoutMessage
             : err instanceof Error
               ? err.message
               : "invoke failed",

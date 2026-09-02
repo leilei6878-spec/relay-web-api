@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import { ImageInput } from "@/components/image-input";
+import { invokeTimeoutMessage } from "@/lib/image-timeout";
 import { getApiKey, readSessionFile } from "@/lib/gateway";
 import { LOCAL_WORKER, localWorkerScript } from "@/lib/local-worker-script";
 import { textFile, zipStore } from "@/lib/zip-store";
@@ -154,7 +155,7 @@ pause
         ok: false as const,
         error:
           res.status === 504
-            ? "TIMEOUT: 图生图超时，网关没有返回内容。请确认参考图已挂上后重试。"
+            ? invokeTimeoutMessage(kind === "chat" ? "/v1/chat/completions" : "/v1/images/generations", payload)
             : `网关 ${res.status || 0}：空响应`,
       };
     }

@@ -47,6 +47,7 @@ function acc(partial: Partial<Account>): Account {
     createdAt: new Date().toISOString(),
     tokenState: partial.tokenState,
     availableModels: partial.availableModels,
+    availableModelsObservedAt: partial.availableModelsObservedAt,
   };
 }
 
@@ -141,7 +142,7 @@ test("scheduler skips token exhausted and missing model, allows unknown capabili
   ];
   const exhausted = acc({ id: "ex", tokenState: "TOKEN_EXHAUSTED" });
   assert.equal(eligibilityReason(exhausted, proxies, settings), "额度用尽");
-  const missing = acc({ id: "m", availableModels: ["FLUX"] });
+  const missing = acc({ id: "m", availableModels: ["FLUX"], availableModelsObservedAt: new Date().toISOString() });
   assert.equal(eligibilityReason(missing, proxies, settings, Date.now(), "leonardo-gpt-image-2"), "模型不可用（leonardo-gpt-image-2）");
   const unknown = acc({ id: "u" });
   assert.equal(eligibilityReason(unknown, proxies, settings, Date.now(), "leonardo-gemini"), null);
@@ -150,6 +151,27 @@ test("scheduler skips token exhausted and missing model, allows unknown capabili
   const list = listEligible([exhausted, missing, gpt], proxies, settings, "leonardo", [], Date.now(), "leonardo-gpt-image-2");
   assert.deepEqual(list.map((a) => a.id), ["g"]);
   assert.equal(accountEligibleForModel(exhausted, "leonardo-gemini").ok, false);
+  const legacyPartial = acc({ id: "legacy", availableModels: ["Nano Banana 2"] });
+  assert.equal(accountHasLeonardoModel(legacyPartial, "leonardo-gpt-image-2"), true);
+  const stale = acc({
+    id: "stale",
+    availableModels: ["Nano Banana 2"],
+    availableModelsObservedAt: new Date(Date.now() - 31 * 60_000).toISOString(),
+  });
+  assert.equal(accountHasLeonardoModel(stale, "leonardo-gpt-image-2"), true);
+  const fresh = acc({
+    id: "fresh",
+    availableModels: ["Nano Banana 2"],
+    availableModelsObservedAt: new Date().toISOString(),
+  });
+  assert.equal(accountHasLeonardoModel(fresh, "leonardo-gpt-image-2"), false);
+});
+
+test("Leonardo model verification never accepts the other model family", () => {
+  assert.equal(leonardoAdapter.verifyModel("leonardo-gpt-image-2", "Nano Banana 2").ok, false);
+  assert.equal(leonardoAdapter.verifyModel("leonardo-gemini", "GPT Image 2").ok, false);
+  assert.equal(leonardoAdapter.verifyModel("leonardo-gpt-image-2", "GPT Image 2").ok, true);
+  assert.equal(leonardoAdapter.verifyModel("leonardo-gemini", "Nano Banana 2").ok, true);
 });
 
 test("leonardo error taxonomy maps to switch vs circuit", () => {

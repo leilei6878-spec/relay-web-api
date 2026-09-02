@@ -76,7 +76,7 @@ export const leonardoAdapter: ProviderAdapter = {
     const got = (actual || "").toLowerCase();
     if (!got) return { ok: false, requested, actual: "", confirmed: false, code: "MODEL_SELECTION_UNCONFIRMED" };
     const labels = map.logical === "leonardo-gpt-image-2" ? GPT_IMAGE_LABELS : GEMINI_FAMILY_LABELS;
-    if (labels.some((l) => got.includes(l.toLowerCase())) || got.includes("nano") || got.includes("gemini") || got.includes("gpt image")) {
+    if (labels.some((l) => got.includes(l.toLowerCase()))) {
       return { ok: true, requested, actual: actual || requested, confirmed: true };
     }
     return { ok: false, requested, actual: actual || "", confirmed: false, code: "MODEL_MISMATCH" };
@@ -102,7 +102,7 @@ export function listAvailableModels(labels: string[]) {
   return { gpt, gemini, geminiPick: pickGeminiLabel(labels) };
 }
 
-export function accountEligibleForModel(account: Pick<Account, "availableModels" | "tokenState" | "status" | "platform">, model: string) {
+export function accountEligibleForModel(account: Pick<Account, "availableModels" | "availableModelsObservedAt" | "tokenState" | "status" | "platform">, model: string) {
   if (account.status && account.status !== "healthy" && account.status !== "probing") {
     return { ok: false as const, reason: "status" };
   }

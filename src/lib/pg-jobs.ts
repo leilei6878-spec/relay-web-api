@@ -588,6 +588,7 @@ export async function finishJobPg(
       const capabilityPatch: Record<string, unknown> = {};
       if (Array.isArray(result.availableModels) && result.availableModels.length) {
         capabilityPatch.availableModels = result.availableModels;
+        capabilityPatch.availableModelsObservedAt = new Date().toISOString();
       }
       if (result.tokenState === "TOKEN_EXHAUSTED" || decision.code === "LEONARDO_TOKEN_EXHAUSTED") {
         capabilityPatch.tokenState = "TOKEN_EXHAUSTED";

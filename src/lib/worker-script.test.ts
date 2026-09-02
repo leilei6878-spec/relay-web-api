@@ -584,6 +584,7 @@ ref = dict(new, src="https://lh3.googleusercontent.com/ref-a", containerId="comp
 avatar = dict(new, src="https://lh3.googleusercontent.com/avatar.png", width=32, height=32, isNewContainer=False)
 reused = dict(new, src="https://cdn.leonardo.ai/reused-card.png", containerId="existing-card", createdAfterSubmit=False, isNewContainer=False, promptMatch=True, resultAction=True)
 unproven = dict(reused, src="https://cdn.leonardo.ai/lazy-history.png", resultAction=False)
+networked = dict(unproven, src="https://cdn.leonardo.ai/short-prompt.png", networkCaptured=True)
 picked = m.pick_accepted_candidates([hist, ref, avatar, unproven, reused], 1)
 assert len(picked)==1 and picked[0]["src"].endswith("reused-card.png"), picked
 picked = m.pick_accepted_candidates([hist, ref, avatar, new], 1)
@@ -592,6 +593,7 @@ assert m.score_result_candidate(hist)=="REJECT"
 assert m.score_result_candidate(ref)=="REJECT"
 assert m.score_result_candidate(reused)=="HIGH"
 assert m.score_result_candidate(unproven)=="MEDIUM"
+assert m.score_result_candidate(networked)=="VERIFIED"
 print("ok")
 `,
     ],
@@ -789,6 +791,18 @@ print('stop-seen-ok')
   );
   assert.equal(out.status, 0, out.stderr || out.stdout);
   assert.match(out.stdout, /stop-seen-ok/);
+});
+
+test("Leonardo text-to-image uses the React-safe fill path and request-bound network results", () => {
+  const s = localWorkerScript();
+  const start = s.indexOf("def run_leonardo");
+  const fn = s.slice(start, s.indexOf("def beat_loop", start));
+  assert.match(fn, /else:\n\s+filled = leonardo_js_fill\(page, prompt\)/);
+  assert.match(fn, /generate did not become ready/);
+  assert.match(fn, /networkCaptured/);
+  assert.match(fn, /captured_full/);
+  assert.match(fn, /model-selector-trigger/);
+  assert.match(fn, /LEONARDO_MODEL_MISMATCH/);
 });
 
 test("worker persists submission safety checkpoints and final timing metadata", () => {

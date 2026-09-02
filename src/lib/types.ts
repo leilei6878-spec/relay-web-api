@@ -35,6 +35,7 @@ export type Account = {
   pageFingerprint?: string | null;
   selectorPackVersion?: string | null;
   availableModels?: string[];
+  availableModelsObservedAt?: string | null;
   tokenState?: TokenState;
   planHint?: string | null;
   lastPageState?: string | null;

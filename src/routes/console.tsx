@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { ImageInput } from "@/components/image-input";
 import { ASPECT_PRESETS, resolutionOptionsFor, type ImageAspect, type ImageK } from "@/lib/provider/image-size";
+import { invokeTimeoutMessage } from "@/lib/image-timeout";
 import {
   historyBadgeOk,
   phaseFromLogical,
@@ -287,7 +288,7 @@ function Console() {
           error: {
             message:
               res.status === 504
-                ? "TIMEOUT: 图生图超时，网关没有返回内容。请确认参考图已挂上后重试。"
+                ? invokeTimeoutMessage(endpoint, body)
                 : `HTTP ${res.status || 0}：空响应`,
           },
         };
