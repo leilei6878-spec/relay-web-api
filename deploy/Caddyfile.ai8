@@ -1,0 +1,51 @@
+{
+	servers {
+		max_header_size 64KB
+		timeouts {
+			read_header 10s
+			idle 10m
+		}
+	}
+}
+
+ai8.itark.cn {
+	reverse_proxy 127.0.0.1:8088 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		transport http {
+			dial_timeout 10s
+			response_header_timeout 360s
+			read_timeout 360s
+			write_timeout 360s
+		}
+		flush_interval -1
+	}
+
+	request_body {
+		max_size 256MB
+	}
+
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Frame-Options "SAMEORIGIN"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/relay.log {
+			roll_size 50mb
+			roll_keep 8
+		}
+		format json
+		level INFO
+	}
+}
+
+http://38.175.201.137 {
+	redir https://ai8.itark.cn{uri} permanent
+}

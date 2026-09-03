@@ -25,6 +25,11 @@ Keep the Gateway bound to loopback or a private network and expose it only
 through a controlled edge proxy. The edge must **overwrite**, not append or
 preserve, exactly one client-IP header. For the recommended Caddy contract:
 
+The production domain configuration is versioned in `deploy/Caddyfile.ai8`.
+It binds `https://ai8.itark.cn` to `127.0.0.1:8088`, redirects direct HTTP-IP
+traffic to the canonical HTTPS origin, and gives Leonardo image jobs a 360
+second upstream response budget (longer than the 300 second worker deadline).
+
 ```caddy
 reverse_proxy 127.0.0.1:8088 {
   header_up X-Real-IP {remote_host}
