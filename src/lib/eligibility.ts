@@ -98,7 +98,7 @@ export function poolUnavailableMessage(
 
 export const defaultSelectors = {
   chatgpt: {
-    input: ["textarea#prompt-textarea", "div[contenteditable='true']#prompt-textarea"],
+    input: ["#prompt-textarea", "textarea#prompt-textarea", "div[contenteditable='true']#prompt-textarea"],
     send: ["button[data-testid='send-button']", "button[aria-label='Send prompt']"],
     assistant: ["div[data-message-author-role='assistant']"],
     streamingStop: ["button[aria-label='Stop streaming']", "button[data-testid='stop-button']"],

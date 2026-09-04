@@ -2662,7 +2662,11 @@ def run_chat(body, ctx=None):
     if not state:
         return {"ok": False, "error": "没有登录态。把 state.json 放到本目录，或从平台下发 Session"}
     sel = body.get("selectors") or {}
-    inp = (sel.get("input") or ["#prompt-textarea", "textarea#prompt-textarea"])[:4]
+    inp = (sel.get("input") or [])[:4]
+    for fallback_input in ("#prompt-textarea", "textarea#prompt-textarea", "div[contenteditable='true']#prompt-textarea", "div[contenteditable='true']"):
+        if fallback_input not in inp:
+            inp.append(fallback_input)
+    inp = inp[:4]
     send = (sel.get("send") or ["button[data-testid='send-button']", "button[aria-label='Send prompt']"])[:4]
     assistant = (sel.get("assistant") or ["div[data-message-author-role='assistant']"])[:4]
     stop = (sel.get("streamingStop") or ["button[aria-label='Stop streaming']", "button[aria-label='Stop generating']", "button[data-testid='stop-button']"])[:4]
