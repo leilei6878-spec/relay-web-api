@@ -63,7 +63,7 @@ export const GPT_MEDIUM: Record<ImageAspect, readonly [number, number]> = {
   "9:16": [1136, 2048],
   "4:5": [1648, 2048],
   "5:4": [2048, 1648],
-  "21:9": [2048, 880],
+  "21:9": [2048, 864],
 };
 
 /** Leonardo Custom panel named presets (fig. 3). */

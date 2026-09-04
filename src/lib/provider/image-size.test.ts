@@ -150,7 +150,7 @@ test("Leonardo GPT Image 2 uses its real Medium and Large web dimensions", () =>
   assert.deepEqual(pixelsFor("3:2", "2K", "gpt"), { w: 2048, h: 1376 });
   assert.deepEqual(pixelsFor("2:3", "2K", "gpt"), { w: 1376, h: 2048 });
   assert.deepEqual(pixelsFor("4:5", "2K", "gpt"), { w: 1648, h: 2048 });
-  assert.deepEqual(pixelsFor("21:9", "2K", "gpt"), { w: 2048, h: 880 });
+  assert.deepEqual(pixelsFor("21:9", "2K", "gpt"), { w: 2048, h: 864 });
 });
 
 test("Nano Banana 2 and GPT Image 2 expose 10 aspects x 3 distinct tiers", () => {
