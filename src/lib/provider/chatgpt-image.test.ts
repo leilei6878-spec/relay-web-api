@@ -35,4 +35,5 @@ test("image API routes ChatGPT LLM image through ChatGPT accounts and the image-
   assert.match(worker, /create_generation_boundary\(page, ctx, "chatgpt", prompt\)/);
   assert.match(worker, /CHATGPT_IMAGE_NOT_FOUND/);
   assert.match(worker, /for fallback_input in \("#prompt-textarea"/);
+  assert.match(worker, /"\[role='textbox'\]"/);
 });

@@ -1867,7 +1867,7 @@ def recover_page(page, context, level, real):
 
 def composer_ready(page, timeout_ms):
     try:
-        page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea", timeout=timeout_ms)
+        page.wait_for_selector("#prompt-textarea, textarea#prompt-textarea, [contenteditable='true'], [role='textbox']", state="visible", timeout=timeout_ms)
         return True
     except Exception:
         return False
@@ -2665,11 +2665,11 @@ def run_chat(body, ctx=None):
     if not state:
         return {"ok": False, "error": "没有登录态。把 state.json 放到本目录，或从平台下发 Session"}
     sel = body.get("selectors") or {}
-    inp = (sel.get("input") or [])[:4]
-    for fallback_input in ("#prompt-textarea", "textarea#prompt-textarea", "div[contenteditable='true']#prompt-textarea", "div[contenteditable='true']"):
+    inp = (sel.get("input") or [])[:6]
+    for fallback_input in ("#prompt-textarea", "[contenteditable='true']", "[role='textbox']", "textarea", "[data-placeholder]"):
         if fallback_input not in inp:
             inp.append(fallback_input)
-    inp = inp[:4]
+    inp = inp[:6]
     send = (sel.get("send") or ["button[data-testid='send-button']", "button[aria-label='Send prompt']"])[:4]
     assistant = (sel.get("assistant") or ["div[data-message-author-role='assistant']"])[:4]
     stop = (sel.get("streamingStop") or ["button[aria-label='Stop streaming']", "button[aria-label='Stop generating']", "button[data-testid='stop-button']"])[:4]
@@ -2688,7 +2688,7 @@ def run_chat(body, ctx=None):
             return {"ok": False, "error": tunnel_down_error(), "fault": "proxy"}
 
     def first_visible(page, names):
-        loc, _sel = pick_locator(page, names, 4)
+        loc, _sel = pick_locator(page, names, min(6, len(names or [])))
         return loc
 
     def run_on(page, context, close_browser):
