@@ -1930,6 +1930,8 @@ def score_result_candidate(c):
         return "VERIFIED"
     if c.get("isNewSrc") and c.get("domainMatch") and (c.get("isNewContainer") or c.get("createdAfterSubmit")):
         return "HIGH"
+    if c.get("isNewSrc") and c.get("domainMatch") and w >= 512 and h >= 512:
+        return "HIGH"
     if c.get("isNewSrc") and c.get("domainMatch") and c.get("resultAction") and w >= 256 and h >= 256:
         return "HIGH"
     if c.get("isNewSrc"):
@@ -2051,8 +2053,7 @@ def collect_result_candidates(page, boundary, provider=""):
                 const id = el.getAttribute('data-generation-id') || el.getAttribute('data-response-id') || el.id || ('c'+i);
                 push(el, id, !baselineC.has(id));
               });
-              const hasGood = out.some((x) => x.isNewSrc && x.domainMatch && !x.ui && !x.historicalDuplicate);
-              if (!hasGood) push(document.body, 'page-fallback', false);
+              push(document.body, 'page-fallback', false);
               return out;
             }""",
             {"baseline": baseline, "containers": containers, "provider": provider, "prompt": (boundary or {}).get("prompt") or ""},
