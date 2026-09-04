@@ -65,6 +65,16 @@ test("ChatGPT structural canary accepts a ready composer before the send button 
   assert.doesNotMatch(block, /send_ok/);
 });
 
+test("worker locator skips hidden duplicate ChatGPT controls", () => {
+  const script = localWorkerScript();
+  const start = script.indexOf("def pick_locator");
+  const end = script.indexOf("def first_visible", start);
+  const block = script.slice(start, end);
+  assert.match(block, /count = min\(4, matches\.count\(\)\)/);
+  assert.match(block, /matches\.nth\(index\)/);
+  assert.match(block, /loc\.is_visible\(\)/);
+});
+
 test("run_leonardo without session is LOGIN_REQUIRED and never fake-success", () => {
   mkdirSync("storage/relay-qa", { recursive: true });
   writeFileSync("storage/relay-qa/worker.py", localWorkerScript());

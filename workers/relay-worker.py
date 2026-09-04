@@ -1572,10 +1572,13 @@ def pick_locator(page, names, limit=4):
         if tried >= limit:
             break
         tried += 1
-        loc = page.locator(s).first
         try:
-            if loc.count() > 0 and loc.is_visible():
-                return loc, s
+            matches = page.locator(s)
+            count = min(4, matches.count())
+            for index in range(count):
+                loc = matches.nth(index)
+                if loc.is_visible():
+                    return loc, s
         except Exception:
             pass
     return None, None
