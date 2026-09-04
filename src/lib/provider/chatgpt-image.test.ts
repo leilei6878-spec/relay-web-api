@@ -44,4 +44,5 @@ test("image API routes ChatGPT LLM image through ChatGPT accounts and the image-
   assert.match(worker, /page\.expect_download/);
   assert.match(worker, /baseline_assistant_count/);
   assert.match(worker, /baseline_download_count/);
+  assert.match(worker, /download\|edit\|share/);
 });

@@ -1933,7 +1933,7 @@ def score_result_candidate(c):
         return "VERIFIED"
     if c.get("isNewSrc") and c.get("domainMatch") and (c.get("isNewContainer") or c.get("createdAfterSubmit")):
         return "HIGH"
-    if c.get("isNewSrc") and c.get("domainMatch") and c.get("promptMatch") and c.get("resultAction") and w >= 256 and h >= 256:
+    if c.get("isNewSrc") and c.get("domainMatch") and c.get("resultAction") and w >= 256 and h >= 256:
         return "HIGH"
     if c.get("isNewSrc"):
         return "MEDIUM"
@@ -1959,11 +1959,11 @@ def create_generation_boundary(page, ctx=None, provider="", prompt=""):
     snap = {"ids": [], "gens": [], "srcs": []}
     try:
         snap = page.evaluate("""() => {
-          const sel = 'model-response, .response-container, [data-message-author-role], [data-testid*="generation"], article, [class*="ImageCard"], [class*="result"]';
+          const sel = 'model-response, .response-container, [data-message-author-role], [data-testid*="generation"], [data-testid*="image"], article, figure, [class*="ImageCard"], [class*="image" i], [class*="result"]';
           const nodes = [...document.querySelectorAll(sel)];
           const ids = nodes.map((el, i) => el.getAttribute('data-generation-id') || el.getAttribute('data-response-id') || el.id || ('c'+i));
           window.__relayBaselineContainers = ids;
-          const srcs = [...document.querySelectorAll('img')].map((im) => im.getAttribute('src') || '').filter(Boolean);
+          const srcs = [...document.querySelectorAll('img')].map((im) => im.currentSrc || im.src || im.getAttribute('src') || '').filter(Boolean);
           window.__relayBaselineSrcs = srcs;
           const downloadSelector = 'button[aria-label*="Download" i], button[title*="Download" i], [data-testid*="download" i], a[download]';
           return {
@@ -2010,7 +2010,7 @@ def collect_result_candidates(page, boundary, provider=""):
               const promptNeedle = promptNorm.slice(0, 48);
               const domainRe = /googleusercontent|ggpht|leonardo\\.ai|leonardocdn|leonardousercontent|oaidalle|oaiusercontent|openaiusercontent|blob\\.core\\.windows\\.net|data:image/;
               const uiRe = /favicon|avatar|logo|sprite|icon|emoji|\\/static\\/|profile/;
-              const sel = 'model-response, .response-container, [data-message-author-role], [data-testid*="generation"], article, [class*="ImageCard"], [class*="result"]';
+              const sel = 'model-response, .response-container, [data-message-author-role], [data-testid*="generation"], [data-testid*="image"], article, figure, [class*="ImageCard"], [class*="image" i], [class*="result"]';
               const nodes = [...document.querySelectorAll(sel)];
               const out = [];
               const seen = new Set();
@@ -2023,7 +2023,9 @@ def collect_result_candidates(page, boundary, provider=""):
                   const r = im.getBoundingClientRect();
                   const alt = im.getAttribute('alt') || '';
                   const altNorm = normalize(alt);
-                  const actionRoot = root === document.body ? im.closest(sel) : root;
+                  const actionRoot = root === document.body
+                    ? (im.closest('[data-message-author-role], [data-testid*="generation"], [data-testid*="image"], article, figure, [class*="image" i], [class*="result"]') || im.parentElement)
+                    : root;
                   const actionBlob = actionRoot ? [...actionRoot.querySelectorAll('button, [role="button"]')]
                     .map((el) => (el.getAttribute('aria-label') || '') + ' ' + (el.innerText || ''))
                     .join(' ') : '';
@@ -2042,7 +2044,7 @@ def collect_result_candidates(page, boundary, provider=""):
                     referenceDuplicate: false,
                     historicalDuplicate: baseline.has(src),
                     promptMatch: promptNeedle.length >= 6 && altNorm.includes(promptNeedle),
-                    resultAction: /download|remove|reuse prompt|copy prompt|make public|add to canva|positive feedback/i.test(actionBlob),
+                    resultAction: /download|edit|share|remove|reuse prompt|copy prompt|make public|add to canva|positive feedback/i.test(actionBlob),
                     ui: uiRe.test(src),
                     fallback: containerId === 'page-fallback',
                   });
