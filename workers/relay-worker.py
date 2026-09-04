@@ -3763,6 +3763,19 @@ def read_displayed_size(page):
         pass
     return 0, 0
 
+def wait_displayed_size(page, timeout_ms=12000):
+    deadline = time.time() + max(0.5, float(timeout_ms or 0) / 1000.0)
+    shown_w, shown_h = 0, 0
+    while time.time() < deadline:
+        shown_w, shown_h = read_displayed_size(page)
+        if shown_w > 0 and shown_h > 0:
+            return shown_w, shown_h
+        try:
+            page.wait_for_timeout(250)
+        except Exception:
+            time.sleep(0.25)
+    return read_displayed_size(page)
+
 def close_leonardo_drawers(page):
     closed = 0
     for _ in range(4):
@@ -3817,7 +3830,7 @@ def apply_image_size(page, want_size, aspect=None, tier=None, gpt=False):
     if gpt and (not aspect_match(shown_w, shown_h, aspect) or str(shown_tier).lower() != str(tier).lower()):
         if count_leonardo_refs(page) == 0:
             query = set_gpt_resolution_query(page, aspect, tier)
-            shown_w, shown_h = read_displayed_size(page)
+            shown_w, shown_h = wait_displayed_size(page, 12000)
     print("image size want=%s aspect=%s tier=%s %dx%d open=%s dim=%s query=%s shown=%dx%d url=%s" % (want_size, aspect, tier, w, h, opened, dim, query, shown_w, shown_h, page.url), flush=True)
     try:
         page.keyboard.press("Escape")

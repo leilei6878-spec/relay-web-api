@@ -268,6 +268,38 @@ print("gpt-query-ok")
   assert.match(out.stdout, /gpt-query-ok/);
 });
 
+test("GPT Image 2 waits for dimensions after a URL tier navigation", () => {
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
+  const out = spawnSync(
+    PYTHON,
+    [
+      "-c",
+      `
+import importlib.util
+spec=importlib.util.spec_from_file_location("w", "storage/relay-qa/worker.py")
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+class Page:
+    def __init__(self): self.reads=0
+    def evaluate(self, source, arg=None):
+        if "return [Number(m[1]), Number(m[2])]" in source:
+            self.reads += 1
+            return [0, 0] if self.reads < 3 else [2752, 1536]
+        return None
+    def wait_for_timeout(self, ms): pass
+p=Page()
+assert m.wait_displayed_size(p, 12000)==(2752, 1536)
+assert p.reads==3
+print("gpt-dimension-wait-ok")
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /gpt-dimension-wait-ok/);
+  assert.match(localWorkerScript(), /wait_displayed_size\(page, 12000\)/);
+});
+
 test("ref_body_sizes and extract_prompt_images keep leonardo refs", () => {
   mkdirSync("storage/relay-qa", { recursive: true });
   writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
