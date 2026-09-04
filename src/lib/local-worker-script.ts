@@ -2876,6 +2876,38 @@ def run_chat(body, ctx=None):
         if ctx and ctx.submission_state == "SUBMITTED":
             set_submission_state(ctx, "GENERATING")
         if image_job:
+            def complete_chatgpt_image(raw, mime, width, height, confidence="VERIFIED"):
+                mark("T8")
+                set_submission_state(ctx, "RESULT_DETECTED")
+                data_url = raw_to_data_url(raw, mime)
+                if not data_url:
+                    return None
+                set_submission_state(ctx, "RESULT_VALIDATED")
+                mark("T9")
+                try:
+                    state_out = context.storage_state()
+                except Exception:
+                    state_out = None
+                mark("T10")
+                return {
+                    "ok": True,
+                    "text": "IMAGE",
+                    "url": data_url,
+                    "urls": [data_url],
+                    "resultConfidences": [confidence or "VERIFIED"],
+                    "pageState": "RESULT_READY",
+                    "modelActual": actual or "ChatGPT",
+                    "backendMode": "web_account",
+                    "selectorPackVersion": pack_version,
+                    "actualWidth": width,
+                    "actualHeight": height,
+                    "sessionState": state_out,
+                    "sessionBaseVersion": int(body.get("sessionVersion") or 0),
+                    "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
+                    "timing": {"marks": marks, "generation_ms": marks.get("T9", 0) - marks.get("T6", 0), "total_ms": marks.get("T10", 0)},
+                    "profile": profile,
+                    "recoveryLevel": recovery_level,
+                }
             deadline = time.time() + max(45, min(300, timeout_ms / 1000.0 - 12))
             final_text = ""
             while time.time() < deadline:
@@ -2883,6 +2915,13 @@ def run_chat(body, ctx=None):
                 if pst in ("LOGIN_REQUIRED", "CHALLENGE", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
                     err, fault = page_state_error(pst, False, "chatgpt")
                     return fail_job(ctx, err, fault, {"pageState": pst, "modelActual": actual or "ChatGPT", "timing": marks})
+                downloaded = download_chatgpt_image_action(page)
+                if downloaded is not None:
+                    raw, mime, width, height = downloaded
+                    if image_magic_ok(raw) and not result_is_reference(raw, ref_hashes) and sha256_hex(raw) not in set(ctx.historical_hashes or []):
+                        completed = complete_chatgpt_image(raw, mime, width, height, "VERIFIED")
+                        if completed:
+                            return completed
                 located_raw = collect_result_candidates(page, image_boundary, "chatgpt")
                 captured_urls = set(image_net["by_url"].keys())
                 upgraded_captures = set(upgrade_cdn_url(url) for url in captured_urls)
@@ -2918,37 +2957,9 @@ def run_chat(body, ctx=None):
                         continue
                     if width < 64 or height < 64:
                         continue
-                    mark("T8")
-                    set_submission_state(ctx, "RESULT_DETECTED")
-                    data_url = raw_to_data_url(raw, mime)
-                    if not data_url:
-                        continue
-                    set_submission_state(ctx, "RESULT_VALIDATED")
-                    mark("T9")
-                    try:
-                        state_out = context.storage_state()
-                    except Exception:
-                        state_out = None
-                    mark("T10")
-                    return {
-                        "ok": True,
-                        "text": "IMAGE",
-                        "url": data_url,
-                        "urls": [data_url],
-                        "resultConfidences": [candidate.get("confidence") or "HIGH"],
-                        "pageState": "RESULT_READY",
-                        "modelActual": actual or "ChatGPT",
-                        "backendMode": "web_account",
-                        "selectorPackVersion": pack_version,
-                        "actualWidth": width,
-                        "actualHeight": height,
-                        "sessionState": state_out,
-                        "sessionBaseVersion": int(body.get("sessionVersion") or 0),
-                        "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
-                        "timing": {"marks": marks, "generation_ms": marks.get("T9", 0) - marks.get("T6", 0), "total_ms": marks.get("T10", 0)},
-                        "profile": profile,
-                        "recoveryLevel": recovery_level,
-                    }
+                    completed = complete_chatgpt_image(raw, mime, width, height, candidate.get("confidence") or "HIGH")
+                    if completed:
+                        return completed
                 current_text = read_assistant_full(page)
                 if usable_assistant_text(current_text):
                     final_text = current_text
@@ -4238,6 +4249,45 @@ def download_page_image(page, context, url):
         except Exception:
             return None, "IMAGE_NOT_FOUND: browser blob download failed"
     return download_result_image(context, url)
+
+def download_chatgpt_image_action(page):
+    selectors = (
+        'button[aria-label*="Download" i]',
+        'button[title*="Download" i]',
+        '[data-testid*="download" i]',
+        'a[download]',
+    )
+    for selector in selectors:
+        try:
+            matches = page.locator(selector)
+            count = min(6, matches.count())
+            for index in range(count - 1, -1, -1):
+                button = matches.nth(index)
+                if not button.is_visible():
+                    continue
+                try:
+                    with page.expect_download(timeout=5000) as pending:
+                        button.click(timeout=2000)
+                    download = pending.value
+                    path = download.path()
+                    if not path or not os.path.isfile(path):
+                        continue
+                    with open(path, "rb") as source:
+                        raw = source.read()
+                    if not image_magic_ok(raw):
+                        continue
+                    width, height = image_wh(raw)
+                    mime = "image/png"
+                    if raw[:3] == b"\\xff\\xd8\\xff":
+                        mime = "image/jpeg"
+                    elif raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+                        mime = "image/webp"
+                    return raw, mime, width, height
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    return None
 
 def run_leonardo(body, ctx=None):
     ctx = ctx or JobRuntimeContext(body)
