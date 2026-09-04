@@ -4925,6 +4925,7 @@ def poll_gateway():
                 payload["aspect"] = job.get("aspect") or ""
                 payload["tier"] = job.get("tier") or ""
             else:
+                payload["platform"] = "chatgpt"
                 payload["model"] = job.get("model") or "chatgpt-web-auto"
             def _run(payload=payload):
                 global DISPATCHED
