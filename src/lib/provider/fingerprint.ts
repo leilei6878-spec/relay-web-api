@@ -17,7 +17,10 @@ export function featureDelta(prev: Fingerprint | null | undefined, next: Fingerp
     const was = prevMap.get(f.key);
     if (was === true && f.present === false) {
       flipped += 1;
-      if (/composer|input|send|assistant/.test(f.key)) missingCritical.push(f.key);
+      const critical = next.provider === "chatgpt"
+        ? /composer|input/.test(f.key)
+        : /composer|input|send|assistant/.test(f.key);
+      if (critical) missingCritical.push(f.key);
     } else if (was !== undefined && was !== f.present) {
       flipped += 1;
     }

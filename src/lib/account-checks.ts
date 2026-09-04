@@ -262,6 +262,7 @@ async function liveCheck(account: Account, runId: string): Promise<CheckResult> 
   const model = canaryModelFor(current.platform, current, adapter.capabilities().models);
   const options = {
     kind: "canary" as const,
+    accountCheck: true,
     targetAccountId: current.id,
     allowUnhealthyTarget: true,
     selectorPackVersion: await activeSelectorPack(current.platform),

@@ -56,6 +56,7 @@ export type Job = {
   resultConfidences?: ResultConfidence[];
   resultAssets?: ImageAssetRecord[];
   fingerprint?: WorkerFingerprint;
+  accountCheck?: boolean;
   attempts?: number;
   startedAt?: string;
   workerName?: string;
@@ -125,6 +126,7 @@ export type EnqueueOpts = {
   inspectionId?: string;
   targetAccountId?: string;
   allowUnhealthyTarget?: boolean;
+  accountCheck?: boolean;
 };
 
 export type WorkerRow = {
@@ -462,6 +464,7 @@ async function enqueue(
       excludeAccountIds: exclude,
       proxyId: account.proxyId || undefined,
       kind: opts.kind,
+      accountCheck: opts.accountCheck,
       inspectionId: opts.inspectionId,
       turns: opts.turns,
       selectorPackVersion:
@@ -842,7 +845,7 @@ export function finishJob(
     job.selectorPackVersion = result.selectorPackVersion || job.selectorPackVersion;
     job.lease = undefined;
     await save(store);
-    if (job.kind === "canary") {
+    if (job.kind === "canary" && !job.accountCheck) {
       await processStructuralCanaryResult({
         provider: job.platform,
         selectorPackVersion: job.selectorPackVersion || getAdapter(job.platform).selectorPack().version,

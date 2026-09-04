@@ -240,3 +240,19 @@ test("fingerprint change on missing composer is critical", () => {
   assert.equal(delta.changed, true);
   assert.ok(delta.missingCritical.includes("composer"));
 });
+
+test("blank ChatGPT threads may hide send and assistant controls without opening the provider circuit", () => {
+  const prev = fingerprint("chatgpt", "chatgpt-v1", [
+    { key: "input", present: true },
+    { key: "send", present: true },
+    { key: "assistant", present: true },
+  ]);
+  const next = fingerprint("chatgpt", "chatgpt-v1", [
+    { key: "input", present: true },
+    { key: "send", present: false },
+    { key: "assistant", present: false },
+  ]);
+  const delta = featureDelta(prev, next);
+  assert.equal(delta.changed, true);
+  assert.deepEqual(delta.missingCritical, []);
+});

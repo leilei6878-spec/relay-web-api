@@ -39,6 +39,8 @@ test("inspection jobs bypass paid image validation and provider counters", async
   const pgSource = await import("node:fs/promises").then((fs) => fs.readFile(new URL("./pg-jobs.ts", import.meta.url), "utf8"));
   assert.match(source, /job\.kind !== "inspection"/);
   assert.match(pgSource, /current\.kind !== "inspection"/);
+  assert.match(source, /job\.kind === "canary" && !job\.accountCheck/);
+  assert.match(pgSource, /current\.kind === "canary" && !current\.accountCheck/);
   assert.match(source, /job\.kind === "inspection"/);
   assert.match(pgSource, /current\.kind === "inspection"/);
   assert.match(source, /opts\.targetAccountId/);

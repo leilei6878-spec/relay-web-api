@@ -160,6 +160,7 @@ export async function enqueuePg(
     excludeAccountIds: exclude,
     proxyId: account.proxyId || undefined,
     kind: opts.kind,
+    accountCheck: opts.accountCheck,
     inspectionId: opts.inspectionId,
     turns: opts.turns,
     selectorPackVersion:
@@ -528,7 +529,7 @@ export async function finishJobPg(
     return { ok: false as const, error: "STALE_LEASE: fencing mismatch or job not running" };
   }
 
-  if (current.kind === "canary") {
+  if (current.kind === "canary" && !current.accountCheck) {
     const { getAdapter } = await import("./provider/index");
     await processStructuralCanaryResult({
       provider: current.platform,

@@ -81,4 +81,5 @@ test("live checks pin the exact account even while its health status is probing"
   const source = await import("node:fs/promises").then((fs) => fs.readFile(new URL("./account-checks.ts", import.meta.url), "utf8"));
   assert.match(source, /targetAccountId: current\.id/);
   assert.match(source, /allowUnhealthyTarget: true/);
+  assert.match(source, /accountCheck: true/);
 });
