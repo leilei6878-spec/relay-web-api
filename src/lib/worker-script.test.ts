@@ -266,6 +266,7 @@ print("gpt-query-ok")
   );
   assert.equal(out.status, 0, out.stderr || out.stdout);
   assert.match(out.stdout, /gpt-query-ok/);
+  assert.match(localWorkerScript(), /"21:9": "21:9-ultrawide-film"/);
 });
 
 test("GPT Image 2 waits for dimensions after a URL tier navigation", () => {

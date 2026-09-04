@@ -45,11 +45,25 @@ export const GPT_LARGE: Record<ImageAspect, readonly [number, number]> = {
   "2:3": [2336, 3504],
   "4:3": [3264, 2448],
   "3:4": [2448, 3264],
-  "16:9": [3840, 2160],
-  "9:16": [2160, 3840],
+  "16:9": [3584, 2016],
+  "9:16": [2016, 3584],
   "4:5": [2560, 3200],
   "5:4": [3200, 2560],
-  "21:9": [3840, 1648],
+  "21:9": [3584, 1536],
+};
+
+/** Leonardo GPT Image 2 web UI Medium targets observed from its size state. */
+export const GPT_MEDIUM: Record<ImageAspect, readonly [number, number]> = {
+  "1:1": [2048, 2048],
+  "3:2": [2048, 1376],
+  "2:3": [1376, 2048],
+  "4:3": [2048, 1536],
+  "3:4": [1536, 2048],
+  "16:9": [2048, 1136],
+  "9:16": [1136, 2048],
+  "4:5": [1648, 2048],
+  "5:4": [2048, 1648],
+  "21:9": [2048, 880],
 };
 
 /** Leonardo Custom panel named presets (fig. 3). */
@@ -240,7 +254,10 @@ export function pixelsFor(aspect: ImageAspect, k: ImageK, family: ImageFamily): 
   const [w1, h1] = NATIVE_1K[aspect] || NATIVE_1K["1:1"];
   if (k === "1K") return { w: w1, h: h1 };
   if (k === "2K") {
-    if (family === "gpt" && aspect === "1:1") return { w: 2048, h: 2048 };
+    if (family === "gpt") {
+      const [w, h] = GPT_MEDIUM[aspect];
+      return { w, h };
+    }
     return { w: w1 * 2, h: h1 * 2 };
   }
   if (family === "gpt") {

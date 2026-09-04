@@ -3736,9 +3736,19 @@ def set_gpt_resolution_query(page, aspect, tier):
             return "query-skip"
         params = dict(parse_qsl(parsed.query, keep_blank_values=True))
         wanted_size = str(tier or "Small").upper()
-        if params.get("aspectRatio") == str(aspect) and params.get("size") == wanted_size:
+        aspect_values = {
+            "3:2": "3:2-slider-only",
+            "4:3": "4:3-twitter",
+            "3:4": "3:4-slider-only",
+            "9:16": "9:16-mobile",
+            "4:5": "4:5-instagram",
+            "5:4": "5:4-slider-only",
+            "21:9": "21:9-ultrawide-film",
+        }
+        wanted_aspect = aspect_values.get(str(aspect), str(aspect))
+        if params.get("aspectRatio") == wanted_aspect and params.get("size") == wanted_size:
             return "query-already"
-        params["aspectRatio"] = str(aspect)
+        params["aspectRatio"] = wanted_aspect
         params["size"] = wanted_size
         target = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(params), parsed.fragment))
         page.goto(target, wait_until="domcontentloaded", timeout=25000)

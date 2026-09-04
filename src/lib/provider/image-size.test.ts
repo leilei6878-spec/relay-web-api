@@ -138,6 +138,21 @@ test("gemini-image is Gemini web, flash-image is Nano Banana", () => {
   assert.ok(ASPECT_PRESETS.some((p) => p.id === "4:5" && p.hint.includes("Instagram")));
 });
 
+test("Leonardo GPT Image 2 uses its real Medium and Large web dimensions", () => {
+  assert.deepEqual(
+    resolutionOptionsFor("leonardo-gpt-image-2", "16:9").map((option) => [option.tier, option.w, option.h]),
+    [
+      ["Small", 1376, 768],
+      ["Medium", 2048, 1136],
+      ["Large", 3584, 2016],
+    ],
+  );
+  assert.deepEqual(pixelsFor("3:2", "2K", "gpt"), { w: 2048, h: 1376 });
+  assert.deepEqual(pixelsFor("2:3", "2K", "gpt"), { w: 1376, h: 2048 });
+  assert.deepEqual(pixelsFor("4:5", "2K", "gpt"), { w: 1648, h: 2048 });
+  assert.deepEqual(pixelsFor("21:9", "2K", "gpt"), { w: 2048, h: 880 });
+});
+
 test("Nano Banana 2 and GPT Image 2 expose 10 aspects x 3 distinct tiers", () => {
   for (const model of ["leonardo-gemini", "leonardo-gpt-image-2"]) {
     for (const preset of ASPECT_PRESETS) {
