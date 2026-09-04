@@ -12,6 +12,7 @@ import { LOCAL_WORKER, localWorkerScript } from "@/lib/local-worker-script";
 import { textFile, zipStore } from "@/lib/zip-store";
 import { useGateway } from "@/lib/store";
 import type { Platform } from "@/lib/types";
+import { CHATGPT_IMAGE_MODEL, isChatGptImageModel } from "@/lib/provider/chatgpt-image";
 
 export const Route = createFileRoute("/playground")({ component: Page });
 
@@ -34,6 +35,7 @@ const CHAT_MODELS = [
 ];
 
 const IMAGE_MODELS = [
+  { id: CHATGPT_IMAGE_MODEL, label: "ChatGPT LLM / 出图（复用 LLM 账号）" },
   { id: "gemini-image", label: "Gemini / 出图" },
   { id: "leonardo-gpt-image-2", label: "Leonardo / GPT Image 2" },
   { id: "leonardo-gemini", label: "Leonardo / Nano Banana 2" },
@@ -211,7 +213,7 @@ pause
   }
 
   async function send() {
-    const platform: Platform = mode === "chat" ? "chatgpt" : imageModel.startsWith("leonardo-") ? "leonardo" : "gemini";
+    const platform: Platform = mode === "chat" || isChatGptImageModel(imageModel) ? "chatgpt" : imageModel.startsWith("leonardo-") ? "leonardo" : "gemini";
     const promptText =
       prompt.trim() || (images.length ? (mode === "chat" ? "请描述这张图片" : "根据参考图生成一张新图") : "");
     if (!promptText) {
@@ -281,7 +283,7 @@ pause
       if ("text" in res && res.text) setReply(res.text);
       if ("url" in res && res.url) setImageUrl(res.url);
       setUsed(email);
-      setReplySource(res.ok && "mode" in res && res.mode === "live" ? "web" : res.ok ? "preview" : "");
+      setReplySource(res.ok && "mode" in res && (res.mode === "live" || res.mode === "web_account") ? "web" : res.ok ? "preview" : "");
     } finally {
       setBusy(false);
     }
@@ -400,7 +402,7 @@ pause
           {used && (
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <Badge tone={replySource === "web" ? "ok" : "warn"}>
-                {replySource === "web" ? "ChatGPT 网页原文" : "预览回写"}
+                {replySource === "web" ? "网页账号真实结果" : "预览回写"}
               </Badge>
               <span className="font-mono text-xs text-muted">{used}</span>
               {switched > 0 && <Badge tone="warn">换号 {switched} 次</Badge>}

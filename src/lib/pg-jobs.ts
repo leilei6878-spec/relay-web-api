@@ -430,7 +430,11 @@ export async function finishJobPg(
   if (result.url && !rawUrls.includes(result.url)) rawUrls.unshift(result.url);
   let url = result.url;
   let urls = rawUrls;
-  if ((current.platform === "gemini" || current.platform === "leonardo") && result.ok && current.kind !== "canary" && current.kind !== "inspection" && result.text !== "CANARY") {
+  const imageResultJob =
+    current.platform === "gemini" ||
+    current.platform === "leonardo" ||
+    (current.platform === "chatgpt" && (current.kind === "image" || current.kind === "edit"));
+  if (imageResultJob && result.ok && current.kind !== "canary" && current.kind !== "inspection" && result.text !== "CANARY") {
     const { validateJobImageUrls } = await import("./provider/image-result-validator");
     const { describeDataUrl } = await import("./provider/reference-verify");
     const pending = urls.length ? urls : url ? [url] : [];
@@ -490,7 +494,7 @@ export async function finishJobPg(
       }));
     }
   }
-  if (urls.length && result.ok && (current.platform === "gemini" || current.platform === "leonardo") && current.kind !== "inspection") {
+  if (urls.length && result.ok && imageResultJob && current.kind !== "inspection") {
     const needsPersist = urls.some((u) => u.startsWith("data:"));
     if (needsPersist) {
       const stored = await persistImageUrls(urls);

@@ -132,7 +132,7 @@ export type ResolutionOption = {
 
 export function imageFamily(model?: string): ImageFamily {
   const m = (model || "").toLowerCase();
-  if (m.includes("gpt-image") || m.startsWith("dall-e") || m === "leonardo-gpt-image-2") return "gpt";
+  if (m === "chatgpt-llm-image" || m.includes("gpt-image") || m.startsWith("dall-e") || m === "leonardo-gpt-image-2") return "gpt";
   if (m === "gemini-image" || (m.startsWith("gemini") && !m.includes("image") && !m.includes("banana") && !m.includes("imagen"))) {
     return "gemini";
   }

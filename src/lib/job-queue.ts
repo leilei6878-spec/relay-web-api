@@ -763,7 +763,11 @@ export function finishJob(
     let url = result.url;
     let urls = (Array.isArray(result.urls) ? result.urls : []).filter((u: string) => typeof u === "string" && u) as string[];
     if (url && !urls.includes(url)) urls.unshift(url);
-    if ((job.platform === "gemini" || job.platform === "leonardo") && result.ok && job.kind !== "canary" && job.kind !== "inspection" && result.text !== "CANARY") {
+    const imageResultJob =
+      job.platform === "gemini" ||
+      job.platform === "leonardo" ||
+      (job.platform === "chatgpt" && (job.kind === "image" || job.kind === "edit"));
+    if (imageResultJob && result.ok && job.kind !== "canary" && job.kind !== "inspection" && result.text !== "CANARY") {
       const pending = urls.length ? urls : url ? [url] : [];
       const refHashes = job.referenceAssets?.length
         ? job.referenceAssets.map((asset) => asset.sha256)
@@ -822,7 +826,7 @@ export function finishJob(
         }));
       }
     }
-    if (urls.length && result.ok && (job.platform === "gemini" || job.platform === "leonardo") && job.kind !== "canary" && job.kind !== "inspection") {
+    if (urls.length && result.ok && imageResultJob && job.kind !== "canary" && job.kind !== "inspection") {
       const needsPersist = urls.some((u) => u.startsWith("data:"));
       if (needsPersist) {
         const stored = await persistImageUrls(urls);

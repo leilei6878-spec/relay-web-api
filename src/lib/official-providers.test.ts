@@ -10,6 +10,7 @@ test("commercial models resolve only to official providers", () => {
   assert.deepEqual(resolveOfficialModel("vertex:gemini-3.7-flash"), { provider: "vertex", model: "gemini-3.7-flash", publicModel: "vertex:gemini-3.7-flash" });
   assert.deepEqual(resolveOfficialModel("gpt-5-mini").provider, "openai");
   assert.throws(() => resolveOfficialModel("chatgpt-web-auto"), /MUST_BE_OFFICIAL/);
+  assert.throws(() => resolveOfficialModel("chatgpt-llm-image"), /MUST_BE_OFFICIAL/);
 });
 
 test("Vertex official adapter exchanges a service-account JWT and uses the regional generateContent endpoint", async () => {

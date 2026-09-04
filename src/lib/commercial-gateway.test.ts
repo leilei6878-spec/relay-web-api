@@ -22,7 +22,7 @@ test("public commercial API branches before web-account selection", async () => 
   const responses = await readFile("src/routes/v1/responses.ts", "utf8");
   const jobs = await readFile("src/routes/api/jobs.ts", "utf8");
   assert.ok(chat.indexOf("if (auth.commercial)") < chat.indexOf("const prepared ="));
-  assert.ok(images.indexOf("if (auth.commercial)") < images.indexOf("const platform = isLeonardoModel"));
+  assert.ok(images.indexOf("if (auth.commercial)") < images.indexOf("const platform ="));
   assert.match(chat, /commercialChatCompletion/);
   assert.match(images, /commercialImageGeneration/);
   assert.match(chat, /Commercial streaming is temporarily disabled/);

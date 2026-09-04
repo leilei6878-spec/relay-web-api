@@ -49,7 +49,7 @@ function errorMessage(body: unknown, fallback: string) {
 
 export function resolveOfficialModel(input: string): ResolvedOfficialModel {
   const raw = input.trim();
-  if (/web[-_ ]|nano-banana|leonardo-gemini|leonardo-gpt-image/i.test(raw)) {
+  if (/web[-_ ]|chatgpt-llm-image|nano-banana|leonardo-gemini|leonardo-gpt-image/i.test(raw)) {
     throw new Error("COMMERCIAL_MODEL_MUST_BE_OFFICIAL: web-account aliases are internal only");
   }
   const qualified = raw.match(/^(openai|google|gemini|vertex|leonardo)[:/](.+)$/i);

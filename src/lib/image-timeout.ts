@@ -1,5 +1,7 @@
 export const LEONARDO_JOB_TIMEOUT_MS = 300_000;
 export const LEONARDO_API_WAIT_MS = 290_000;
+export const CHATGPT_IMAGE_JOB_TIMEOUT_MS = 300_000;
+export const CHATGPT_IMAGE_API_WAIT_MS = 290_000;
 export const ADMIN_INVOKE_TIMEOUT_MS = 330_000;
 
 function hasReferenceImage(payload: unknown) {

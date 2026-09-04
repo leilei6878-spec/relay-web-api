@@ -2,14 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { assertApiKey, pickAccount, readControlPlane } from "@/lib/control-plane";
 import { poolUnavailableMessage } from "@/lib/eligibility";
 import { decideWithSafety } from "@/lib/fault-matrix";
-import { enqueueImage, getJob, liveWorkerOnline, waitJob } from "@/lib/job-queue";
+import { enqueueChat, enqueueImage, getJob, liveWorkerOnline, waitJob, type EnqueueOpts } from "@/lib/job-queue";
 import { defaultPrompt, MAX_IMAGES_LEONARDO, parseImageRequest } from "@/lib/media";
 import { completeRequest, createRelayRequest } from "@/lib/requests";
 import { fallbackImage } from "@/lib/upstream";
 import { appendUsage } from "@/lib/usage";
 import { estimateTokens } from "@/lib/tokens";
 import { publicRelayMeta } from "@/lib/public-relay-meta";
-import { LEONARDO_API_WAIT_MS, LEONARDO_JOB_TIMEOUT_MS } from "@/lib/image-timeout";
+import { CHATGPT_IMAGE_API_WAIT_MS, CHATGPT_IMAGE_JOB_TIMEOUT_MS, LEONARDO_API_WAIT_MS, LEONARDO_JOB_TIMEOUT_MS } from "@/lib/image-timeout";
 import { uid } from "@/lib/utils";
 import { commercialImageGeneration, openAiCompatibleCommercialImages } from "@/lib/commercial-gateway";
 import { enforceCommercialKeyLimits } from "@/lib/saas-api-keys";
@@ -17,6 +17,7 @@ import type { CommercialApiKey } from "@/lib/commercial-types";
 import { resolveOfficialModel } from "@/lib/official-providers";
 import { collectSizeInput, resolveImageSpec } from "@/lib/provider/image-size";
 import { getAdapter } from "@/lib/provider";
+import { chatGptImagePrompt, isChatGptImageModel } from "@/lib/provider/chatgpt-image";
 import { ingestReferenceImages } from "@/lib/reference-input";
 import {
   defaultResponseFormat,
@@ -215,7 +216,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     }
     return Response.json(openAiCompatibleCommercialImages(result), { headers: cors() });
   }
-  const platform = isLeonardoModel(model) ? "leonardo" : "gemini";
+  const platform = isChatGptImageModel(model) ? "chatgpt" : isLeonardoModel(model) ? "leonardo" : "gemini";
   let n = 1;
   let size = "1024x1024";
   let quality = "MEDIUM";
@@ -275,6 +276,9 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     );
   }
   const format = defaultResponseFormat(model, parsed.responseFormat);
+  const providerPrompt = platform === "chatgpt"
+    ? chatGptImagePrompt({ prompt, aspect, size, hasReferences: parsed.images.length > 0 })
+    : prompt;
   const frozen = await ingestReferenceImages(parsed.images, new URL(request.url).origin);
   if (!frozen.ok) {
     return Response.json(
@@ -329,10 +333,12 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
     });
 
   if (!live) {
-    if (!plane.settings.allowPreviewFallback || platform === "leonardo") {
+    if (!plane.settings.allowPreviewFallback || platform === "leonardo" || platform === "chatgpt") {
       const error =
         platform === "leonardo"
           ? "WORKER_DEAD: Leonardo web_account 禁止预览假图"
+          : platform === "chatgpt"
+            ? "WORKER_DEAD: ChatGPT web_account 没有在线网页执行器"
           : "WORKER_DEAD: 没有在线的网页执行器";
       await completeRequest(reqId, { ok: false, finalError: error });
       await log({ ok: false, error });
@@ -357,7 +363,12 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
   for (let i = 0; i <= maxRetry; i++) {
     const account = await pickAccount(platform, exclude, { model });
     if (!account) break;
-    const queued = await enqueueImage(prompt, model, platform === "leonardo" ? LEONARDO_JOB_TIMEOUT_MS : 90_000, referenceUrls, {
+    const jobTimeout = platform === "leonardo"
+      ? LEONARDO_JOB_TIMEOUT_MS
+      : platform === "chatgpt"
+        ? CHATGPT_IMAGE_JOB_TIMEOUT_MS
+        : 90_000;
+    const enqueueOptions: EnqueueOpts = {
       idempotencyKey: idem,
       keyId: auth.record.id,
       requestId: reqId,
@@ -370,14 +381,20 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
       aspect,
       tier,
       referenceAssets: frozen.assets,
-    });
+    };
+    const queued = platform === "chatgpt"
+      ? await enqueueChat(providerPrompt, model, jobTimeout, referenceUrls, enqueueOptions)
+      : await enqueueImage(providerPrompt, model, jobTimeout, referenceUrls, enqueueOptions);
     if (!queued.ok) {
       last = queued.error;
       if (queued.error.includes("circuit OPEN") || queued.error.includes("QUEUE_FULL")) break;
       exclude.push(account.id);
       continue;
     }
-    const waitMs = Math.min(queued.job.timeoutMs, platform === "leonardo" ? LEONARDO_API_WAIT_MS : 80_000);
+    const waitMs = Math.min(
+      queued.job.timeoutMs,
+      platform === "leonardo" ? LEONARDO_API_WAIT_MS : platform === "chatgpt" ? CHATGPT_IMAGE_API_WAIT_MS : 80_000,
+    );
     const done = await waitJob(queued.job.id, waitMs, { graceMs: 10_000, cancelOnTimeout: false });
     const fresh = (await getJob(queued.job.id)) || done.job || queued.job;
     const urls = (fresh.urls && fresh.urls.length ? fresh.urls : done.url ? [done.url] : []).filter(Boolean);
@@ -386,7 +403,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
       await log({
         ok: true,
         accountEmail: queued.job.accountEmail,
-        mode: platform === "leonardo" ? "web_account" : "live",
+        mode: platform === "leonardo" || platform === "chatgpt" ? "web_account" : "live",
         jobId: queued.job.id,
         attemptId: fresh.attemptId,
         workerId: fresh.workerId,
@@ -394,7 +411,7 @@ export async function handleImage(request: Request, kind: "image" | "edit" = "im
         proxyId: fresh.proxyId,
       });
       return Response.json(
-        await imagePayload(urls, queued.job.accountEmail, queued.job.id, parsed.images.length, platform === "leonardo" ? "web_account" : "live", reqId, fresh, format, size),
+        await imagePayload(urls, queued.job.accountEmail, queued.job.id, parsed.images.length, platform === "leonardo" || platform === "chatgpt" ? "web_account" : "live", reqId, fresh, format, size),
         { headers: cors() },
       );
     }

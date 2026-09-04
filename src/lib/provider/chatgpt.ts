@@ -24,7 +24,7 @@ const VERSION_TOKEN: Record<string, RegExp> = {
 };
 
 const PRODUCT_ONLY = /^(chatgpt|auto|instant|fast|chatgpt\s*auto|chatgpt\s*instant)$/i;
-const WEB_ALIAS = new Set(["chatgpt-web-auto", "chatgpt-web-fast", "chatgpt-web"]);
+const WEB_ALIAS = new Set(["chatgpt-web-auto", "chatgpt-web-fast", "chatgpt-web", "chatgpt-llm-image"]);
 
 export function isWebModelAlias(model?: string) {
   return WEB_ALIAS.has(String(model || "").trim().toLowerCase());

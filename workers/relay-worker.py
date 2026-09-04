@@ -1993,7 +1993,7 @@ def collect_result_candidates(page, boundary, provider=""):
               const normalize = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9\u3400-\u9fff]+/g, '');
               const promptNorm = normalize(args.prompt || '');
               const promptNeedle = promptNorm.slice(0, 48);
-              const domainRe = /googleusercontent|ggpht|leonardo\.ai|leonardocdn|leonardousercontent|oaidalle|data:image/;
+              const domainRe = /googleusercontent|ggpht|leonardo\.ai|leonardocdn|leonardousercontent|oaidalle|oaiusercontent|openaiusercontent|blob\.core\.windows\.net|data:image/;
               const uiRe = /favicon|avatar|logo|sprite|icon|emoji|\/static\/|profile/;
               const sel = 'model-response, .response-container, [data-message-author-role], [data-testid*="generation"], article, [class*="ImageCard"], [class*="result"]';
               const nodes = [...document.querySelectorAll(sel)];
@@ -2619,6 +2619,9 @@ def select_model(page, model):
     ok = any(lab.lower() in actual.lower() for lab in labels) if actual else False
     return ok, actual
 
+def is_chatgpt_image_model(model):
+    return str(model or "").strip().lower() == "chatgpt-llm-image"
+
 def run_chat(body, ctx=None):
     ctx = ctx or JobRuntimeContext(body)
     from playwright.sync_api import sync_playwright
@@ -2637,6 +2640,8 @@ def run_chat(body, ctx=None):
                 if u and u not in images:
                     images.append(u)
     images = images[:4]
+    image_job = body.get("kind") in ("image", "edit") and is_chatgpt_image_model(body.get("model"))
+    _requested_refs, ref_hashes, _reference_descs = bind_reference_hashes(ctx, images)
     prompt = (prompt or "").strip()
     if not prompt and images:
         prompt = "请描述这张图片"
@@ -2663,7 +2668,8 @@ def run_chat(body, ctx=None):
     stop = (sel.get("streamingStop") or ["button[aria-label='Stop streaming']", "button[aria-label='Stop generating']", "button[data-testid='stop-button']"])[:4]
     pack_version = body.get("selectorPackVersion") or sel.get("version") or "chatgpt-v1"
     timeout_ms = int(body.get("timeoutMs") or 90000)
-    model = (body.get("model") or "chatgpt-web-auto").strip()
+    public_model = (body.get("model") or "chatgpt-web-auto").strip()
+    model = "chatgpt-web-auto" if image_job else public_model
     proxy = None if TEST_URL else job_proxy(body)
     if not TEST_URL:
         ident = proxy_identity_error(body, proxy)
@@ -2692,6 +2698,7 @@ def run_chat(body, ctx=None):
             pass
         arm_page(page)
         net = {"armed": False, "req": None, "res": None, "finished": False, "urls": set()}
+        image_net = {"armed": False, "by_url": {}}
         def arm_turn_network():
             net["armed"] = True
             net["req"] = None
@@ -2710,6 +2717,21 @@ def run_chat(body, ctx=None):
             u = res.url or ""
             if net["armed"] and net["res"] is None and u in net["urls"]:
                 net["res"] = time.time()
+            if image_job and image_net["armed"]:
+                try:
+                    ct = (res.headers.get("content-type") or "").lower()
+                    if "image/" not in ct or "svg" in ct:
+                        return
+                    if any(bad in u.lower() for bad in ("favicon", "sprite", "logo", "icon", "emoji", "avatar")):
+                        return
+                    raw = res.body()
+                    if not image_magic_ok(raw) or result_is_reference(raw, ref_hashes):
+                        return
+                    w, h = image_wh(raw)
+                    if w >= 64 and h >= 64:
+                        image_net["by_url"][u] = (raw, ct.split(";")[0], w, h)
+                except Exception:
+                    pass
         def on_req_done(req):
             u = req.url or ""
             if net["armed"] and u in net["urls"]:
@@ -2801,6 +2823,9 @@ def run_chat(body, ctx=None):
                 "sessionBaseVersion": int(body.get("sessionVersion") or 0),
                 "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
             }
+        image_boundary = create_generation_boundary(page, ctx, "chatgpt", prompt) if image_job else None
+        if image_job:
+            image_net["armed"] = True
         mark("T5")
         install_mut_observer(page, page.locator("div[data-message-author-role='assistant']").count())
         arm_turn_network()
@@ -2840,6 +2865,94 @@ def run_chat(body, ctx=None):
         post_phase("generating", ctx)
         if ctx and ctx.submission_state == "SUBMITTED":
             set_submission_state(ctx, "GENERATING")
+        if image_job:
+            deadline = time.time() + max(45, min(300, timeout_ms / 1000.0 - 12))
+            final_text = ""
+            while time.time() < deadline:
+                pst = detect_page_state(page, "chatgpt")
+                if pst in ("LOGIN_REQUIRED", "CHALLENGE", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
+                    err, fault = page_state_error(pst, False, "chatgpt")
+                    return fail_job(ctx, err, fault, {"pageState": pst, "modelActual": actual or "ChatGPT", "timing": marks})
+                located_raw = collect_result_candidates(page, image_boundary, "chatgpt")
+                captured_urls = set(image_net["by_url"].keys())
+                upgraded_captures = set(upgrade_cdn_url(url) for url in captured_urls)
+                for candidate in located_raw:
+                    src = candidate.get("src") or ""
+                    candidate["networkCaptured"] = bool(src in captured_urls or upgrade_cdn_url(src) in upgraded_captures)
+                located = pick_accepted_candidates(located_raw, 1)
+                for candidate in located:
+                    src = candidate.get("src") or ""
+                    cached = image_net["by_url"].get(src)
+                    if cached is None:
+                        full = upgrade_cdn_url(src)
+                        for captured_url, captured in image_net["by_url"].items():
+                            if upgrade_cdn_url(captured_url) == full:
+                                cached = captured
+                                break
+                    if cached is not None:
+                        raw, mime, width, height = cached
+                    else:
+                        data_url, _download_error = download_result_image(context, src)
+                        if not data_url or "," not in data_url:
+                            continue
+                        try:
+                            header, encoded = data_url.split(",", 1)
+                            raw = base64.b64decode(encoded)
+                            mime = header[5:].split(";")[0] if header.startswith("data:") else "image/png"
+                            width, height = image_wh(raw)
+                        except Exception:
+                            continue
+                    if not image_magic_ok(raw) or result_is_reference(raw, ref_hashes):
+                        continue
+                    if sha256_hex(raw) in set(ctx.historical_hashes or []):
+                        continue
+                    if width < 64 or height < 64:
+                        continue
+                    mark("T8")
+                    set_submission_state(ctx, "RESULT_DETECTED")
+                    data_url = raw_to_data_url(raw, mime)
+                    if not data_url:
+                        continue
+                    set_submission_state(ctx, "RESULT_VALIDATED")
+                    mark("T9")
+                    try:
+                        state_out = context.storage_state()
+                    except Exception:
+                        state_out = None
+                    mark("T10")
+                    return {
+                        "ok": True,
+                        "text": "IMAGE",
+                        "url": data_url,
+                        "urls": [data_url],
+                        "resultConfidences": [candidate.get("confidence") or "HIGH"],
+                        "pageState": "RESULT_READY",
+                        "modelActual": actual or "ChatGPT",
+                        "backendMode": "web_account",
+                        "selectorPackVersion": pack_version,
+                        "actualWidth": width,
+                        "actualHeight": height,
+                        "sessionState": state_out,
+                        "sessionBaseVersion": int(body.get("sessionVersion") or 0),
+                        "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
+                        "timing": {"marks": marks, "generation_ms": marks.get("T9", 0) - marks.get("T6", 0), "total_ms": marks.get("T10", 0)},
+                        "profile": profile,
+                        "recoveryLevel": recovery_level,
+                    }
+                current_text = read_assistant_full(page)
+                if usable_assistant_text(current_text):
+                    final_text = current_text
+                time.sleep(0.35)
+            if ctx and ctx.submission_state in POST_SUBMIT_STATES:
+                set_submission_state(ctx, "RESULT_UNCERTAIN")
+            suffix = ": assistant returned text without a downloadable image" if final_text else ": timed out waiting for a generated image"
+            return fail_job(ctx, "CHATGPT_IMAGE_NOT_FOUND" + suffix, "provider", {
+                "pageState": detect_page_state(page, "chatgpt"),
+                "modelActual": actual or "ChatGPT",
+                "timing": marks,
+                "profile": profile,
+                "recoveryLevel": recovery_level,
+            })
         want_fast = "thinking" not in (model or "").lower()
         has_images = bool(images)
         first_wait = (40 if has_images else 18) if want_fast else min(120, timeout_ms / 1000.0)
@@ -3078,7 +3191,8 @@ class H(BaseHTTPRequestHandler):
             body = {}
         if self.path in ("/image", "/v1/images/generations", "/v1/images/edits"):
             model = (body.get("model") or "")
-            body["platform"] = "leonardo" if is_leonardo_model(model) else "gemini"
+            body["platform"] = "chatgpt" if is_chatgpt_image_model(model) else ("leonardo" if is_leonardo_model(model) else "gemini")
+            body["kind"] = "edit" if self.path == "/v1/images/edits" or body.get("images") or body.get("image") or body.get("image_url") else "image"
         try:
             result = exec_job(body)
         except Exception as e:
@@ -3285,6 +3399,8 @@ def exec_job_run(body):
     try:
         if body.get("kind") == "inspection":
             result = run_account_inspection(body, ctx)
+        elif body.get("platform") == "chatgpt" and body.get("kind") in ("image", "edit") and is_chatgpt_image_model(body.get("model")):
+            result = run_chat(body, ctx)
         elif body.get("platform") in ("gemini", "image", "leonardo") or body.get("kind") in ("image", "edit"):
             if body.get("platform") == "leonardo" or is_leonardo_model(body.get("model")):
                 result = run_leonardo(body, ctx)

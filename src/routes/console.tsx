@@ -8,6 +8,7 @@ import { Input, Textarea } from "@/components/ui/input";
 import { ImageInput } from "@/components/image-input";
 import { ASPECT_PRESETS, resolutionOptionsFor, type ImageAspect, type ImageK } from "@/lib/provider/image-size";
 import { invokeTimeoutMessage } from "@/lib/image-timeout";
+import { CHATGPT_IMAGE_MODEL, isChatGptImageModel } from "@/lib/provider/chatgpt-image";
 import {
   historyBadgeOk,
   phaseFromLogical,
@@ -26,6 +27,7 @@ const CHAT_MODELS = [
 ];
 
 const IMAGE_MODELS = [
+  { id: CHATGPT_IMAGE_MODEL, label: "ChatGPT LLM / 出图（复用 LLM 账号）" },
   { id: "leonardo-gemini", label: "Leonardo / Nano Banana 2" },
   { id: "leonardo-gpt-image-2", label: "Leonardo / GPT Image 2" },
   { id: "gemini-image", label: "Gemini / 出图" },
@@ -113,7 +115,7 @@ function Console() {
             }>,
         )
         .then((b) => {
-          const need = imageModel === "gemini-image" ? "gemini" : "leonardo";
+          const need = isChatGptImageModel(imageModel) ? "chatgpt" : imageModel === "gemini-image" ? "gemini" : "leonardo";
           const mine = (b.accounts || []).filter((a) => a.platform === need);
           const ok = mine.filter((a) => a.status === "healthy" || a.status === "probing");
           if (ok.length) {
@@ -122,7 +124,7 @@ function Console() {
           }
           const row = mine[0];
           const why = row?.lastError || row?.status || "未添加";
-          const label = need === "gemini" ? "Gemini" : "Leonardo";
+          const label = need === "chatgpt" ? "ChatGPT LLM" : need === "gemini" ? "Gemini" : "Leonardo";
           setPoolNote(
             `${label} 网页号不可用（${row?.email || "无账号"}：${why}）。现在发出去会立刻失败，请先到「账号池」完成登录后再测图生图。`,
           );
@@ -446,7 +448,11 @@ function Console() {
               <select
                 className="h-11 w-full rounded-sm border border-border bg-elevated px-3 text-sm"
                 value={imageModel}
-                onChange={(e) => setImageModel(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setImageModel(next);
+                  if (isChatGptImageModel(next)) setImageN(1);
+                }}
               >
                 {IMAGE_MODELS.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -502,7 +508,7 @@ function Console() {
                   value={imageN}
                   onChange={(e) => setImageN(Number(e.target.value))}
                 >
-                  {[1, 2, 3, 4].map((n) => (
+                  {(isChatGptImageModel(imageModel) ? [1] : [1, 2, 3, 4]).map((n) => (
                     <option key={n} value={n}>
                       {n} 张
                     </option>
@@ -542,8 +548,8 @@ function Console() {
           <ImageInput
             images={images}
             onChange={setImages}
-            hint={kind === "chat" ? "对话识图，OpenAI Vision 格式" : "参考图写入 image / images（Leonardo 最多 6 张）。未出现缩略图不会出图。"}
-            max={kind === "image" ? 6 : 4}
+            hint={kind === "chat" ? "对话识图，OpenAI Vision 格式" : "参考图写入 image / images（ChatGPT/Gemini 最多 4 张，Leonardo 最多 6 张）。未出现缩略图不会出图。"}
+            max={kind === "image" && imageModel.startsWith("leonardo-") ? 6 : 4}
           />
           <div className="flex gap-2">
             <Button className="flex-1" type="button" onClick={() => void run()} disabled={phase === "sending" || phase === "streaming"}>

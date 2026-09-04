@@ -3,6 +3,7 @@ import { chatgptAdapter, geminiAdapter, leonardoAdapter } from "@/lib/provider/i
 import { OFFICIAL_GPT_IMAGE_IDS, OFFICIAL_NANO_IDS } from "@/lib/provider/leonardo-models";
 import { bearerToken, classify } from "@/lib/authz";
 import { getSql } from "@/lib/db";
+import { CHATGPT_IMAGE_MODEL } from "@/lib/provider/chatgpt-image";
 
 function asModel(id: string, owned: string, caps: ReturnType<typeof chatgptAdapter.capabilities>, description: string) {
   return {
@@ -25,6 +26,7 @@ const chatgpt = chatgptAdapter.capabilities();
 const gemini = geminiAdapter.capabilities();
 const leonardo = leonardoAdapter.capabilities();
 const gptImageCaps = { ...leonardo, imageGeneration: true, imageEdit: true, chat: false };
+const chatgptImageCaps = { ...chatgpt, imageGeneration: true, imageEdit: true, chat: false, streaming: false, multiTurn: false };
 
 export const MODELS = [
   ...chatgpt.models.map((id) =>
@@ -39,6 +41,7 @@ export const MODELS = [
           : "ChatGPT web, vision + multi-turn; exact IDs fail closed unless confirmed by the UI",
     ),
   ),
+  asModel(CHATGPT_IMAGE_MODEL, "relay-chatgpt", chatgptImageCaps, "ChatGPT Images through an uploaded ChatGPT web login session"),
   asModel("gemini-image", "relay-gemini", gemini, "Gemini 出图 / 参考图编辑（mask 不支持）"),
   asModel("leonardo-gpt-image-2", "relay-leonardo", leonardo, "Leonardo web GPT Image 2"),
   asModel("leonardo-gemini", "relay-leonardo", leonardo, "Leonardo web Gemini / Nano Banana family"),
