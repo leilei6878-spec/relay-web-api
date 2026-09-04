@@ -2008,7 +2008,7 @@ def collect_result_candidates(page, boundary, provider=""):
               const push = (root, containerId, isNewContainer) => {
                 if (!root) return;
                 for (const im of root.querySelectorAll('img')) {
-                  const src = im.getAttribute('src') || '';
+                  const src = im.currentSrc || im.src || im.getAttribute('src') || '';
                   if (!src || seen.has(src)) continue;
                   seen.add(src);
                   const r = im.getBoundingClientRect();
@@ -2024,7 +2024,7 @@ def collect_result_candidates(page, boundary, provider=""):
                     createdAfterSubmit: isNewContainer,
                     isNewContainer,
                     isNewSrc: !baseline.has(src),
-                    domainMatch: domainRe.test(src),
+                    domainMatch: domainRe.test(src) || src.startsWith('blob:'),
                     width: Math.round(im.naturalWidth || r.width || 0),
                     height: Math.round(im.naturalHeight || r.height || 0),
                     bytes: 0,
@@ -2902,7 +2902,7 @@ def run_chat(body, ctx=None):
                     if cached is not None:
                         raw, mime, width, height = cached
                     else:
-                        data_url, _download_error = download_result_image(context, src)
+                        data_url, _download_error = download_page_image(page, context, src)
                         if not data_url or "," not in data_url:
                             continue
                         try:
@@ -4216,6 +4216,28 @@ def download_result_image(context, url):
             return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode()), None
         return None, last_err
     return None, "LEONARDO_RESULT_NOT_FOUND"
+
+def download_page_image(page, context, url):
+    if not url:
+        return None, "IMAGE_NOT_FOUND: empty source"
+    if url.startswith("blob:"):
+        try:
+            data_url = page.evaluate("""async (source) => {
+              const response = await fetch(source);
+              if (!response.ok) throw new Error('blob fetch failed');
+              const blob = await response.blob();
+              return await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => reject(reader.error || new Error('blob read failed'));
+                reader.readAsDataURL(blob);
+              });
+            }""", url)
+            if isinstance(data_url, str) and data_url.startswith("data:image"):
+                return data_url, None
+        except Exception:
+            return None, "IMAGE_NOT_FOUND: browser blob download failed"
+    return download_result_image(context, url)
 
 def run_leonardo(body, ctx=None):
     ctx = ctx or JobRuntimeContext(body)
