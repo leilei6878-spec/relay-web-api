@@ -1962,7 +1962,14 @@ def create_generation_boundary(page, ctx=None, provider="", prompt=""):
           window.__relayBaselineContainers = ids;
           const srcs = [...document.querySelectorAll('img')].map((im) => im.getAttribute('src') || '').filter(Boolean);
           window.__relayBaselineSrcs = srcs;
-          return { ids, gens: ids, srcs, assistantCount: document.querySelectorAll('[data-message-author-role="assistant"]').length };
+          const downloadSelector = 'button[aria-label*="Download" i], button[title*="Download" i], [data-testid*="download" i], a[download]';
+          return {
+            ids,
+            gens: ids,
+            srcs,
+            assistantCount: document.querySelectorAll('[data-message-author-role="assistant"]').length,
+            downloadCount: document.querySelectorAll(downloadSelector).length,
+          };
         }""") or snap
     except Exception:
         try:
@@ -1982,6 +1989,7 @@ def create_generation_boundary(page, ctx=None, provider="", prompt=""):
         "baseline_asset_hashes": list(getattr(ctx, "historical_hashes", []) or []) if ctx else [],
         "reference_hashes": refs,
         "baseline_assistant_count": int(snap.get("assistantCount") or 0),
+        "baseline_download_count": int(snap.get("downloadCount") or 0),
     }
 
 def collect_result_candidates(page, boundary, provider=""):
@@ -4249,48 +4257,40 @@ def download_page_image(page, context, url):
     return download_result_image(context, url)
 
 def download_chatgpt_image_action(page, boundary=None):
-    selectors = (
-        'button[aria-label*="Download" i]',
-        'button[title*="Download" i]',
-        '[data-testid*="download" i]',
-        'a[download]',
-    )
-    baseline_count = int((boundary or {}).get("baseline_assistant_count") or 0)
-    roots = page.locator('[data-message-author-role="assistant"]')
+    selector = 'button[aria-label*="Download" i], button[title*="Download" i], [data-testid*="download" i], a[download]'
+    baseline_count = int((boundary or {}).get("baseline_download_count") or 0)
     try:
-        if roots.count() <= baseline_count:
+        matches = page.locator(selector)
+        count = min(12, matches.count())
+        if count <= baseline_count:
             return None
-        roots = roots.nth(roots.count() - 1)
     except Exception:
         return None
-    for selector in selectors:
+    for index in range(count - 1, baseline_count - 1, -1):
         try:
-            matches = roots.locator(selector)
-            count = min(6, matches.count())
-            for index in range(count - 1, -1, -1):
-                button = matches.nth(index)
-                if not button.is_visible():
+            button = matches.nth(index)
+            if not button.is_visible():
+                continue
+            try:
+                with page.expect_download(timeout=5000) as pending:
+                    button.click(timeout=2000)
+                download = pending.value
+                path = download.path()
+                if not path or not os.path.isfile(path):
                     continue
-                try:
-                    with page.expect_download(timeout=5000) as pending:
-                        button.click(timeout=2000)
-                    download = pending.value
-                    path = download.path()
-                    if not path or not os.path.isfile(path):
-                        continue
-                    with open(path, "rb") as source:
-                        raw = source.read()
-                    if not image_magic_ok(raw):
-                        continue
-                    width, height = image_wh(raw)
-                    mime = "image/png"
-                    if raw[:3] == b"\xff\xd8\xff":
-                        mime = "image/jpeg"
-                    elif raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
-                        mime = "image/webp"
-                    return raw, mime, width, height
-                except Exception:
+                with open(path, "rb") as source:
+                    raw = source.read()
+                if not image_magic_ok(raw):
                     continue
+                width, height = image_wh(raw)
+                mime = "image/png"
+                if raw[:3] == b"\xff\xd8\xff":
+                    mime = "image/jpeg"
+                elif raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+                    mime = "image/webp"
+                return raw, mime, width, height
+            except Exception:
+                continue
         except Exception:
             continue
     return None
