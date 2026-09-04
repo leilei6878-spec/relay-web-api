@@ -98,13 +98,17 @@ test("apply_image_size clicks Image Dimensions chips then Small/Medium/Large", (
   assert.match(s, /slider\.press\("Home"/);
   assert.match(s, /def close_leonardo_drawers/);
   assert.match(s, /button\[data-slot="drawer-close"\]/);
-  assert.match(s, /skip-square/);
+  assert.match(s, /dimension-miss/);
   assert.match(s, /def aspect_match/);
   assert.match(s, /LEONARDO_RESULT_ASPECT_MISMATCH/);
   assert.match(s, /Image Dimensions stayed/);
   const fn = s.slice(s.indexOf("def click_leonardo_resolution"), s.indexOf("def read_displayed_size"));
   assert.match(fn, /squarePreset/);
   assert.equal(fn.includes("aspect !== '1:1'"), true);
+  assert.match(fn, /dimensionLabel/);
+  assert.match(fn, /scope\.querySelectorAll/);
+  assert.match(fn, /dimension-miss/);
+  assert.doesNotMatch(fn, /document\.querySelectorAll\('button, \[role=button\], \[role=radio\], \[role=option\]'\)\.filter\(vis\)/);
 });
 
 test("Leonardo dimension selectors are valid JavaScript and unknown size fails closed", () => {
@@ -125,6 +129,7 @@ class Keyboard:
 class Page:
     def __init__(self, dimensions):
         self.dimensions=dimensions
+        self.url=""
         self.keyboard=Keyboard()
     def wait_for_timeout(self, ms):
         return None
@@ -224,6 +229,43 @@ test("leonardo img2img attaches refs before one visible Generate click", () => {
   const submitBlock = s.slice(s.indexOf('print("leonardo clicking generate"'), s.indexOf("page.wait_for_timeout(800)", s.indexOf('print("leonardo clicking generate"')));
   assert.doesNotMatch(submitBlock, /keyboard\.press\("Enter"\)/);
   assert.match(submitBlock, /visible Generate button disappeared before click/);
+});
+
+test("GPT Image 2 resolution fallback writes Leonardo aspect and tier URL state", () => {
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
+  const out = spawnSync(
+    PYTHON,
+    [
+      "-c",
+      `
+import importlib.util
+from urllib.parse import parse_qs, urlsplit
+spec=importlib.util.spec_from_file_location("w", "storage/relay-qa/worker.py")
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+class Page:
+    def __init__(self):
+        self.url="https://app.leonardo.ai/generate?model=gpt-image-2&aspectRatio=16%3A9&size=SMALL&quality=MEDIUM"
+        self.visited=[]
+    def goto(self, url, **kwargs):
+        self.url=url; self.visited.append((url, kwargs))
+    def wait_for_timeout(self, ms): pass
+p=Page()
+result=m.set_gpt_resolution_query(p, "16:9", "Medium")
+query=parse_qs(urlsplit(p.url).query)
+assert result=="query:MEDIUM", result
+assert query["model"]==["gpt-image-2"], query
+assert query["aspectRatio"]==["16:9"], query
+assert query["size"]==["MEDIUM"], query
+assert query["quality"]==["MEDIUM"], query
+assert len(p.visited)==1
+print("gpt-query-ok")
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /gpt-query-ok/);
 });
 
 test("ref_body_sizes and extract_prompt_images keep leonardo refs", () => {

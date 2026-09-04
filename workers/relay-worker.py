@@ -3678,9 +3678,26 @@ def click_leonardo_resolution(page, aspect, tier, k, w, h):
               };
               const click = (el) => { if (!el) return false; try { el.click(); return true; } catch (e) { return false; } };
               const norm = (s) => String(s || '').replace(/\s/g, '').replace(/\u00d7/g, 'x').toLowerCase();
-              const buttons = [...document.querySelectorAll('button, [role=button], [role=radio], [role=option]')].filter(vis);
-              const squarePreset = (t) => /^(1024x1024|2048x2048|4096x4096|2880x2880)$/.test(t);
               const want = norm(wantX);
+              const labels = [...document.querySelectorAll('div,p,span,label,h2,h3,h4')].filter(vis);
+              const dimensionLabel = labels.find((e) => {
+                const first = ((e.innerText || '').split('\\n')[0] || '').trim();
+                return /^image dimensions$/i.test(first);
+              });
+              let scope = dimensionLabel ? (dimensionLabel.parentElement || dimensionLabel) : document.body;
+              if (dimensionLabel) {
+                let node = dimensionLabel.parentElement;
+                for (let i = 0; node && i < 5; i++, node = node.parentElement) {
+                  const text = norm(node.innerText || '');
+                  const controls = [...node.querySelectorAll('button, [role=button], [role=radio], [role=option]')].filter(vis);
+                  if (controls.length > 0 && (text.indexOf(want) >= 0 || /small|medium|large|1k|2k|4k/.test(text))) {
+                    scope = node;
+                    break;
+                  }
+                }
+              }
+              const buttons = [...scope.querySelectorAll('button, [role=button], [role=radio], [role=option]')].filter(vis);
+              const squarePreset = (t) => /^(1024x1024|2048x2048|4096x4096|2880x2880)$/.test(t);
               const px = buttons.find((e) => {
                 const t = norm(e.innerText || '');
                 const a = norm(e.getAttribute('aria-label') || '');
@@ -3699,13 +3716,33 @@ def click_leonardo_resolution(page, aspect, tier, k, w, h):
                 return true;
               });
               if (click(tbtn)) return 'tier';
-              return aspect === '1:1' ? 'skip' : 'skip-square';
+              return dimensionLabel ? 'dimension-miss' : 'dimension-label-miss';
             }""",
             {"aspect": aspect, "tier": tier, "k": k, "w": w, "h": h},
         )
     except Exception:
         dim = "err"
     return dim
+
+def set_gpt_resolution_query(page, aspect, tier):
+    try:
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+        current = str(page.url or "")
+        parsed = urlsplit(current)
+        if parsed.hostname != "app.leonardo.ai" or "/generate" not in parsed.path:
+            return "query-skip"
+        params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        wanted_size = str(tier or "Small").upper()
+        if params.get("aspectRatio") == str(aspect) and params.get("size") == wanted_size:
+            return "query-already"
+        params["aspectRatio"] = str(aspect)
+        params["size"] = wanted_size
+        target = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(params), parsed.fragment))
+        page.goto(target, wait_until="domcontentloaded", timeout=25000)
+        page.wait_for_timeout(900)
+        return "query:" + wanted_size
+    except Exception as e:
+        return "query-error:" + str(e)[:80]
 
 def read_displayed_size(page):
     try:
@@ -3775,7 +3812,13 @@ def apply_image_size(page, want_size, aspect=None, tier=None, gpt=False):
         time.sleep(0.4)
     dim = click_leonardo_resolution(page, aspect, tier, k, w, h)
     shown_w, shown_h = read_displayed_size(page)
-    print("image size want=%s aspect=%s tier=%s %dx%d open=%s dim=%s shown=%dx%d" % (want_size, aspect, tier, w, h, opened, dim, shown_w, shown_h), flush=True)
+    query = ""
+    shown_tier, _shown_px = size_tier(shown_w, shown_h, gpt)
+    if gpt and (not aspect_match(shown_w, shown_h, aspect) or str(shown_tier).lower() != str(tier).lower()):
+        if count_leonardo_refs(page) == 0:
+            query = set_gpt_resolution_query(page, aspect, tier)
+            shown_w, shown_h = read_displayed_size(page)
+    print("image size want=%s aspect=%s tier=%s %dx%d open=%s dim=%s query=%s shown=%dx%d url=%s" % (want_size, aspect, tier, w, h, opened, dim, query, shown_w, shown_h, page.url), flush=True)
     try:
         page.keyboard.press("Escape")
     except Exception:
