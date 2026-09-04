@@ -1930,7 +1930,7 @@ def score_result_candidate(c):
         return "VERIFIED"
     if c.get("isNewSrc") and c.get("domainMatch") and (c.get("isNewContainer") or c.get("createdAfterSubmit")):
         return "HIGH"
-    if c.get("isNewSrc") and c.get("domainMatch") and w >= 512 and h >= 512:
+    if c.get("isNewSrc") and c.get("resultAction") and w >= 512 and h >= 512:
         return "HIGH"
     if c.get("isNewSrc") and c.get("domainMatch") and c.get("resultAction") and w >= 256 and h >= 256:
         return "HIGH"
