@@ -260,11 +260,11 @@ async function liveCheck(account: Account, runId: string): Promise<CheckResult> 
   }
   const adapter = getAdapter(current.platform);
   const model = canaryModelFor(current.platform, current, adapter.capabilities().models);
-  const excludeAccountIds = plane.accounts.filter((item) => item.id !== current.id).map((item) => item.id);
   const options = {
     kind: "canary" as const,
+    targetAccountId: current.id,
+    allowUnhealthyTarget: true,
     selectorPackVersion: await activeSelectorPack(current.platform),
-    excludeAccountIds,
     idempotencyKey: `account-check:${runId}:${current.id}`,
     n: 1,
     size: "1024x1024",

@@ -76,3 +76,9 @@ test("scheduler applies 15m/30m/2h cadence and accelerates near expiry", () => {
 test("check level input is bounded and deduplicated", () => {
   assert.deepEqual(normalizeCheckLevels(["live", "static", "live", "paid"]), ["live", "static"]);
 });
+
+test("live checks pin the exact account even while its health status is probing", async () => {
+  const source = await import("node:fs/promises").then((fs) => fs.readFile(new URL("./account-checks.ts", import.meta.url), "utf8"));
+  assert.match(source, /targetAccountId: current\.id/);
+  assert.match(source, /allowUnhealthyTarget: true/);
+});

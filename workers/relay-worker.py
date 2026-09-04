@@ -2783,13 +2783,13 @@ def run_chat(body, ctx=None):
         if body.get("kind") == "canary":
             fp = page_fingerprint(page, sel)
             pst = detect_page_state(page, "chatgpt")
-            send_ok = first_visible(page, send) is not None
+            composer_ok = first_visible(page, inp) is not None
             try:
                 state_out = context.storage_state()
             except Exception:
                 state_out = None
             return {
-                "ok": pst in ("COMPOSER_READY", "AUTHENTICATED", "RESULT_READY", "GENERATING") and send_ok,
+                "ok": pst in ("COMPOSER_READY", "AUTHENTICATED", "RESULT_READY", "GENERATING") and composer_ok,
                 "text": "CANARY",
                 "pageState": pst,
                 "fingerprint": fp,

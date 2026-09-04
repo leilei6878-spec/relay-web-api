@@ -54,6 +54,17 @@ test("page state error mapping and image false-positive rejection", () => {
   assert.match(out.stdout, /ok/);
 });
 
+test("ChatGPT structural canary accepts a ready composer before the send button is visible", () => {
+  const script = localWorkerScript();
+  const start = script.indexOf('if body.get("kind") == "canary":');
+  const end = script.indexOf('mark("T5")', start);
+  const block = script.slice(start, end);
+  assert.ok(start > 0 && end > start);
+  assert.match(block, /composer_ok = first_visible\(page, inp\) is not None/);
+  assert.match(block, /and composer_ok/);
+  assert.doesNotMatch(block, /send_ok/);
+});
+
 test("run_leonardo without session is LOGIN_REQUIRED and never fake-success", () => {
   mkdirSync("storage/relay-qa", { recursive: true });
   writeFileSync("storage/relay-qa/worker.py", localWorkerScript());
