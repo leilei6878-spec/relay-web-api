@@ -1962,7 +1962,7 @@ def create_generation_boundary(page, ctx=None, provider="", prompt=""):
           window.__relayBaselineContainers = ids;
           const srcs = [...document.querySelectorAll('img')].map((im) => im.getAttribute('src') || '').filter(Boolean);
           window.__relayBaselineSrcs = srcs;
-          return { ids, gens: ids, srcs };
+          return { ids, gens: ids, srcs, assistantCount: document.querySelectorAll('[data-message-author-role="assistant"]').length };
         }""") or snap
     except Exception:
         try:
@@ -1981,6 +1981,7 @@ def create_generation_boundary(page, ctx=None, provider="", prompt=""):
         "baseline_asset_urls": snap.get("srcs") or [],
         "baseline_asset_hashes": list(getattr(ctx, "historical_hashes", []) or []) if ctx else [],
         "reference_hashes": refs,
+        "baseline_assistant_count": int(snap.get("assistantCount") or 0),
     }
 
 def collect_result_candidates(page, boundary, provider=""):
@@ -2912,7 +2913,7 @@ def run_chat(body, ctx=None):
                 if pst in ("LOGIN_REQUIRED", "CHALLENGE", "RATE_LIMITED", "ACCOUNT_RESTRICTED"):
                     err, fault = page_state_error(pst, False, "chatgpt")
                     return fail_job(ctx, err, fault, {"pageState": pst, "modelActual": actual or "ChatGPT", "timing": marks})
-                downloaded = download_chatgpt_image_action(page)
+                downloaded = download_chatgpt_image_action(page, image_boundary)
                 if downloaded is not None:
                     raw, mime, width, height = downloaded
                     if image_magic_ok(raw) and not result_is_reference(raw, ref_hashes) and sha256_hex(raw) not in set(ctx.historical_hashes or []):
@@ -4247,16 +4248,24 @@ def download_page_image(page, context, url):
             return None, "IMAGE_NOT_FOUND: browser blob download failed"
     return download_result_image(context, url)
 
-def download_chatgpt_image_action(page):
+def download_chatgpt_image_action(page, boundary=None):
     selectors = (
         'button[aria-label*="Download" i]',
         'button[title*="Download" i]',
         '[data-testid*="download" i]',
         'a[download]',
     )
+    baseline_count = int((boundary or {}).get("baseline_assistant_count") or 0)
+    roots = page.locator('[data-message-author-role="assistant"]')
+    try:
+        if roots.count() <= baseline_count:
+            return None
+        roots = roots.nth(roots.count() - 1)
+    except Exception:
+        return None
     for selector in selectors:
         try:
-            matches = page.locator(selector)
+            matches = roots.locator(selector)
             count = min(6, matches.count())
             for index in range(count - 1, -1, -1):
                 button = matches.nth(index)
