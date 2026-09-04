@@ -28,10 +28,10 @@ export function inspectSession(json: string, platform: Platform) {
     const dummy = cookies.length <= 1 && cookies.some((c) => (c.value || "").includes("qa"));
     if (dummy) return { ok: false as const, reason: "演示登录不能商用" };
     if (platform === "chatgpt") {
-      const has =
-        names.has("__Secure-next-auth.session-token") ||
-        names.has("oai-did") ||
-        names.has("__Secure-next-auth.session-token.0");
+      const has = cookies.some((cookie) =>
+        /^__Secure-next-auth\.session-token(?:\.\d+)?$/i.test(cookie.name || "") ||
+        /^oai-client-auth-info$/i.test(cookie.name || ""),
+      );
       if (!has) return { ok: false as const, reason: "缺少 ChatGPT 登录 Cookie" };
     }
     if (platform === "leonardo") {
@@ -52,19 +52,24 @@ export function inspectSession(json: string, platform: Platform) {
         };
       }
     }
-    const sessionCookies = cookies.filter((c) => {
-      const n = c.name || "";
-      if (platform === "leonardo") return /better-auth\.session_token/i.test(n);
-      return /session|SID|PSID|auth|oai-did|cognito|idToken|accessToken/i.test(n);
-    });
+    const chatgptTokens = cookies.filter((c) =>
+      /^__Secure-next-auth\.session-token(?:\.\d+)?$/i.test(c.name || ""),
+    );
+    const sessionCookies = platform === "chatgpt"
+      ? chatgptTokens.length
+        ? chatgptTokens
+        : cookies.filter((c) => /^oai-client-auth-info$/i.test(c.name || ""))
+      : cookies.filter((c) => {
+          const n = c.name || "";
+          if (platform === "leonardo") return /better-auth\.session_token/i.test(n);
+          return /session|SID|PSID|auth|oai-did|cognito|idToken|accessToken/i.test(n);
+        });
     const expiries = sessionCookies
       .map((c) => (typeof c.expires === "number" && c.expires > 0 ? c.expires : 0))
       .filter((n) => n > now);
     const expiresAt = expiries.length ? Math.min(...expiries) : 0;
-    const stale = sessionCookies.filter(
-      (c) => typeof c.expires === "number" && c.expires > 0 && c.expires < now,
-    );
-    if (stale.length) return { ok: false as const, reason: "登录 Cookie 已过期" };
+    const dated = sessionCookies.filter((c) => typeof c.expires === "number" && c.expires > 0);
+    if (dated.length > 0 && expiries.length === 0) return { ok: false as const, reason: "登录 Cookie 已过期" };
     const hoursLeft = expiresAt ? (expiresAt - now) / 3600 : 0;
     const warning = hoursLeft > 0 && hoursLeft < 48 ? `登录约 ${Math.max(1, Math.round(hoursLeft))} 小时后过期` : undefined;
     return { ok: true as const, cookieCount: cookies.length, warning, expiresAt: expiresAt || undefined };

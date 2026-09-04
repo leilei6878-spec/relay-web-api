@@ -9,7 +9,7 @@ export type SessionWrite = {
 };
 
 export type SessionDecision =
-  | { ok: true; sessionVersion: number; lastRefreshAt: string }
+  | { ok: true; sessionVersion: number; lastRefreshAt: string; expiresAt?: number; warning?: string }
   | { ok: false; code: "STALE_SESSION_UPDATE" | "SESSION_INVALID" | "SESSION_EXPIRED"; error: string };
 
 export function canWriteSession(storedVersion: number, workerBaseVersion: number): boolean {
@@ -50,6 +50,8 @@ export function applySessionUpdate(
     ok: true,
     sessionVersion: write.nextVersion || nextSessionVersion(stored),
     lastRefreshAt: now.toISOString(),
+    expiresAt: inspected.expiresAt,
+    warning: inspected.warning,
   };
 }
 
@@ -59,5 +61,7 @@ export function sessionPatch(decision: Extract<SessionDecision, { ok: true }>, e
     lastRefreshAt: decision.lastRefreshAt,
     lastValidatedAt: decision.lastRefreshAt,
     expiresHint: expiresHint ?? null,
+    sessionExpiresAt: decision.expiresAt ? new Date(decision.expiresAt * 1000).toISOString() : null,
+    sessionWarning: decision.warning ?? null,
   };
 }

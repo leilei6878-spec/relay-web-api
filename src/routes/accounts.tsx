@@ -153,6 +153,20 @@ function AccountsView() {
     return body.updated || 0;
   }
 
+  async function releaseInspection(account: AccountOperationalRow) {
+    const response = await fetch("/api/admin/account-inspections", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "force-close", accountId: account.id }),
+    });
+    const body = (await response.json().catch(() => ({}))) as { ok?: boolean; released?: number; error?: string };
+    if (!response.ok || !body.ok) throw new Error(body.error || "释放账号占用失败");
+    updateAccount(account.id, { lockedUntil: null, inspectionId: null });
+    await loadOperations();
+    toast.success(body.released ? "查看会话已关闭，账号占用已释放" : "账号占用状态已校正");
+  }
+
   function bulkDelete() {
     selected.forEach(deleteAccount);
     setSelected([]);
@@ -464,6 +478,15 @@ function AccountsView() {
                       currentScope={{}}
                       onComplete={() => void loadOperations()}
                     />
+                    {a.busy && a.inspectionId ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void releaseInspection(a).catch((error) => toast.error(error.message))}
+                      >
+                        释放查看占用
+                      </Button>
+                    ) : null}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1009,6 +1032,21 @@ function InspectionDialog({ account }: { account: Account }) {
     };
   }, [open, inspection?.id, inspection?.token]);
 
+  useEffect(() => {
+    if (!inspection) return;
+    const release = () => {
+      const payload = JSON.stringify({
+        action: "command",
+        id: inspection.id,
+        token: inspection.token,
+        command: { type: "close" },
+      });
+      navigator.sendBeacon("/api/admin/account-inspections", new Blob([payload], { type: "application/json" }));
+    };
+    window.addEventListener("pagehide", release);
+    return () => window.removeEventListener("pagehide", release);
+  }, [inspection?.id, inspection?.token]);
+
   async function start() {
     setStarting(true);
     setError("");
@@ -1048,7 +1086,7 @@ function InspectionDialog({ account }: { account: Account }) {
           <div className="space-y-4">
             <p className="text-sm leading-6 text-muted">系统将锁定当前账号，使用已保存 Session 和原 sticky 代理打开平台。不会把 Cookie 或浏览器调试端口发送到前端。</p>
             <Field label="打开模式"><Select value={mode} onValueChange={(value) => setMode(value as typeof mode)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="view">查看模式（只允许滚动、刷新、前进后退）</SelectItem><SelectItem value="maintenance">维护模式（允许点击和输入，可重新登录）</SelectItem></SelectContent></Select></Field>
-            <div className="rounded-md border border-border bg-elevated p-3 text-xs text-subtle">生产环境必须通过 HTTPS 打开管理台；普通 HTTP 会被服务器拒绝。会话空闲或运行 30 分钟后自动关闭。</div>
+            <div className="rounded-md border border-border bg-elevated p-3 text-xs text-subtle">生产环境必须通过 HTTPS 打开管理台；普通 HTTP 会被服务器拒绝。页面关闭或失联约 90 秒会自动释放账号，单次查看最长 30 分钟。</div>
             {error ? <p className="text-sm text-danger">{error}</p> : null}
             <Button className="w-full" disabled={starting} onClick={() => void start()}>{starting ? "正在分配安全浏览器…" : "安全打开"}</Button>
           </div>

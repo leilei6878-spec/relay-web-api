@@ -879,6 +879,8 @@ export function finishJob(
           sessionVersion: decided.sessionVersion,
           lastRefreshAt: decided.lastRefreshAt,
           lastValidatedAt: decided.lastRefreshAt,
+          sessionExpiresAt: decided.expiresAt ? new Date(decided.expiresAt * 1000).toISOString() : null,
+          sessionWarning: decided.warning ?? null,
         } as never);
       }
     }
@@ -967,6 +969,13 @@ export function finishJob(
     clearJobEvents(id);
     return { ok: true as const };
   });
+}
+
+export function reconcileWorkerAssignments(workerName: string, activeJobIds: string[], graceMs = 45_000) {
+  if (pgSotActive()) {
+    return import("./pg-jobs").then((module) => module.reconcileWorkerAssignmentsPg(workerName, activeJobIds, graceMs));
+  }
+  return Promise.resolve({ recovered: 0 });
 }
 
 export function checkpointJob(

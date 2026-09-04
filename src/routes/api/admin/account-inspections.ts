@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
   commandAccountInspection,
   createAccountInspection,
+  forceCloseAccountInspection,
   getAccountInspection,
   listAccountInspections,
   readInspectionFrame,
@@ -35,13 +36,17 @@ export const Route = createFileRoute("/api/admin/account-inspections")({
         const auth = await assertAdmin(request);
         if (!auth.ok) return Response.json({ error: auth.error }, { status: 401 });
         const body = (await request.json().catch(() => ({}))) as {
-          action?: "start" | "command";
+          action?: "start" | "command" | "force-close";
           accountId?: string;
           mode?: "view" | "maintenance";
           id?: string;
           token?: string;
           command?: InspectionCommand;
         };
+        if (body.action === "force-close") {
+          const result = await forceCloseAccountInspection(body.accountId || "", "admin");
+          return Response.json(result, { status: result.ok ? 200 : result.status });
+        }
         if (body.action === "command" && body.command) {
           const result = await commandAccountInspection(body.id || "", body.token || "", body.command);
           return Response.json(result, { status: result.ok ? 200 : result.status });

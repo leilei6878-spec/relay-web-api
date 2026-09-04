@@ -46,4 +46,16 @@ test("inspection jobs bypass paid image validation and provider counters", async
   const inspectionSource = await import("node:fs/promises").then((fs) => fs.readFile(new URL("./account-inspections.ts", import.meta.url), "utf8"));
   assert.match(inspectionSource, /targetAccountId: account\.id/);
   assert.match(inspectionSource, /allowUnhealthyTarget: true/);
+  assert.match(inspectionSource, /inspection-viewer:/);
+  assert.match(inspectionSource, /viewer_disconnected/);
+  assert.match(inspectionSource, /forceCloseAccountInspection/);
+  assert.match(inspectionSource, /cancelJob\(jobId/);
+});
+
+test("inspection UI releases viewing locks on unload and exposes manual recovery", async () => {
+  const source = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../routes/accounts.tsx", import.meta.url), "utf8"));
+  assert.match(source, /navigator\.sendBeacon\("\/api\/admin\/account-inspections"/);
+  assert.match(source, /action: "force-close"/);
+  assert.match(source, /释放查看占用/);
+  assert.match(source, /失联约 90 秒/);
 });

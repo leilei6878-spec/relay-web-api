@@ -4,8 +4,8 @@ import { resolve } from "node:path";
 import { audit } from "./audit";
 import { patchAccount, readControlPlane } from "./control-plane";
 import { getSql } from "./db";
-import { coordGet, coordSet } from "./coord";
-import { enqueueChat, enqueueImage } from "./job-queue";
+import { coordDel, coordGet, coordSet } from "./coord";
+import { cancelJob, enqueueChat, enqueueImage } from "./job-queue";
 import { activeSelectorPack } from "./selector-promotion";
 import { uid } from "./utils";
 import { getAdapter } from "./provider/index";
@@ -37,6 +37,12 @@ type InspectionRow = {
 };
 
 const FRAME_DIR = resolve(process.env.RELAY_STORAGE_DIR || "storage", "inspection-frames");
+const VIEWER_TTL_MS = 90_000;
+const VIEWER_START_GRACE_MS = 120_000;
+
+function viewerKey(id: string) {
+  return `inspection-viewer:${id}`;
+}
 
 function safeId(value: string) {
   return value.replace(/[^a-zA-Z0-9_-]/g, "");
@@ -149,6 +155,7 @@ export async function createAccountInspection(input: {
      values ($1,$2,$3,'queued',$4,$5,$6,$7,$8,now(),$9,$10::jsonb)`,
     [id, account.id, mode, tokenHash(token), input.requestedBy || "admin", account.proxyId, account.loginIp || null, account.sessionVersion || 0, expiresAt, JSON.stringify({ commandSeq: 0, frameSeq: 0 })],
   );
+  await coordSet(viewerKey(id), "1", VIEWER_TTL_MS);
   const adapter = getAdapter(account.platform);
   const model = canaryModelFor(account.platform, account, adapter.capabilities().models);
   const excludeAccountIds = plane.accounts.filter((item) => item.id !== account.id).map((item) => item.id);
@@ -170,6 +177,7 @@ export async function createAccountInspection(input: {
     : await enqueueImage("Secure account inspection", model, 30 * 60_000, [], options);
   if (!queued.ok) {
     await db.query("update relay_account_inspections set status='failed', finished_at=now(), close_reason=$2 where id=$1", [id, queued.error]);
+    await coordDel(viewerKey(id));
     return { ok: false as const, status: 409, error: queued.error };
   }
   await db.query(
@@ -186,6 +194,7 @@ export async function createAccountInspection(input: {
 export async function getAccountInspection(id: string, token: string) {
   const row = await authorizedInspection(safeId(id), token);
   if (!row) return null;
+  await coordSet(viewerKey(row.id), "1", VIEWER_TTL_MS);
   return {
     ...row,
     frameSeq: Number(row.extra.frameSeq || 0),
@@ -226,6 +235,15 @@ export async function workerInspectionPoll(id: string, afterSeq: number) {
     return { ok: true as const, close: true, commandSeq: Number(row.extra.commandSeq || 0) };
   }
   const commandSeq = Number(row.extra.commandSeq || 0);
+  const viewerAlive = Boolean(await coordGet(viewerKey(row.id)));
+  const viewerMissing = !viewerAlive && Date.now() - Date.parse(row.createdAt) >= VIEWER_START_GRACE_MS;
+  if (viewerMissing && row.status !== "closing") {
+    const db = await getSql();
+    await db.query(
+      "update relay_account_inspections set status='closing', close_reason='viewer_disconnected' where id=$1 and status in ('queued','active')",
+      [row.id],
+    );
+  }
   let queued: { commandSeq?: number; command?: InspectionCommand } | null = null;
   try {
     const raw = await coordGet(`inspection-command:${row.id}`);
@@ -235,7 +253,7 @@ export async function workerInspectionPoll(id: string, afterSeq: number) {
   }
   return {
     ok: true as const,
-    close: row.status === "closing",
+    close: row.status === "closing" || viewerMissing,
     mode: row.mode,
     commandSeq,
     command: commandSeq > afterSeq && Number(queued?.commandSeq || 0) === commandSeq ? queued?.command || null : null,
@@ -266,6 +284,8 @@ export async function workerInspectionStatus(id: string, patch: Record<string, u
     [row.id, status, patch.observedIp || null, patch.closeReason || null, JSON.stringify(allowed)],
   );
   if (status === "closed" || status === "failed") {
+    await coordDel(viewerKey(row.id));
+    await coordDel(`inspection-command:${row.id}`);
     await patchAccount(row.accountId, { inspectionId: null });
     await deleteInspectionFrame(row.id);
   }
@@ -293,6 +313,7 @@ export async function saveInspectionFrame(id: string, bytes: Buffer) {
 export async function readInspectionFrame(id: string, token: string) {
   const row = await authorizedInspection(safeId(id), token);
   if (!row) return null;
+  await coordSet(viewerKey(row.id), "1", VIEWER_TTL_MS);
   try {
     return await readFile(resolve(FRAME_DIR, `${row.id}.jpg`));
   } catch {
@@ -328,9 +349,37 @@ export async function expireAccountInspections() {
     );
     const account = plane.accounts.find((item) => item.id === row.accountId);
     if (account?.inspectionId === row.id) await patchAccount(row.accountId, { inspectionId: null });
+    await coordDel(viewerKey(row.id));
+    await coordDel(`inspection-command:${row.id}`);
     await deleteInspectionFrame(row.id);
   }
   return rows.length;
+}
+
+export async function forceCloseAccountInspection(accountId: string, requestedBy = "admin") {
+  const plane = await readControlPlane();
+  const account = plane.accounts.find((item) => item.id === accountId);
+  if (!account) return { ok: false as const, status: 404, error: "账号不存在" };
+  const db = await getSql();
+  const rows = await db.query<Record<string, unknown>>(
+    "select * from relay_account_inspections where account_id=$1 and status in ('queued','active','closing') order by created_at desc",
+    [accountId],
+  );
+  for (const raw of rows) {
+    const row = mapInspection(raw);
+    const jobId = String(row.extra.jobId || "");
+    await db.query(
+      "update relay_account_inspections set status='closed', finished_at=now(), close_reason='released_by_admin' where id=$1",
+      [row.id],
+    );
+    await coordDel(viewerKey(row.id));
+    await coordDel(`inspection-command:${row.id}`);
+    if (jobId) await cancelJob(jobId, "REQUEST_CANCELLED: administrator released account inspection");
+    await deleteInspectionFrame(row.id);
+  }
+  await patchAccount(accountId, { inspectionId: null, lockedUntil: null });
+  await audit("account.inspection.release", JSON.stringify({ accountId, inspections: rows.length, requestedBy }));
+  return { ok: true as const, released: rows.length };
 }
 
 let cleanupTimer: ReturnType<typeof setInterval> | null = null;

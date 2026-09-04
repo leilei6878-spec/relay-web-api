@@ -74,3 +74,12 @@ test("parseActiveJobsHeader reads JSON list and falls back to single ids", async
   assert.deepEqual(parseActiveJobsHeader("not-json", "j9", "a9"), [{ jobId: "j9", accountId: "a9" }]);
   assert.deepEqual(parseActiveJobsHeader("[]"), []);
 });
+
+test("worker heartbeat reconciles assignments missing from its active job list", async () => {
+  const route = await import("node:fs/promises").then((fs) => fs.readFile(new URL("../routes/api/worker/next.ts", import.meta.url), "utf8"));
+  const pg = await import("node:fs/promises").then((fs) => fs.readFile(new URL("./pg-jobs.ts", import.meta.url), "utf8"));
+  assert.match(route, /reconcileWorkerAssignments\(name, pairs\.map/);
+  assert.match(pg, /dbListWorkerOrphanCandidates/);
+  assert.match(pg, /inspection worker no longer active/);
+  assert.match(pg, /!result\.retained/);
+});

@@ -878,6 +878,17 @@ export async function dbReclaimDeadJobs(deadMs: number, graceMs: number, maxRetr
   return reclaimDeadJobsWithDb(await sql(), deadMs, graceMs, maxRetry);
 }
 
+export async function dbListWorkerOrphanCandidates(workerName: string, graceMs: number) {
+  const db = await sql();
+  const rows = await db.query<{ extra: unknown }>(
+    `select extra from relay_jobs
+      where status='running' and worker_id=$1 and started_at is not null
+        and extract(epoch from (now() - started_at)) * 1000 > $2`,
+    [workerName, Math.max(5_000, graceMs)],
+  );
+  return rows.map((row) => row.extra as Record<string, unknown>).filter(Boolean);
+}
+
 export async function dbInsertRequestIdempotent(row: Record<string, unknown>): Promise<{ request: Record<string, unknown>; replay: boolean }> {
   const db = await sql();
   const key = row.idempotencyKey ? String(row.idempotencyKey) : null;

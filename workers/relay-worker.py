@@ -21,13 +21,16 @@ ACTIVE_JOBS_LOCK = threading.Lock()
 _JOB_SEQ = 0
 WARM_STATS = {"warm_hit": 0, "warm_miss": 0, "warm_recycle": 0, "reset_ms": 0, "navigation_ms": 0}
 WARM_STATS_LOCK = threading.Lock()
+WORKER_NAME_BASE = os.environ.get("RELAY_WORKER_NAME") or "pc-1"
+WORKER_INSTANCE_ID = os.environ.get("RELAY_WORKER_INSTANCE_ID") or hashlib.sha256(os.urandom(16)).hexdigest()[:10]
+WORKER_NAME = WORKER_NAME_BASE + "@" + WORKER_INSTANCE_ID
 
 class JobRuntimeContext:
     def __init__(self, body=None):
         body = body if isinstance(body, dict) else {}
         lease = body.get("lease") if isinstance(body.get("lease"), dict) else {}
         proxy = body.get("proxy") if isinstance(body.get("proxy"), dict) else {}
-        worker = os.environ.get("RELAY_WORKER_NAME") or "pc-1"
+        worker = WORKER_NAME
         job_id = str(body.get("id") or body.get("jobId") or "")
         self.job_id = job_id
         self.request_id = str(body.get("requestId") or job_id)
@@ -2781,6 +2784,10 @@ def run_chat(body, ctx=None):
             fp = page_fingerprint(page, sel)
             pst = detect_page_state(page, "chatgpt")
             send_ok = first_visible(page, send) is not None
+            try:
+                state_out = context.storage_state()
+            except Exception:
+                state_out = None
             return {
                 "ok": pst in ("COMPOSER_READY", "AUTHENTICATED", "RESULT_READY", "GENERATING") and send_ok,
                 "text": "CANARY",
@@ -2790,6 +2797,7 @@ def run_chat(body, ctx=None):
                 "modelActual": actual or model,
                 "profile": profile,
                 "timing": marks,
+                "sessionState": state_out,
                 "sessionBaseVersion": int(body.get("sessionVersion") or 0),
                 "sessionVersion": int(body.get("sessionVersion") or 0) + 1,
             }
@@ -4695,7 +4703,7 @@ def beat_loop():
                 gw + "/api/worker/next",
                 headers={
                     "Authorization": "Bearer " + token,
-                    "X-Worker-Name": os.environ.get("RELAY_WORKER_NAME") or "pc-1",
+                    "X-Worker-Name": WORKER_NAME,
                     "X-Worker-Capacity": str(CAPACITY),
                     "X-Worker-Active": str(max(ACTIVE, DISPATCHED)),
                     "X-Worker-Beat-Only": "1",
@@ -4738,7 +4746,7 @@ def poll_gateway():
                 gw + "/api/worker/next",
                 headers={
                     "Authorization": "Bearer " + token,
-                    "X-Worker-Name": os.environ.get("RELAY_WORKER_NAME") or "pc-1",
+                    "X-Worker-Name": WORKER_NAME,
                     "X-Worker-Capacity": str(CAPACITY),
                     "X-Worker-Active": str(max(ACTIVE, DISPATCHED)),
                     "X-Worker-Browsers": str(shard_browser_count() or ACTIVE),

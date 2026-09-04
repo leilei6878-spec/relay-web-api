@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { assertWorker } from "@/lib/authz";
-import { beatWorker, claimNext } from "@/lib/job-queue";
+import { beatWorker, claimNext, reconcileWorkerAssignments } from "@/lib/job-queue";
 
 export const Route = createFileRoute("/api/worker/next")({
   server: {
@@ -26,7 +26,8 @@ export const Route = createFileRoute("/api/worker/next")({
           for (const p of pairs) {
             await renewJobLeases(p.jobId, p.accountId, 120_000, name);
           }
-          return Response.json({ ok: true, beat: true, name, renewed: pairs.length });
+          const reconciled = await reconcileWorkerAssignments(name, pairs.map((pair) => pair.jobId));
+          return Response.json({ ok: true, beat: true, name, renewed: pairs.length, recovered: reconciled.recovered });
         }
         const next = await claimNext(name, stats);
         return Response.json(next);

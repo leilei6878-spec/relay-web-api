@@ -9,6 +9,7 @@ import { applySessionUpdate, canWriteSession, sessionExpired } from "./session-c
 import { assertGeneratedBytes, assertGeneratedImage, isUiOrOldSrc, pngSize } from "./image-guard.ts";
 import { featureDelta, fingerprint } from "./fingerprint.ts";
 import { packFor, selectorCandidates } from "./selectors.ts";
+import { inspectSession } from "../session-probe.ts";
 
 test("adapters expose the required surface", () => {
   for (const id of ["chatgpt", "gemini", "leonardo"] as const) {
@@ -203,6 +204,25 @@ test("model verify requires version evidence, not product labels", () => {
   const alias = chatgptAdapter.verifyModel("chatgpt-web-auto", "ChatGPT");
   assert.equal(alias.ok, false);
   if (!alias.ok) assert.equal(alias.confirmed, false);
+});
+
+test("ChatGPT session lifetime ignores short-lived refresh bootstrap cookies", () => {
+  const now = Date.now() / 1000;
+  const state = {
+    cookies: [
+      { name: "oai-did", value: "device", expires: now + 365 * 86400 },
+      { name: "oai-client-auth-session", value: "short", expires: now + 1800 },
+      { name: "_uasid", value: "noise", expires: now - 60 },
+      { name: "__Secure-next-auth.session-token", value: "real", expires: now + 90 * 86400 },
+    ],
+  };
+  const inspected = inspectSession(JSON.stringify(state), "chatgpt");
+  assert.equal(inspected.ok, true);
+  if (inspected.ok) {
+    assert.equal(inspected.warning, undefined);
+    assert.ok((inspected.expiresAt || 0) > now + 89 * 86400);
+  }
+  assert.equal(inspectSession(JSON.stringify({ cookies: [{ name: "oai-did", value: "device", expires: now + 86400 }] }), "chatgpt").ok, false);
 });
 
 test("fingerprint change on missing composer is critical", () => {

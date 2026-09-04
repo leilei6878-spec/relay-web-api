@@ -895,6 +895,14 @@ test("worker persists submission safety checkpoints and final timing metadata", 
   assert.match(s, /arm_turn_network\(\)/);
 });
 
+test("worker process identity changes across restarts so orphaned jobs are reclaimable", () => {
+  const script = localWorkerScript();
+  assert.match(script, /WORKER_INSTANCE_ID = .*os\.urandom/);
+  assert.match(script, /WORKER_NAME = WORKER_NAME_BASE \+ "@" \+ WORKER_INSTANCE_ID/);
+  assert.match(script, /"X-Worker-Name": WORKER_NAME/);
+  assert.match(script, /worker = WORKER_NAME/);
+});
+
 test("browser pool key includes proxy identity and credentials", () => {
   const s = localWorkerScript();
   assert.match(s, /def proxy_pool_key/);

@@ -20,6 +20,7 @@ import {
   dbListQueuedJobs,
   dbLoadJobs,
   dbLoadWorkers,
+  dbListWorkerOrphanCandidates,
   dbQueueCounts,
   dbReclaimDeadJobs,
   dbTryLockAccount,
@@ -576,6 +577,8 @@ export async function finishJobPg(
         sessionVersion: decided.sessionVersion,
         lastRefreshAt: decided.lastRefreshAt,
         lastValidatedAt: decided.lastRefreshAt,
+        sessionExpiresAt: decided.expiresAt ? new Date(decided.expiresAt * 1000).toISOString() : null,
+        sessionWarning: decided.warning ?? null,
       } as never);
     }
   }
@@ -799,6 +802,22 @@ export async function beatWorkerPg(
   });
   await coordSet(`hb:worker:${name}`, String(Date.now()), 20_000);
   return { ok: true as const };
+}
+
+export async function reconcileWorkerAssignmentsPg(workerName: string, activeJobIds: string[], graceMs = 45_000) {
+  const active = new Set(activeJobIds.filter(Boolean));
+  const candidates = await dbListWorkerOrphanCandidates(workerName, graceMs);
+  let recovered = 0;
+  for (const raw of candidates) {
+    const job = asJob(raw);
+    if (!job || active.has(job.id)) continue;
+    const error = job.kind === "inspection"
+      ? "REQUEST_CANCELLED: inspection worker no longer active"
+      : "WORKER_CRASH: worker no longer reports active job";
+    const result = await cancelJobPg(job.id, error);
+    if (result.ok && !result.retained) recovered += 1;
+  }
+  return { recovered };
 }
 
 export async function renewLeasePg(jobId: string, leaseId: string, ttlMs: number) {
