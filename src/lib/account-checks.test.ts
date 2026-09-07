@@ -49,6 +49,13 @@ test("transient failures need two consecutive checks but explicit session/IP fai
 
   const session = healthPatchForResults(account(), [{ ok: false, code: "SESSION_EXPIRED", detail: "expired" }], at);
   assert.equal(session.status, "invalid");
+  assert.equal(session.lastError, "SESSION_EXPIRED: expired");
+  const alreadyLabeled = healthPatchForResults(account(), [{
+    ok: false,
+    code: "LOGIN_REQUIRED",
+    detail: "LOGIN_REQUIRED: session expired; re-login required",
+  }], at);
+  assert.equal(alreadyLabeled.lastError, "LOGIN_REQUIRED: session expired; re-login required");
   const drift = healthPatchForResults(account(), [{ ok: false, code: "IP_DRIFT", detail: "drift", ipState: "drift" }], at);
   assert.equal(drift.status, "invalid");
 });

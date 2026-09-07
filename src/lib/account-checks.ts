@@ -300,6 +300,12 @@ async function liveCheck(account: Account, runId: string): Promise<CheckResult> 
 
 export function healthPatchForResults(account: Account, results: CheckResult[], nowIso = new Date().toISOString()): Partial<Account> {
   const failed = results.find((result) => !result.ok);
+  const failedDetail = (failed?.detail || "").trim();
+  const failedLabel = failed
+    ? failedDetail.toUpperCase().startsWith(`${failed.code.toUpperCase()}:`)
+      ? failedDetail
+      : `${failed.code}: ${failedDetail}`
+    : null;
   const explicitInvalid = failed && ["SESSION_EXPIRED", "SESSION_INVALID", "LOGIN_REQUIRED", "IP_DRIFT"].includes(failed.code);
   const consecutive = failed ? (account.consecutiveProbeFailures || 0) + 1 : 0;
   const invalid = Boolean(explicitInvalid || (failed && consecutive >= 2));
@@ -312,7 +318,7 @@ export function healthPatchForResults(account: Account, results: CheckResult[], 
     nextProbeAt: new Date(Date.parse(nowIso) + (failed ? 15 * 60_000 : 2 * 60 * 60_000)).toISOString(),
     consecutiveProbeFailures: consecutive,
     healthScore: failed ? Math.max(0, 100 - consecutive * 30 - (explicitInvalid ? 40 : 0)) : 100,
-    lastError: failed ? `${failed.code}: ${failed.detail}` : null,
+    lastError: failedLabel,
     status: invalid ? "invalid" : failed ? "probing" : "healthy",
   };
   if (staticResult) {
