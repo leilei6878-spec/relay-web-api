@@ -56,6 +56,15 @@ test("page state does not map composer miss to session death", () => {
   assert.equal(login, "LOGIN_REQUIRED");
   assert.equal(errorForPageState(login).code, "LOGIN_REQUIRED");
 
+  const expiredBehindComposer = detectPageState({
+    url: "https://chatgpt.com/",
+    html: "Your session has expired. Please log in again to continue using the app.",
+    hasComposer: true,
+    hasSend: true,
+  });
+  assert.equal(expiredBehindComposer, "LOGIN_REQUIRED");
+  assert.equal(errorForPageState(expiredBehindComposer).polluteAccountPool, true);
+
   const challenge = detectPageState({ html: "verify you are human captcha" });
   assert.equal(challenge, "CHALLENGE");
   assert.equal(errorForPageState(challenge).polluteAccountPool, false);

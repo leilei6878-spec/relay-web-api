@@ -1456,6 +1456,42 @@ def last_assistant_complete_signal(page):
         return False
 
 
+def chatgpt_session_expired_visible(page):
+    try:
+        return bool(page.evaluate(
+            """() => {
+              const visible = (element) => {
+                if (!element) return false;
+                const rect = element.getBoundingClientRect();
+                const style = getComputedStyle(element);
+                return rect.width > 4 && rect.height > 4 && style.display !== 'none' && style.visibility !== 'hidden';
+              };
+              const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+              const markers = [
+                'your session has expired',
+                'session has expired',
+                'please log in again',
+                'log in again to continue',
+                '会话已过期',
+                '登录已过期',
+                '登录状态已过期',
+                '请重新登录'
+              ];
+              const expired = (text) => markers.some((marker) => text.includes(marker));
+              const dialogs = [...document.querySelectorAll('[role="dialog"], [aria-modal="true"], [data-testid*="modal" i]')];
+              if (dialogs.some((dialog) => visible(dialog) && expired(clean(dialog.innerText)))) return true;
+              const loginAction = [...document.querySelectorAll('button, a')].some((element) => {
+                if (!visible(element)) return false;
+                return /^(log in|sign in|log in again|sign in again|重新登录|登录)$/.test(clean(element.innerText || element.getAttribute('aria-label')));
+              });
+              const bodyText = clean(document.body && document.body.innerText);
+              return loginAction && expired(bodyText);
+            }"""
+        ))
+    except Exception:
+        return False
+
+
 def detect_page_state(page, provider="chatgpt"):
     url = ""
     html = ""
@@ -1467,6 +1503,8 @@ def detect_page_state(page, provider="chatgpt"):
         html = (page.content() or "")[:12000].lower()
     except Exception:
         html = ""
+    if provider == "chatgpt" and chatgpt_session_expired_visible(page):
+        return "LOGIN_REQUIRED"
     if "captcha" in html or "cf-challenge" in html or "verify you are" in html or "turnstile" in html or "unusual traffic" in html or "just a moment" in html:
         return "CHALLENGE"
     if "deactivated" in html or "suspended" in html or "account has been disabled" in html or "restricted" in html:
@@ -1521,7 +1559,7 @@ def page_state_error(state, selector_failed=False, provider="chatgpt"):
     if state == "LOGIN_REQUIRED":
         if provider == "leonardo":
             return "LEONARDO_LOGIN_REQUIRED", "account"
-        return "LOGIN_REQUIRED: provider login wall", "account"
+        return "LOGIN_REQUIRED: session expired or provider login wall; re-login required", "account"
     if state == "CHALLENGE":
         if provider == "leonardo":
             return "LEONARDO_CHALLENGE", "provider"
@@ -2803,6 +2841,10 @@ def run_chat(body, ctx=None):
                     return {"ok": False, "error": err, "fault": fault, "pageState": pst, "recoveryLevel": recovery_level, "timing": marks}
         mark("T3")
         post_phase("page_ready", ctx)
+        ready_state = detect_page_state(page, "chatgpt")
+        if ready_state in ("LOGIN_REQUIRED", "CHALLENGE", "ACCOUNT_RESTRICTED"):
+            err, fault = page_state_error(ready_state, False, "chatgpt")
+            return fail_job(ctx, err, fault, {"pageState": ready_state, "timing": marks, "recoveryLevel": recovery_level})
         profile = detect_profile(page)
         switched, actual = select_model(page, model)
         if not switched and not TEST_URL:
@@ -2996,7 +3038,15 @@ def run_chat(body, ctx=None):
         stable_ms = max(chat_stable_ms(), 2000) if has_images else chat_stable_ms()
         det = AssistantCompletionDetector(stable_ms=stable_ms, confirm_ms=chat_confirm_ms(), stop_stable_ms=chat_stop_stable_ms())
         det.on_submit(time.time())
+        next_account_state_check = 0
         while time.time() < deadline:
+            now = time.time()
+            if now >= next_account_state_check:
+                current_state = detect_page_state(page, "chatgpt")
+                if current_state in ("LOGIN_REQUIRED", "CHALLENGE", "ACCOUNT_RESTRICTED"):
+                    err, fault = page_state_error(current_state, False, "chatgpt")
+                    return fail_job(ctx, err, fault, {"pageState": current_state, "timing": marks, "profile": profile, "recoveryLevel": recovery_level})
+                next_account_state_check = now + 0.5
             try:
                 det.on_stop(stop_generating_visible(page, stop), time.time())
             except Exception:
@@ -3070,6 +3120,9 @@ def run_chat(body, ctx=None):
         if det.state != det.CONFIRMED_COMPLETE:
             pst = detect_page_state(page, "chatgpt")
             extra = {"pageState": pst, "timing": marks, "profile": profile, "recoveryLevel": recovery_level, "chatCompletion": chat_obs}
+            if pst in ("LOGIN_REQUIRED", "CHALLENGE", "ACCOUNT_RESTRICTED"):
+                err, fault = page_state_error(pst, False, "chatgpt")
+                return fail_job(ctx, err, fault, extra)
             if usable_assistant_text(text):
                 extra["text"] = text
                 if ctx:

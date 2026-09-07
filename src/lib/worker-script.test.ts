@@ -54,6 +54,38 @@ test("page state error mapping and image false-positive rejection", () => {
   assert.match(out.stdout, /ok/);
 });
 
+test("ChatGPT session-expired modal overrides a composer visible behind it", () => {
+  mkdirSync("storage/relay-qa", { recursive: true });
+  writeFileSync("storage/relay-qa/worker-session-expired.py", localWorkerScript());
+  const out = spawnSync(
+    PYTHON,
+    [
+      "-c",
+      `
+import importlib.util
+spec=importlib.util.spec_from_file_location("w", "storage/relay-qa/worker-session-expired.py")
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+class Page:
+    url = "https://chatgpt.com/"
+    def evaluate(self, script):
+        return True
+    def content(self):
+        return "<main>Your session has expired. Please log in again.</main>"
+page=Page()
+assert m.chatgpt_session_expired_visible(page) is True
+assert m.detect_page_state(page, "chatgpt") == "LOGIN_REQUIRED"
+err, fault=m.page_state_error("LOGIN_REQUIRED", False, "chatgpt")
+assert "re-login required" in err
+assert fault == "account"
+print("ok")
+`,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(out.status, 0, out.stderr || out.stdout);
+  assert.match(out.stdout, /ok/);
+});
+
 test("ChatGPT structural canary accepts a ready composer before the send button is visible", () => {
   const script = localWorkerScript();
   const start = script.indexOf('if body.get("kind") == "canary":');

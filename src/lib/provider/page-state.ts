@@ -2,7 +2,7 @@ import type { PageSignals, PageState, ProviderId } from "./types";
 
 const LOGIN_URL = /\/auth\/login|accounts\.google\.com|signin|\/login/i;
 const LOGIN_HTML =
-  /sign in to chatgpt|log in|使用 google 账号|sign in with google|create an account|continue with google/i;
+  /sign in to chatgpt|log in|使用 google 账号|sign in with google|create an account|continue with google|your session has expired|session has expired|please log in again|log in again to continue|会话已过期|登录已过期|登录状态已过期|请重新登录/i;
 const CHALLENGE =
   /captcha|cf-challenge|unusual traffic|verify you are (a )?human|turnstile|recaptcha|checking your browser/i;
 const RATE = /too many requests|rate limit|try again later|you.?ve reached|usage limit/i;
