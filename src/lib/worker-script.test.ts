@@ -74,6 +74,7 @@ class Page:
 page=Page()
 assert m.chatgpt_session_expired_visible(page) is True
 assert m.detect_page_state(page, "chatgpt") == "LOGIN_REQUIRED"
+assert m.chatgpt_login_wall_visible(page) is True
 err, fault=m.page_state_error("LOGIN_REQUIRED", False, "chatgpt")
 assert "re-login required" in err
 assert fault == "account"

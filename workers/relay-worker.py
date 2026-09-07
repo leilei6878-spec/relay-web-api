@@ -1489,6 +1489,29 @@ def chatgpt_session_expired_visible(page):
         return False
 
 
+def chatgpt_login_wall_visible(page):
+    try:
+        return bool(page.evaluate(
+            """() => {
+              const visible = (element) => {
+                if (!element) return false;
+                const rect = element.getBoundingClientRect();
+                const style = getComputedStyle(element);
+                return rect.width > 4 && rect.height > 4 && style.display !== 'none' && style.visibility !== 'hidden';
+              };
+              const clean = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+              const actions = [...document.querySelectorAll('button, a')].filter(visible);
+              const hasLogin = actions.some((element) => /^(log in|sign in|登录)$/.test(clean(element.innerText || element.getAttribute('aria-label'))));
+              if (!hasLogin) return false;
+              const hasSignup = actions.some((element) => /^(sign up|sign up for free|create account|注册|免费注册)$/.test(clean(element.innerText || element.getAttribute('aria-label'))));
+              const text = clean(document.body && document.body.innerText);
+              return hasSignup || text.includes('log in to get answers') || text.includes('log in to continue') || text.includes('登录后继续');
+            }"""
+        ))
+    except Exception:
+        return False
+
+
 def detect_page_state(page, provider="chatgpt"):
     url = ""
     html = ""
@@ -1500,7 +1523,7 @@ def detect_page_state(page, provider="chatgpt"):
         html = (page.content() or "")[:12000].lower()
     except Exception:
         html = ""
-    if provider == "chatgpt" and chatgpt_session_expired_visible(page):
+    if provider == "chatgpt" and (chatgpt_session_expired_visible(page) or chatgpt_login_wall_visible(page)):
         return "LOGIN_REQUIRED"
     if "captcha" in html or "cf-challenge" in html or "verify you are" in html or "turnstile" in html or "unusual traffic" in html or "just a moment" in html:
         return "CHALLENGE"
